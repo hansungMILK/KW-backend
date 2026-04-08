@@ -7,7 +7,7 @@ import { log } from '../../utils/logger';
 
 import type { Orchestrator, ProposalResult } from './types';
 
-const MODEL = 'claude-sonnet-4-20250514';
+const MODEL = 'claude-haiku-4-5-20251001';
 
 const COST_ESTIMATES: Record<string, number> = {
     search: 0.02,
