@@ -18,7 +18,7 @@ type Handler = (event: APIGatewayProxyEvent) => Promise<APIGatewayProxyResult>;
  */
 export const withMiddleware = (handler: Handler): Handler => {
     return async event => {
-        initDomainPacks(); // idempotent — only runs once
+        await initDomainPacks(); // idempotent — only runs once
         const method = event.httpMethod || event.requestContext?.http?.method || '?';
         const path = event.path || event.rawPath || '?';
         log.info(`${method} ${path}`);

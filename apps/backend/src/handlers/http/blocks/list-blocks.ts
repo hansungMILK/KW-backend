@@ -1,4 +1,4 @@
-import { blockRegistry } from '../../../modules/blocks';
+import { blockCatalogService } from '../../../services/block-catalog-service';
 import { withMiddleware } from '../../../utils/middleware';
 import { ok } from '../../../utils/response';
 
@@ -11,7 +11,8 @@ import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
  * Returns: { list: BlockViewWithFrontend[] }
  *
  * Utility blocks (frontend-only) are hardcoded here.
- * Backend blocks come from the dynamic block registry (shorts-pack etc.).
+ * Backend blocks come from the block CATALOG (shorts-pack registers there at startup).
+ * block-executor still reads from REGISTRY (separate concern).
  */
 
 interface BlockDef {
@@ -107,23 +108,49 @@ const UTILITY_BLOCKS: BlockDef[] = [
 // ── Handler ───────────────────────────────────────────────────────────────────
 
 const handler = async (_event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
-    // Build backend block list dynamically from the registry
-    const registeredBlocks: BlockDef[] = blockRegistry.listAllWithMeta().map(({ executor, meta }) => ({
-        $definition: {
-            id: `blk-${executor.blockType}`,
-            type: executor.blockType,
-            label: meta?.label ?? executor.blockType,
-            description: meta?.description ?? '',
-            inputs: meta?.inputs ?? [{ id: 'in', label: 'Input', type: 'any' }],
-            outputs: meta?.outputs ?? [{ id: 'out', label: 'Output', type: 'any' }],
-            configSchema: meta?.configSchema ?? [],
-        },
-        isFrontend: 0,
-        stereo: meta?.stereo ?? 'process',
-        isRunnable: true,
-    }));
+    // Build backend block list from the catalog (registered at startup by domain packs)
+    const catalogDefs = await blockCatalogService.listAvailable();
 
-    return ok({ list: [...UTILITY_BLOCKS, ...registeredBlocks] });
+    const backendBlocks: BlockDef[] = catalogDefs.map(def => {
+        // Derive port arrays from PortableSchema properties
+        const inputProps = def.inputSchema.properties ?? {};
+        const outputProps = def.outputSchema.properties ?? {};
+        const configProps = def.configSchema.properties ?? {};
+
+        const inputs = Object.entries(inputProps).map(([id, field]) => ({
+            id,
+            label: (field as { description?: string }).description ?? id,
+            type: (field as { type?: string }).type ?? 'any',
+        }));
+        const outputs = Object.entries(outputProps).map(([id, field]) => ({
+            id,
+            label: (field as { description?: string }).description ?? id,
+            type: (field as { type?: string }).type ?? 'any',
+        }));
+        const configSchema = Object.entries(configProps).map(([key, field]) => ({
+            key,
+            label: (field as { description?: string }).description ?? key,
+            type: (field as { type?: string }).type ?? 'text',
+            default: (field as { default?: unknown }).default ?? '',
+        }));
+
+        return {
+            $definition: {
+                id: def.id,
+                type: def.type,
+                label: def.name,
+                description: def.description,
+                inputs,
+                outputs,
+                configSchema,
+            },
+            isFrontend: 0,
+            stereo: def.category as 'input' | 'process' | 'output',
+            isRunnable: true,
+        };
+    });
+
+    return ok({ list: [...UTILITY_BLOCKS, ...backendBlocks] });
 };
 
 export const main = withMiddleware(handler);

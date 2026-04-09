@@ -1,3 +1,4 @@
+import { blockCatalogService } from '../../../services/block-catalog-service';
 import { blockRegistry } from '../../blocks';
 import { registerOrchestrator } from '../../orchestrator';
 import { analysisBlock } from './blocks/analysis';
@@ -13,6 +14,7 @@ import { shortsMockOrchestrator } from './mock-proposal';
 import { shortsOrchestrator } from './orchestrator';
 
 import type { BlockExecutor } from '../../blocks/types';
+import type { BlockDefinitionModel } from '@flows/contracts';
 
 const ALL_EXECUTORS: BlockExecutor[] = [
     searchBlock,
@@ -26,10 +28,61 @@ const ALL_EXECUTORS: BlockExecutor[] = [
 ];
 
 /**
- * Register shorts-pack: blocks + orchestrator.
+ * Build BlockDefinitionModel[] from shorts-pack manifest metadata.
+ * Used to populate the block catalog so clients can discover block contracts.
+ */
+function buildBlockDefinitions(): BlockDefinitionModel[] {
+    const now = new Date().toISOString();
+    return SHORTS_PACK_MANIFEST.blockTypes.map(type => {
+        const meta = SHORTS_BLOCK_META[type];
+        return {
+            id: `blk-${type}`,
+            type,
+            version: SHORTS_PACK_MANIFEST.version,
+            isLatest: true,
+            workspaceId: null,
+            name: meta.label,
+            description: meta.description,
+            category: meta.stereo,
+            executionMode: 'domain-pack' as const,
+            inputSchema: {
+                type: 'object' as const,
+                properties: Object.fromEntries(
+                    meta.inputs.map(inp => [inp.id, { type: 'string' as const, description: inp.label }])
+                ),
+                required: meta.inputs.map(i => i.id),
+            },
+            outputSchema: {
+                type: 'object' as const,
+                properties: Object.fromEntries(
+                    meta.outputs.map(out => [out.id, { type: 'string' as const, description: out.label }])
+                ),
+                required: meta.outputs.map(o => o.id),
+            },
+            configSchema: {
+                type: 'object' as const,
+                properties: Object.fromEntries(
+                    (meta.configSchema || []).map(cfg => [
+                        cfg.key,
+                        { type: 'string' as const, description: cfg.label, default: cfg.default },
+                    ])
+                ),
+            },
+            source: 'domain-pack' as const,
+            domainPack: 'shorts-pack',
+            approved: true,
+            createdBy: 'system',
+            createdAt: now,
+            updatedAt: now,
+        };
+    });
+}
+
+/**
+ * Register shorts-pack: blocks + orchestrator + catalog definitions.
  * Performs startup validation to catch configuration errors early.
  */
-export function registerShortsPack(): void {
+export async function registerShortsPack(): Promise<void> {
     // ── Startup validation ──
     const executorTypes = new Set(ALL_EXECUTORS.map(e => e.blockType));
     const manifestTypes = new Set(SHORTS_PACK_MANIFEST.blockTypes);
@@ -53,7 +106,7 @@ export function registerShortsPack(): void {
         throw new Error('[shorts-pack] Duplicate blockType detected in executors');
     }
 
-    // ── Register blocks with type-keyed metadata ──
+    // ── Register blocks with type-keyed metadata (registry — runtime executor lookup) ──
     for (const executor of ALL_EXECUTORS) {
         const meta = SHORTS_BLOCK_META[executor.blockType];
         blockRegistry.registerWithMeta(executor, meta);
@@ -66,6 +119,10 @@ export function registerShortsPack(): void {
     } else {
         registerOrchestrator(shortsMockOrchestrator, 'shorts-pack');
     }
+
+    // ── Register block definitions in catalog (metadata layer) ──
+    const defs = buildBlockDefinitions();
+    await blockCatalogService.registerBulk(defs);
 }
 
 export function unregisterShortsPack(): void {

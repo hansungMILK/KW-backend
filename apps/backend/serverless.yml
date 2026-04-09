@@ -275,6 +275,19 @@ functions:
                   path: /_api_/blocks/0/list
                   method: get
 
+    blockGet:
+        handler: src/handlers/http/blocks/get-block.main
+        events:
+            - httpApi:
+                  path: '/blocks/{type}'
+                  method: get
+            - httpApi:
+                  path: '/_apis/blocks/{type}'
+                  method: get
+            - httpApi:
+                  path: '/_api_/blocks/{type}'
+                  method: get
+
     # ── Messages ──
     messageList:
         handler: src/handlers/http/messages/list-messages.main

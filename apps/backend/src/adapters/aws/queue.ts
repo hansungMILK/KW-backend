@@ -51,7 +51,7 @@ export const queue = {
     async processLocally(message: QueueMessage): Promise<void> {
         // Ensure domain packs are loaded — critical for SQS worker path
         // which doesn't go through HTTP middleware
-        initDomainPacks();
+        await initDomainPacks();
 
         switch (message.type) {
             case 'EXECUTE_RUN':

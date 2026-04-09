@@ -9,4 +9,5 @@ export * from './queue.schema';
 export * from './traces.schema';
 export * from './assets.schema';
 export * from './settings.schema';
+export * from './block-definitions.schema';
 export { SYSTEM_INFO_FORMAT } from './system.schema';
