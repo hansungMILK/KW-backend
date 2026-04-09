@@ -4,8 +4,9 @@ import { join } from 'path';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 
-const STAGE = process.env.STAGE || 'local';
-const USE_REAL_DYNAMO = !!process.env.DYNAMODB_ENDPOINT || STAGE !== 'local';
+import { env, isLocalStage } from '../../config/env';
+
+const USE_REAL_DYNAMO = !!env.dynamodbEndpoint || !isLocalStage;
 
 // ============================================================================
 // Real DynamoDB client (for dev/prod or when DYNAMODB_ENDPOINT is set)
@@ -16,8 +17,8 @@ let _docClient: DynamoDBDocumentClient | null = null;
 export const getDocClient = (): DynamoDBDocumentClient => {
     if (!_docClient) {
         const client = new DynamoDBClient({
-            region: process.env.AWS_REGION || 'ap-northeast-2',
-            ...(process.env.DYNAMODB_ENDPOINT ? { endpoint: process.env.DYNAMODB_ENDPOINT } : {}),
+            region: env.awsRegion,
+            ...(env.dynamodbEndpoint ? { endpoint: env.dynamodbEndpoint } : {}),
         });
         _docClient = DynamoDBDocumentClient.from(client, {
             marshallOptions: { removeUndefinedValues: true },
@@ -87,8 +88,8 @@ export const memDb = {
 // ============================================================================
 
 export const TableNames = {
-    flows: process.env.FLOWS_TABLE || 'eureka-flows-backend-flows-local',
-    connections: process.env.CONNECTIONS_TABLE || 'eureka-flows-backend-connections-local',
+    flows: env.flowsTable,
+    connections: env.connectionsTable,
 } as const;
 
 export { USE_REAL_DYNAMO };

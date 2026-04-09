@@ -1,4 +1,5 @@
 import { executionEngine } from '../../services/execution-engine';
+import { isLocalStage } from '../../config/env';
 
 import type { QueueMessage } from '@flows/contracts';
 
@@ -14,8 +15,7 @@ import type { QueueMessage } from '@flows/contracts';
  *   SQS trigger wiring is commented out in serverless.yml (future Phase 4+).
  */
 
-const STAGE = process.env.STAGE || 'local';
-const IS_LOCAL = STAGE === 'local';
+const IS_LOCAL = isLocalStage;
 
 export const queue = {
     /**
