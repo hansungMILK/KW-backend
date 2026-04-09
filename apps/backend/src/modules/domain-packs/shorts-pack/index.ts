@@ -9,7 +9,7 @@ import { mediaImageBlock } from './blocks/media-image';
 import { mediaTtsBlock } from './blocks/media-tts';
 import { mediaVideoBlock } from './blocks/media-video';
 import { searchBlock } from './blocks/search';
-import { SHORTS_BLOCK_META, SHORTS_PACK_MANIFEST } from './manifest';
+import { SHORTS_BLOCK_CATEGORIES, SHORTS_BLOCK_META, SHORTS_PACK_MANIFEST, SHORTS_PORTABLE_SCHEMAS } from './manifest';
 import { shortsMockOrchestrator } from './mock-proposal';
 import { shortsOrchestrator } from './orchestrator';
 
@@ -35,6 +35,8 @@ function buildBlockDefinitions(): BlockDefinitionModel[] {
     const now = new Date().toISOString();
     return SHORTS_PACK_MANIFEST.blockTypes.map(type => {
         const meta = SHORTS_BLOCK_META[type];
+        const schemas = SHORTS_PORTABLE_SCHEMAS[type];
+        const category = SHORTS_BLOCK_CATEGORIES[type] || 'process';
         return {
             id: `blk-${type}`,
             type,
@@ -43,30 +45,20 @@ function buildBlockDefinitions(): BlockDefinitionModel[] {
             workspaceId: null,
             name: meta.label,
             description: meta.description,
-            category: meta.stereo,
+            category, // functional: search | content | media | etc.
+            stereo: meta.stereo, // UI: input | process | output
             executionMode: 'domain-pack' as const,
-            inputSchema: {
+            inputSchema: (schemas?.input as BlockDefinitionModel['inputSchema']) || {
                 type: 'object' as const,
-                properties: Object.fromEntries(
-                    meta.inputs.map(inp => [inp.id, { type: 'string' as const, description: inp.label }])
-                ),
-                required: meta.inputs.map(i => i.id),
+                properties: {},
             },
-            outputSchema: {
+            outputSchema: (schemas?.output as BlockDefinitionModel['outputSchema']) || {
                 type: 'object' as const,
-                properties: Object.fromEntries(
-                    meta.outputs.map(out => [out.id, { type: 'string' as const, description: out.label }])
-                ),
-                required: meta.outputs.map(o => o.id),
+                properties: {},
             },
-            configSchema: {
+            configSchema: (schemas?.config as BlockDefinitionModel['configSchema']) || {
                 type: 'object' as const,
-                properties: Object.fromEntries(
-                    (meta.configSchema || []).map(cfg => [
-                        cfg.key,
-                        { type: 'string' as const, description: cfg.label, default: cfg.default },
-                    ])
-                ),
+                properties: {},
             },
             source: 'domain-pack' as const,
             domainPack: 'shorts-pack',

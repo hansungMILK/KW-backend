@@ -10,6 +10,7 @@ provider:
         DYNAMODB_ENDPOINT: ${env:DYNAMODB_ENDPOINT, ''}
         FLOWS_TABLE: ${self:service}-flows-${self:provider.stage}
         CONNECTIONS_TABLE: ${self:service}-connections-${self:provider.stage}
+        BLOCK_DEFINITIONS_TABLE: ${self:service}-block-defs-${self:provider.stage}
         ORCHESTRATOR_MODE: ${env:ORCHESTRATOR_MODE, 'mock'}
         ANTHROPIC_API_KEY: ${env:ANTHROPIC_API_KEY, ''}
     httpApi:
@@ -605,3 +606,32 @@ resources:
                 TimeToLiveSpecification:
                     AttributeName: ttl
                     Enabled: true
+
+        BlockDefinitionsTable:
+            Type: AWS::DynamoDB::Table
+            Properties:
+                TableName: ${self:provider.environment.BLOCK_DEFINITIONS_TABLE}
+                BillingMode: PAY_PER_REQUEST
+                AttributeDefinitions:
+                    - AttributeName: type
+                      AttributeType: S
+                    - AttributeName: version
+                      AttributeType: S
+                    - AttributeName: category
+                      AttributeType: S
+                    - AttributeName: createdAt
+                      AttributeType: S
+                KeySchema:
+                    - AttributeName: type
+                      KeyType: HASH
+                    - AttributeName: version
+                      KeyType: RANGE
+                GlobalSecondaryIndexes:
+                    - IndexName: category-index
+                      KeySchema:
+                          - AttributeName: category
+                            KeyType: HASH
+                          - AttributeName: createdAt
+                            KeyType: RANGE
+                      Projection:
+                          ProjectionType: ALL

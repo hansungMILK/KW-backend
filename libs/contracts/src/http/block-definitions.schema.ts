@@ -63,7 +63,8 @@ export const BlockDefinitionSchema = z.object({
     // Display
     name: z.string(),
     description: z.string(),
-    category: z.string(),
+    category: z.string(), // functional: search | content | transform | analysis | media | integration
+    stereo: z.enum(['input', 'process', 'output']).optional(), // UI positioning
     icon: z.string().optional(),
 
     // Execution contract (PortableSchema DSL)

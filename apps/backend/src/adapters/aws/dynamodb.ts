@@ -89,6 +89,7 @@ export const memDb = {
 export const TableNames = {
     flows: process.env.FLOWS_TABLE || 'eureka-flows-backend-flows-local',
     connections: process.env.CONNECTIONS_TABLE || 'eureka-flows-backend-connections-local',
+    blockDefinitions: process.env.BLOCK_DEFINITIONS_TABLE || 'eureka-flows-backend-block-defs-local',
 } as const;
 
 export { USE_REAL_DYNAMO };
