@@ -1,35 +1,29 @@
 import { log } from './logger';
 import { badRequest, serverError } from './response';
-import { registerShortsPack } from '../modules/domain-packs/shorts-pack';
+import { initDomainPacks } from '../bootstrap/init-domain-packs';
 
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 
 type Handler = (event: APIGatewayProxyEvent) => Promise<APIGatewayProxyResult>;
 
-let _initialized = false;
-
-function ensureInit(): void {
-    if (!_initialized) {
-        registerShortsPack();
-        _initialized = true;
-    }
-}
-
 /**
  * Wraps a handler with common middleware:
+ * - Domain pack initialization (once, via bootstrap layer)
  * - JSON body parsing (event.body → event.parsedBody)
  * - Error catching → 500 response
  * - Request logging
+ *
+ * NOTE: middleware does NOT know about specific domain packs.
+ * It calls initDomainPacks() which reads DOMAIN_PACKS env to decide what to load.
  */
 export const withMiddleware = (handler: Handler): Handler => {
     return async event => {
-        ensureInit();
+        initDomainPacks(); // idempotent — only runs once
         const method = event.httpMethod || event.requestContext?.http?.method || '?';
         const path = event.path || event.rawPath || '?';
         log.info(`${method} ${path}`);
 
         try {
-            // Parse JSON body if present
             if (event.body) {
                 try {
                     (event as APIGatewayProxyEvent & { parsedBody: unknown }).parsedBody = JSON.parse(event.body);

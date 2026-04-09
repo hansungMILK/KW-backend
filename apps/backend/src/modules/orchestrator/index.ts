@@ -5,27 +5,56 @@ import type { Orchestrator } from './types';
 export type { Orchestrator, ProposalResult } from './types';
 
 /**
- * Orchestrator selection via ORCHESTRATOR_MODE env variable.
+ * Orchestrator registry — domain-agnostic.
  *
- * - 'mock' (default): Fixed 8-block proposal, no API calls
- * - 'claude': Real Claude API call with zod validation
+ * Domain packs register their orchestrator at startup.
+ * getOrchestrator() returns the registered one, or falls back to mock.
  *
- * Both implement the same Orchestrator interface.
- * Switch at runtime via env without code changes.
+ * Core orchestrator module does NOT import any domain pack.
  */
+
+let _registeredOrchestrator: Orchestrator | null = null;
+
+/** Called by domain packs to register their orchestrator implementation. */
+export function registerOrchestrator(orchestrator: Orchestrator): void {
+    _registeredOrchestrator = orchestrator;
+    log.info('Orchestrator registered');
+}
+
+/** Get the active orchestrator. Falls back to mock if none registered. */
 export const getOrchestrator = async (): Promise<Orchestrator> => {
     const mode = process.env.ORCHESTRATOR_MODE || 'mock';
 
-    if (mode === 'claude') {
-        log.info('Using Claude orchestrator');
-        const { claudeOrchestrator } = await import('./claude-orchestrator');
-        return claudeOrchestrator;
+    if (mode === 'mock') {
+        // Mock orchestrator is part of shorts-pack but also useful standalone.
+        // If a domain pack registered an orchestrator, use it for mock too.
+        if (_registeredOrchestrator) return _registeredOrchestrator;
+        // Ultimate fallback: inline minimal mock
+        return {
+            async generateProposal(_flowId: string, _userMessage: string) {
+                return {
+                    proposedNodes: [],
+                    proposedEdges: [],
+                    estimatedCost: { currency: 'USD', total: 0 },
+                    approvalRequired: false,
+                    assistantMessage: 'No domain pack loaded. Please configure DOMAIN_PACKS.',
+                };
+            },
+        };
     }
 
-    log.info('Using mock orchestrator');
-    const { mockOrchestrator } = await import('./mock-orchestrator');
-    return mockOrchestrator;
-};
+    if (_registeredOrchestrator) return _registeredOrchestrator;
 
-// Re-export mock for direct use in tests
-export { mockOrchestrator } from './mock-orchestrator';
+    log.warn('No orchestrator registered, returning empty fallback');
+    return {
+        async generateProposal() {
+            return {
+                proposedNodes: [],
+                proposedEdges: [],
+                estimatedCost: { currency: 'USD', total: 0 },
+                approvalRequired: false,
+                assistantMessage: 'No orchestrator configured.',
+            };
+        },
+    };
+};

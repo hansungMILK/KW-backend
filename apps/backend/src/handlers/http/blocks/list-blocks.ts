@@ -116,7 +116,7 @@ const handler = async (_event: APIGatewayProxyEvent): Promise<APIGatewayProxyRes
             description: meta?.description ?? '',
             inputs: meta?.inputs ?? [{ id: 'in', label: 'Input', type: 'any' }],
             outputs: meta?.outputs ?? [{ id: 'out', label: 'Output', type: 'any' }],
-            configSchema: [],
+            configSchema: meta?.configSchema ?? [],
         },
         isFrontend: 0,
         stereo: meta?.stereo ?? 'process',

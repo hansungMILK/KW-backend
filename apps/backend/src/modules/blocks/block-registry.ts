@@ -8,6 +8,7 @@ export interface BlockCatalogMeta {
     stereo: 'input' | 'process' | 'output';
     inputs: Array<{ id: string; label: string; type: string }>;
     outputs: Array<{ id: string; label: string; type: string }>;
+    configSchema: Array<{ key: string; label: string; type: string; default?: string }>;
 }
 
 // ── Internal maps ─────────────────────────────────────────────────────────────

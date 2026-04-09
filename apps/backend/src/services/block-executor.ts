@@ -1,31 +1,26 @@
 /**
  * Block executor — runs a single block's logic via the block registry.
- * Phase 3C: wired to real per-block executors (dummy output).
- * Phase 4 will swap dummy executors for real AI/tool calls.
+ * Unknown block types are ALWAYS a hard failure (never silent fallback).
  */
 
 import { blockRegistry } from '../modules/blocks';
-import { log } from '../utils/logger';
 
 import type { BlockExecutorResult } from '../modules/blocks/types';
 
+export class UnknownBlockTypeError extends Error {
+    constructor(public readonly blockType: string) {
+        super(`Unknown block type: ${blockType}. Not registered in block registry.`);
+        this.name = 'UnknownBlockTypeError';
+    }
+}
+
 export const blockExecutor = {
-    /**
-     * Execute a single block by type.
-     * Returns the output payload, timing, and any produced assets.
-     *
-     * @param blockType  The type identifier of the block (e.g. "search", "content")
-     * @param input      The resolved input payload for this block
-     */
     async execute(blockType: string, input: unknown): Promise<BlockExecutorResult> {
         const executor = blockRegistry.get(blockType);
 
         if (!executor) {
-            log.warn(`Unknown block type: ${blockType}, using fallback`);
-            return {
-                output: { error: `Unknown block type: ${blockType}`, blockType },
-                durationMs: 0,
-            };
+            // Hard failure — execution-engine catches this and marks node FAILED
+            throw new UnknownBlockTypeError(blockType);
         }
 
         const start = Date.now();

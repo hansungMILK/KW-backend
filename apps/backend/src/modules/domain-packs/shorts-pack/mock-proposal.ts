@@ -1,17 +1,15 @@
-import { generateNumericId } from '../../utils/id-generator';
-import { SHORTS_8STEP_BLOCKS, SHORTS_8STEP_EDGE_PAIRS, SHORTS_COST_PER_BLOCK } from '../domain-packs/shorts-pack';
-
-import type { Orchestrator, ProposalResult } from './types';
-
 /**
- * Mock orchestrator — generates a fixed 8-block shorts pipeline proposal.
- * Will be replaced by real Claude-based orchestrator in Phase 2C.
- * Block definitions come from the shorts-pack template.
+ * Shorts-pack mock orchestrator — generates fixed 8-block proposal.
+ * Used when ORCHESTRATOR_MODE=mock (no API calls).
  */
 
-export const mockOrchestrator: Orchestrator = {
+import { SHORTS_8STEP_BLOCKS, SHORTS_8STEP_EDGE_PAIRS, SHORTS_COST_PER_BLOCK } from './templates/shorts-8step';
+import { generateNumericId } from '../../../utils/id-generator';
+
+import type { Orchestrator, ProposalResult } from '../../orchestrator/types';
+
+export const shortsMockOrchestrator: Orchestrator = {
     async generateProposal(_flowId: string, _userMessage: string): Promise<ProposalResult> {
-        // Generate 8 nodes in a vertical layout
         const nodes = SHORTS_8STEP_BLOCKS.map((block, i) => ({
             id: generateNumericId(),
             blockId: `blk-${block.type}`,
@@ -21,7 +19,6 @@ export const mockOrchestrator: Orchestrator = {
             state: 'IDLE',
         }));
 
-        // Build edges from the canonical edge pairs
         const edges = SHORTS_8STEP_EDGE_PAIRS.map(([srcIdx, tgtIdx]) => ({
             id: generateNumericId(),
             sourceNodeId: nodes[srcIdx].id,
@@ -39,11 +36,7 @@ export const mockOrchestrator: Orchestrator = {
         return {
             proposedNodes: nodes,
             proposedEdges: edges,
-            estimatedCost: {
-                currency: 'USD',
-                total: Math.round(total * 100) / 100,
-                breakdown,
-            },
+            estimatedCost: { currency: 'USD', total: Math.round(total * 100) / 100, breakdown },
             approvalRequired: true,
             assistantMessage: `8개 블록이 필요합니다. 예상 비용: $${total.toFixed(2)}. 승인하시겠습니까?`,
         };
