@@ -1,10 +1,11 @@
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { env } from '../../config/env';
 
 const s3 = new S3Client({
-    region: process.env.AWS_REGION || 'ap-northeast-2',
+    region: env.awsRegion,
 });
 
-const BUCKET = process.env.S3_BUCKET || 'eureka-flows-local';
+const BUCKET = env.s3Bucket;
 
 export const getObject = async (key: string) => {
     const cmd = new GetObjectCommand({ Bucket: BUCKET, Key: key });

@@ -1,3 +1,4 @@
+import { env } from '../../config/env';
 import { plainText } from '../../utils/response';
 
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
@@ -10,5 +11,5 @@ import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
  */
 export const main = async (_event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
     const version = '0.1.0';
-    return plainText(`eureka-flows-backend/${version}\nstage/${process.env.STAGE || 'local'}`);
+    return plainText(`eureka-flows-backend/${version}\nstage/${env.stage}`);
 };

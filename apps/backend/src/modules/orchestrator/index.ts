@@ -1,4 +1,5 @@
 import { log } from '../../utils/logger';
+import { env } from '../../config/env';
 
 import type { Orchestrator } from './types';
 
@@ -14,7 +15,7 @@ export type { Orchestrator, ProposalResult } from './types';
  * Switch at runtime via env without code changes.
  */
 export const getOrchestrator = async (): Promise<Orchestrator> => {
-    const mode = process.env.ORCHESTRATOR_MODE || 'mock';
+    const mode = env.orchestratorMode;
 
     if (mode === 'claude') {
         log.info('Using Claude orchestrator');
