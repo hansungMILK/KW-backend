@@ -1,478 +1,406 @@
-<div align="center">
+# Eureka Flow Backend Guide
 
-# Eureka Flow
+이 문서는 이 프로젝트에 참여할 백엔드 개발자 3명을 위한 온보딩 문서입니다.
+전제는 "백엔드 개발 경험이 거의 없다"입니다.
 
-### Visual Workflow Editor for Building Data Flow Pipelines
+목표는 3가지입니다.
 
-[![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=white)](https://react.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Vite](https://img.shields.io/badge/Vite-7-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev/)
-[![Nx](https://img.shields.io/badge/Nx-22-143055?style=for-the-badge&logo=nx&logoColor=white)](https://nx.dev/)
-[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
-
-<br />
-
-[**Live Demo**](https://flow.eureka.codes) · [Features](#features) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Contributing](#contributing)
-
-<br />
-
-<img src="docs/images/eureka-flow-demo.png" alt="Eureka Flow Demo" width="800" />
-
-_Drag, connect, and execute - visual workflow building made simple_
-
-</div>
+- 이 프로젝트의 백엔드가 어떤 역할을 하는지 이해하기
+- 어디에 어떤 코드를 넣어야 하는지 빠르게 판단하기
+- 3명이 동시에 작업해도 충돌을 줄이면서 협업하기
 
 ---
 
-## Overview
+## 1. 이 프로젝트가 하는 일
 
-**Eureka Flow** is a powerful, browser-based visual workflow editor for creating and executing data processing pipelines. Build complex workflows by connecting pre-built blocks, execute them in real-time, and monitor execution status through WebSocket-based live updates.
+Eureka Flow는 "노드와 엣지로 구성된 워크플로우"를 만들고 실행하는 서비스입니다.
 
-### Try It Now
+백엔드는 주로 아래 일을 합니다.
 
-> Visit **[flow.eureka.codes](https://flow.eureka.codes)** to try Eureka Flow instantly.
->
-> Get your API key from [Eureka Codes Console](https://console.eureka.codes) with just one click.
+- flow, node, edge 데이터를 저장하고 불러오기
+- 실행(run) 생성 및 상태 관리
+- WebSocket으로 실행 상태 전달
+- AI / AWS 같은 외부 서비스 연결
+- 프론트와 공유하는 API 계약 관리
 
----
+중요한 점:
 
-## Features
-
-### Visual Workflow Editor
-
-- **Drag-and-drop** node placement on an infinite canvas
-- **Bezier curve** connections between nodes
-- **Pan, zoom, and multi-select** for intuitive navigation
-- **Touch gesture support** for tablet and mobile devices
-- **Undo/Redo** with full history management
-- **Auto-layout** algorithm for automatic node arrangement
-
-### Block System
-
-- **100+ pre-built blocks** organized by category (input, process, output)
-- **Port-based data flow** with typed connections
-- **Configurable block parameters** with live preview
-- **Extensible block registry** for custom blocks
-
-### Dual Execution Modes
-
-- **Frontend blocks** — Execute directly in browser for instant feedback
-- **Backend blocks** — Server-side execution for heavy computation
-- **Real-time status tracking** — IDLE → READY → RUNNING → COMPLETED/ERROR
-
-### Real-Time Updates
-
-- **WebSocket integration** for live node execution notifications
-- **Port data synchronization** with sequence numbering
-- **Self-echo prevention** with smart debouncing
-
-### Seamless API Key Integration
-
-- **One-click API key generation** via [Eureka Codes Console](https://console.eureka.codes)
-- **Secure postMessage-based** key transfer between console and editor
-- **State validation** for enhanced security
-
-### Developer Experience
-
-- **Dark/Light theme** with system preference detection
-- **Internationalization (i18n)** — English & Korean
-- **Auto-save** with configurable toggle
-- **LocalStorage caching** for session continuity
+- 이 백엔드는 Express 서버가 아니라 **Serverless Framework + Lambda handler 구조**입니다.
+- 로컬에서는 `serverless offline`으로 실행합니다.
+- 처음부터 AWS를 알아야 시작할 수 있는 구조는 아닙니다.
 
 ---
 
-## Tech Stack
+## 2. 가장 먼저 이해할 핵심 개념
 
-<table>
-<tr>
-<td><b>Category</b></td>
-<td><b>Technology</b></td>
-</tr>
-<tr>
-<td>Framework</td>
-<td><img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" alt="React" /></td>
-</tr>
-<tr>
-<td>Language</td>
-<td><img src="https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white" alt="TypeScript" /></td>
-</tr>
-<tr>
-<td>Build Tool</td>
-<td><img src="https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white" alt="Vite" /></td>
-</tr>
-<tr>
-<td>Monorepo</td>
-<td><img src="https://img.shields.io/badge/Nx-22-143055?logo=nx&logoColor=white" alt="Nx" /></td>
-</tr>
-<tr>
-<td>State Management</td>
-<td><img src="https://img.shields.io/badge/Zustand-5-brown?logo=npm" alt="Zustand" /></td>
-</tr>
-<tr>
-<td>Server State</td>
-<td><img src="https://img.shields.io/badge/TanStack_Query-5-FF4154?logo=reactquery&logoColor=white" alt="TanStack Query" /></td>
-</tr>
-<tr>
-<td>Styling</td>
-<td><img src="https://img.shields.io/badge/Tailwind_CSS-3-06B6D4?logo=tailwindcss&logoColor=white" alt="Tailwind CSS" /> <img src="https://img.shields.io/badge/shadcn/ui-black?logo=shadcnui&logoColor=white" alt="shadcn/ui" /></td>
-</tr>
-<tr>
-<td>Testing</td>
-<td><img src="https://img.shields.io/badge/Vitest-green?logo=vitest&logoColor=white" alt="Vitest" /></td>
-</tr>
-</table>
+이 프로젝트는 아래 흐름으로 읽으면 됩니다.
+
+1. `serverless.yml`
+2. `handlers`
+3. `services`
+4. `repositories` / `adapters`
+5. `libs/contracts`
+
+한 줄로 보면:
+
+`요청 -> handler -> service -> repository/adapter -> 응답`
+
+역할은 이렇게 이해하면 됩니다.
+
+- `handler`: HTTP/WS 진입점
+- `service`: 비즈니스 로직
+- `repository`: 저장소 접근
+- `adapter`: 외부 시스템 접근
+- `contracts`: 프론트/백엔드가 같이 쓰는 요청/응답 스키마
 
 ---
 
-## Quick Start
+## 3. 모노레포 구조
 
-### Prerequisites
+```text
+KW-backend/
+├── apps/
+│   ├── backend/                 # 백엔드 앱
+│   │   ├── serverless.yml       # 라우팅과 Lambda 연결
+│   │   ├── package.json
+│   │   └── src/
+│   │       ├── config/          # 환경변수 진입점
+│   │       ├── handlers/        # HTTP / WebSocket handler
+│   │       ├── services/        # 비즈니스 로직
+│   │       ├── repositories/    # 저장소 접근
+│   │       ├── adapters/        # AWS / AI / 외부 API
+│   │       ├── modules/         # block executor / orchestrator
+│   │       └── utils/           # 공용 유틸
+│   └── web/                     # 프론트엔드 앱
+├── libs/
+│   ├── contracts/               # 프론트/백엔드 공용 API 계약
+│   ├── flows/
+│   ├── socket/
+│   ├── web-core/
+│   ├── ui-kit/
+│   ├── shared/
+│   └── theme/
+├── package.json
+└── tsconfig.base.json
+```
 
-- **Node.js 20+** (check `.nvmrc` for exact version)
-- **Yarn 1.22+**
+백엔드 작업자는 우선 아래만 보면 됩니다.
 
-### Installation
+- `apps/backend/serverless.yml`
+- `apps/backend/src/**`
+- `libs/contracts/**`
+
+---
+
+## 4. 백엔드 폴더 설명
+
+### `apps/backend/src/config`
+
+- 환경변수 읽는 곳입니다.
+- 새 env를 추가하면 **여기 먼저 추가**합니다.
+- 현재 시작점: `apps/backend/src/config/env.ts`
+
+### `apps/backend/src/handlers`
+
+- HTTP 또는 WebSocket 요청이 처음 들어오는 곳입니다.
+- request 파싱, zod 검증, service 호출, response 반환 정도만 담당합니다.
+- 큰 로직을 handler에 오래 두지 않는 것이 좋습니다.
+
+### `apps/backend/src/services`
+
+- 실제 비즈니스 로직이 들어갑니다.
+- 예: run 생성, proposal 승인/거절, 실행 상태 변경
+
+### `apps/backend/src/repositories`
+
+- 데이터 저장/조회 전용입니다.
+- "무슨 데이터를 읽고 쓰는지"만 담당합니다.
+- 비즈니스 판단은 service에서 합니다.
+
+### `apps/backend/src/adapters`
+
+- 외부 시스템과 통신하는 코드입니다.
+- 예: AWS, Claude, TTS, 이미지 생성, ffmpeg
+
+### `apps/backend/src/modules`
+
+- 현재 프로젝트의 워크플로우 실행용 모듈이 들어 있습니다.
+- `blocks`: block executor 구현
+- `orchestrator`: AI가 제안을 만드는 로직
+
+### `libs/contracts`
+
+- 프론트와 백엔드가 같이 쓰는 스키마입니다.
+- `zod schema + type infer` 방식으로 관리합니다.
+- API 요청/응답 구조가 바뀌면 **여기를 먼저 수정**합니다.
+
+---
+
+## 5. 실제 요청은 어떻게 흐르나
+
+예를 들어 프론트가 flow 실행을 요청하면 대체로 이런 순서입니다.
+
+```text
+Frontend
+  -> serverless.yml route
+  -> handler
+  -> service
+  -> repository / adapter
+  -> response
+  -> (필요하면 WebSocket broadcast)
+```
+
+코드를 읽을 때는 보통 이 순서로 따라가면 됩니다.
+
+- `serverless.yml`에서 어떤 path가 어떤 handler로 연결되는지 본다
+- handler에서 어떤 service를 부르는지 본다
+- service가 어떤 repository / adapter를 쓰는지 본다
+- request/response shape는 `libs/contracts`에서 확인한다
+
+---
+
+## 6. 로컬 실행 방법
+
+### 준비
 
 ```bash
-# Clone the repository
-git clone https://github.com/lemoncloud-io/eureka-flow.git
-cd eureka-flow
-
-# Install dependencies
 yarn install
-
-# Copy environment template
 cp .env.example .env.local
+```
 
-# Start development server
+`.env.local`은 프론트가 백엔드 주소를 알기 위해 씁니다.
+
+### 백엔드 실행
+
+```bash
+yarn workspace @flows/backend start
+```
+
+로컬에서 뜨는 기본 포트:
+
+- HTTP API: `http://localhost:8800`
+- WebSocket API: `ws://localhost:8801`
+
+### 프론트 실행
+
+```bash
 yarn web:start
 ```
 
-The app will be available at `http://localhost:3000`.
+프론트 주소:
 
-### Using the Live Service
+- `http://localhost:3000`
 
-1. Visit **[flow.eureka.codes](https://flow.eureka.codes)**
-2. Click "Create New Key" to open the [Eureka Codes Console](https://console.eureka.codes)
-3. Sign in and generate your API key
-4. The key is automatically transferred back to Eureka Flow
-5. Start building your workflows!
+### 백엔드 환경변수
 
----
+기본 local/mock 실행은 추가 설정 없이 가능합니다.
 
-## Environment Variables
+백엔드 환경변수 예시는 아래 파일을 참고합니다.
 
-### Root `.env.local`
+- `apps/backend/.env.example`
 
-```bash
-# Required: API endpoint for the flows backend
-VITE_API_URL=http://localhost:8800
-```
+자주 쓰는 값:
 
-### App-specific `apps/web/.env.*`
-
-```bash
-# Environment identifier (DEV, PROD, LOCAL)
-VITE_ENV=LOCAL
-
-# Project name
-VITE_PROJECT=FLOWS
-
-# API endpoint for the flows backend
-VITE_API_URL=http://localhost:8800
-
-# WebSocket endpoint for real-time updates
-VITE_WS_ENDPOINT=ws://localhost:8801
-
-# Eureka Codes console URL for API key management
-VITE_CODES_URL=https://console.eureka.codes
-```
+- `STAGE=local`
+- `ORCHESTRATOR_MODE=mock`
+- `DYNAMODB_ENDPOINT`
+- `S3_BUCKET`
+- `ANTHROPIC_API_KEY`
 
 ---
 
-## Architecture
+## 7. 로컬에서 데이터가 어디 저장되는가
 
-### Monorepo Structure
+로컬 실행에서는 일부 데이터가 파일 기반 저장소로 저장됩니다.
 
-```
-eureka-flow/
-├── apps/
-│   └── web/                    # React web application
-├── libs/
-│   ├── flows/                  # Flow editor core (API, hooks, stores, types)
-│   ├── socket/                 # WebSocket layer for real-time updates
-│   ├── web-core/               # HTTP client, auth state, error handling
-│   ├── ui-kit/                 # 33 shadcn/ui components (Radix UI)
-│   ├── shared/                 # Common components (ErrorFallback, ApiKeyDialog)
-│   └── theme/                  # Dark/light theme provider
-├── scripts/                    # Build and deployment scripts
-└── .github/                    # CI/CD workflows
-```
+- 현재 기준 진입점: `apps/backend/src/adapters/aws/dynamodb.ts`
+- local 파일 저장 디렉토리: `apps/backend/.local-db/` 기준으로 생각하면 됩니다
 
-### State Architecture
+즉, 로컬에서 테스트하다가 데이터를 초기화하고 싶으면 `.local-db`를 지우면 됩니다.
 
-Four Zustand stores manage different concerns:
+주의:
 
-| Store               | Purpose                                            |
-| ------------------- | -------------------------------------------------- |
-| `useCanvasStore`    | Canvas UI: nodes, connections, viewport, selection |
-| `useFlowsStore`     | Flow metadata: blockRegistry, flowName, saveStatus |
-| `useWebSocketStore` | WebSocket: connectionStatus, subscribers           |
-| `useWebCoreStore`   | Auth: apiKey, isAuthenticated, profile             |
+- 현재 프로젝트는 아직 구현 중이라 저장소가 완전히 통일된 상태는 아닙니다.
+- 그래서 local/mock 기준으로 개발한다고 생각하는 것이 가장 편합니다.
 
-### Data Flow
+---
 
-```
-FlowEditorPage (orchestrator)
-├── useFlows hook (flow CRUD operations)
-├── useBlocks hook (block registry loading)
-├── useInitFlowSocket hook (WebSocket callbacks)
-│
-├── Header (file operations, save status)
-├── Sidebar (block library by category)
-├── WorkflowCanvas (imperative canvas ref)
-│   ├── NodeBlock (execution status display)
-│   ├── ConnectionLine (SVG bezier curves)
-│   └── useCanvasStore (nodes, connections)
-└── DetailPanel (selected node configuration)
-```
+## 8. 어디에 어떤 코드를 넣어야 하나
 
-### API Key Flow
+### 새 HTTP endpoint를 추가할 때
 
-```
-┌─────────────────────┐     postMessage      ┌──────────────────────┐
-│    Eureka Flow      │ ◄──────────────────► │   Eureka Codes       │
-│ (flow.eureka.codes) │      (API Key)       │(console.eureka.codes)│
-└─────────────────────┘                       └──────────────────────┘
-         │                                              │
-         │ 1. Click "Create New Key"                    │
-         │ ─────────────────────────────────────────────►
-         │                                              │
-         │                          2. User signs in    │
-         │                             & creates key    │
-         │                                              │
-         │ 3. API key sent via postMessage              │
-         │ ◄─────────────────────────────────────────────
-         │                                              │
-         │ 4. State validation for security             │
-         │                                              │
-         ▼
-   Key stored locally
-   Ready to use!
-```
+1. `libs/contracts`에 request/response schema 추가
+2. `apps/backend/src/handlers/http/...`에 handler 추가
+3. 필요하면 `services`에 비즈니스 로직 추가
+4. 필요하면 `repositories`에 저장 로직 추가
+5. `apps/backend/serverless.yml`에 route 연결
 
-### Path Aliases
+### 새 WebSocket 동작을 추가할 때
 
-```typescript
-@flows/flows      // libs/flows/src/index.ts
-@flows/socket     // libs/socket/src/index.ts
-@flows/web-core   // libs/web-core/src/index.ts
-@flows/ui-kit     // libs/ui-kit/src/index.ts
-@flows/shared     // libs/shared/src/index.ts
-@flows/theme      // libs/theme/src/index.ts
-@flows/lib/utils  // libs/ui-kit/src/utils/index.ts
+1. `handlers/ws` 확인
+2. 필요 시 `services/websocket-service.ts` 활용
+3. event payload가 바뀌면 `libs/contracts` 수정
+
+### 새 외부 API 연동을 추가할 때
+
+1. `adapters/...`에 구현
+2. handler에서 직접 호출하지 말고 service 또는 module에서 사용
+3. env가 필요하면 `config/env.ts`에 먼저 추가
+
+### 새 비즈니스 규칙을 추가할 때
+
+- `services`에 넣습니다.
+- repository는 가능한 한 "읽기/쓰기"만 하게 둡니다.
+
+---
+
+## 9. 협업 규칙
+
+이 프로젝트에서는 아래 규칙만 지켜도 협업이 훨씬 쉬워집니다.
+
+### 규칙 1. API shape를 바꾸면 `libs/contracts`부터 수정
+
+프론트와 백엔드가 서로 다른 shape를 생각하면 바로 깨집니다.
+
+### 규칙 2. 새 env는 `config/env.ts`부터 추가
+
+`process.env`를 파일마다 흩뿌리지 않습니다.
+
+### 규칙 3. handler는 얇게 유지
+
+handler 안에서는 되도록 이것만 합니다.
+
+- 입력 읽기
+- 스키마 검증
+- service 호출
+- 응답 반환
+
+### 규칙 4. repository에는 비즈니스 판단을 넣지 않기
+
+repository는 "저장/조회"만 담당합니다.
+
+### 규칙 5. 외부 연동은 adapter로 빼기
+
+Claude, OpenAI, AWS, 이미지 API 같은 것은 adapter로 보냅니다.
+
+### 규칙 6. generic `types/` 폴더는 만들지 않기
+
+타입은 아래 원칙으로 둡니다.
+
+- 공용 계약 타입: `libs/contracts`
+- 저장 타입: repository 옆
+- 외부 API 타입: adapter 옆
+- 내부 타입: service/module 옆
+
+### 규칙 7. PR 하나에는 한 가지 목적만 담기
+
+좋은 예:
+
+- flow save API 수정
+- run status 로직 수정
+- settings API 추가
+
+나쁜 예:
+
+- run 수정 + README 대수정 + UI 수정 + env 구조 변경
+
+---
+
+## 10. 3명이 협업할 때 추천 작업 분리
+
+초기에는 레이어 단위보다 **기능 단위 분리**가 더 안전합니다.
+
+추천 예시는 아래와 같습니다.
+
+- A: `flows / nodes / edges`
+- B: `runs / execution / traces / assets`
+- C: `messages / proposals / settings / websocket`
+
+공용으로 자주 충돌하는 파일:
+
+- `libs/contracts/**`
+- `apps/backend/serverless.yml`
+- `apps/backend/src/config/env.ts`
+
+이 파일을 건드릴 때는 먼저 서로 알려주고 작업하는 것이 좋습니다.
+
+---
+
+## 11. 백엔드 초심자를 위한 읽는 순서
+
+처음 코드를 읽을 때는 아래 순서를 추천합니다.
+
+1. `apps/backend/serverless.yml`
+2. `apps/backend/src/handlers/http/health.ts`
+3. `flows` 관련 handler 하나
+4. `run-service.ts`
+5. `flow-repository.ts`
+6. `libs/contracts/src/http/*`
+
+이 순서로 보면 "라우팅 -> 요청 처리 -> 로직 -> 저장 -> 계약" 흐름이 잡힙니다.
+
+---
+
+## 12. 자주 쓰는 명령어
+
+```bash
+# backend 실행
+yarn workspace @flows/backend start
+
+# frontend 실행
+yarn web:start
+
+# 전체 lint
+yarn lint
+
+# 자동 수정 lint
+yarn lint:fix
+
+# 포맷팅
+yarn prettier
+
+# Nx 의존성 그래프 보기
+yarn graph
+
+# backend 타입 확인
+npx tsc -p apps/backend/tsconfig.json --noEmit
 ```
 
 ---
 
-## Development
+## 13. 작업 전에 체크할 것
 
-### Available Commands
-
-```bash
-# Development
-yarn web:start          # Start dev server on port 3000
-yarn lint               # Run ESLint
-yarn lint:fix           # Run ESLint with auto-fix
-yarn prettier           # Format code with Prettier
-
-# Build
-yarn web:build          # Build for production
-yarn web:build:dev      # Build for development environment
-yarn web:build:prod     # Build for production environment
-
-# Testing
-yarn web:test           # Run tests
-
-# Utilities
-yarn clean:cache        # Clear build caches
-yarn graph              # View Nx dependency graph
-```
-
-### Code Style
-
-- **Named exports only** (no default exports)
-- **Arrow functions**: `const fn = (): Type => {}`
-- **4-space indentation**, single quotes, ES5 trailing commas
-- **TypeScript strict mode** enabled
-- **ESLint** enforces import ordering
-
-### Import Organization
-
-ESLint enforces strict ordering:
-
-1. React and external libraries
-2. Internal `@flows/*` packages
-3. Relative imports
-4. Type imports (separate section)
+- 내가 바꾸는 API shape가 `libs/contracts`와 맞는가
+- env를 새로 쓰면 `config/env.ts`에 추가했는가
+- handler에 로직이 너무 많이 들어가 있지 않은가
+- 외부 API 호출을 adapter로 뺐는가
+- 같은 기능을 다른 사람이 동시에 작업 중이지 않은가
 
 ---
 
-## API Integration
+## 14. 현재 기준으로 기억하면 좋은 한 줄 요약
 
-Eureka Flow requires a backend API for full functionality. Key endpoints:
-
-| Endpoint               | Purpose                                |
-| ---------------------- | -------------------------------------- |
-| `GET /flows/:id/load`  | Load flow with nodes, edges, channelId |
-| `POST /flows/:id/save` | Save flow (id='0' creates new)         |
-| `POST /nodes/:id/run`  | Execute node                           |
-| `GET /blocks/0/list`   | Load block definitions                 |
-
-### Authentication
-
-The app uses API key-based authentication:
-
-- API key is stored in `useWebCoreStore` and localStorage
-- Requests include `x-api-key` header
-- 403 responses trigger API key dialog
-- Keys can be generated via [Eureka Codes Console](https://console.eureka.codes)
+- 이 프로젝트 백엔드는 **serverless handler 기반**이다
+- API 계약은 **`libs/contracts`** 에서 관리한다
+- 환경변수 진입점은 **`apps/backend/src/config/env.ts`** 이다
+- 저장은 **repository**, 외부 연동은 **adapter**, 로직은 **service**
+- 3명 협업 시에는 **기능 단위로 나눠서 작업**하는 것이 가장 안전하다
 
 ---
 
-## Deployment
+## 15. 커밋 메시지 형식
 
-### Build for Production
-
-```bash
-# Build with production configuration
-yarn web:build:prod
-
-# Output will be in dist/apps/web/
-```
-
-### Environment-Specific Builds
-
-```bash
-# Development build (connects to dev API)
-yarn web:build:dev
-
-# Production build (connects to prod API)
-yarn web:build:prod
-```
-
-### Local Deployment Setup
-
-For local deployment to AWS S3/CloudFront, create environment files from the template:
-
-```bash
-# Copy the example file
-cp apps/web/.env.example apps/web/.env.dev    # For DEV deployment
-cp apps/web/.env.example apps/web/.env.prod   # For PROD deployment
-```
-
-Edit the files with actual values (see `apps/web/.env.example` for reference).
-
-**Required environment variables:**
-
-| Variable           | Description                              |
-| ------------------ | ---------------------------------------- |
-| `VITE_ENV`         | Environment identifier (`DEV` or `PROD`) |
-| `VITE_PROJECT`     | Project name (`FLOWS`)                   |
-| `VITE_API_URL`     | API endpoint URL                         |
-| `VITE_WS_ENDPOINT` | WebSocket endpoint URL                   |
-| `VITE_CODES_URL`   | Eureka Codes console URL                 |
-
-**AWS configuration** (create `.env.deploy` from `.env.deploy.example`):
-
-```bash
-# Copy the example file
-cp .env.deploy.example .env.deploy
-```
-
-| Variable                  | Description                          |
-| ------------------------- | ------------------------------------ |
-| `AWS_PROFILE_NAME`        | AWS CLI profile name (e.g., `lemon`) |
-| `BUCKET_NAME`             | S3 bucket name for deployment        |
-| `DEV_CF_DISTRIBUTION_ID`  | CloudFront distribution ID for DEV   |
-| `PROD_CF_DISTRIBUTION_ID` | CloudFront distribution ID for PROD  |
-
-### Deployment Commands
-
-```bash
-# Deploy to development (uses .env.deploy for AWS config)
-yarn web:deploy:dev
-
-# Deploy to production (uses .env.deploy for AWS config)
-yarn web:deploy:prod
-```
-
-### GitHub Actions Deployment
-
-CI/CD is configured via GitHub Actions. The following secrets must be set in your repository:
-
-| Secret                    | Description            |
-| ------------------------- | ---------------------- |
-| `AWS_ACCESS_KEY_ID`       | AWS access key         |
-| `AWS_SECRET_ACCESS_KEY`   | AWS secret key         |
-| `AWS_DEFAULT_REGION`      | AWS region             |
-| `BUCKET_NAME`             | S3 bucket name         |
-| `DEV_CF_DISTRIBUTION_ID`  | CloudFront ID for DEV  |
-| `PROD_CF_DISTRIBUTION_ID` | CloudFront ID for PROD |
-| `VITE_DEV_API_URL`        | DEV API URL            |
-| `VITE_DEV_WS_ENDPOINT`    | DEV WebSocket URL      |
-| `VITE_DEV_CODES_URL`      | DEV Eureka Codes URL   |
-| `VITE_PROD_API_URL`       | PROD API URL           |
-| `VITE_PROD_WS_ENDPOINT`   | PROD WebSocket URL     |
-| `VITE_PROD_CODES_URL`     | PROD Eureka Codes URL  |
-
-**Deployment triggers:**
-
-- Push to `develop` branch → Deploy to DEV
-- Push to `main` branch → Deploy to PROD
-
----
-
-## Contributing
-
-We welcome contributions! Please follow these steps:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes using [Conventional Commits](https://www.conventionalcommits.org/)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-### Commit Message Format
-
-```
+```text
 type(scope): description
 
-# Examples
-feat(canvas): add node grouping functionality
-fix(socket): resolve connection timeout issue
-docs(readme): update installation instructions
+예시
+feat(runs): add retry node handler
+fix(flows): validate flow id before save
+docs(readme): rewrite backend onboarding guide
 ```
 
 ---
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-## Related Projects
-
-- **[Eureka Codes](https://console.eureka.codes)** — API key management and developer console
-- **[Eureka Flows API](https://www.npmjs.com/package/@lemoncloud/eureka-flows-api)** — TypeScript types for the Flows API
-
----
-
-<div align="center">
-
-Made with :purple_heart: by [LemonCloud](https://github.com/lemoncloud-io)
-
-[Website](https://lemoncloud.io) · [GitHub](https://github.com/lemoncloud-io)
-
-</div>
+This project is licensed under the MIT License. See `LICENSE`.
