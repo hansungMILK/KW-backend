@@ -108,43 +108,125 @@ Domain Packs:
 
 ```typescript
 interface BlockDefinition {
-    // Identity
-    id: string; // "blk-search" or "blk-usr-abc123"
-    type: string; // unique type key
-    version: string; // "1.0.0"
+    // Identity — 버전 보존을 위해 blockId + version이 복합키
+    blockId: string; // "blk-search" or "blk-usr-abc123"
+    type: string; // unique type key (latest version의 alias)
+    version: string; // semver "1.0.0"
+    isLatest: boolean; // true면 type으로 조회 시 이 버전 사용
 
     // Display
-    name: string; // "트렌드 수집" or user-defined
+    name: string;
     description: string;
     category: string; // "search" | "content" | "media" | "analysis" | "custom"
     icon?: string;
 
-    // Execution contract
-    inputSchema: Record<string, unknown>; // zod-serializable
-    outputSchema: Record<string, unknown>;
-    configSchema: Record<string, unknown>;
+    // Execution contract — Portable Schema DSL (아래 2.2.1 참조)
+    inputSchema: PortableSchema;
+    outputSchema: PortableSchema;
+    configSchema: PortableSchema;
 
-    // Agent behavior (NEW — 프롬프트형 블록의 핵심)
+    // Agent behavior
     executionMode: 'builtin' | 'prompt-agent' | 'domain-pack';
     systemPrompt?: string; // prompt-agent 전용
-    model?: string; // "claude-haiku-4-5" 등
+    promptTemplate?: string; // input binding slots (아래 2.2.2 참조)
+    model?: string; // allowlist에서만 선택 가능
     temperature?: number;
     maxTokens?: number;
     outputFormat?: 'json' | 'text' | 'markdown';
 
-    // Constraints
-    costHint?: { currency: string; estimated: number };
-    requiredSecrets?: string[]; // ["ANTHROPIC_API_KEY"]
-    allowedTools?: string[]; // future: MCP tools
+    // Security & Cost (보정 #5)
+    costBudget?: { maxTokensPerCall: number; maxCallsPerRun: number; maxCostUsd: number };
+    requiredSecrets?: string[]; // ["ANTHROPIC_API_KEY"] — secret scope 제한
+    allowedModels?: string[]; // ["claude-haiku-4-5"] — model allowlist
     maxExecutionSec?: number;
+
+    // Scope (보정 — 열린 질문 해결)
+    scope: 'workspace'; // 현재는 workspace 전용만 지원
+    workspaceId?: string;
 
     // Provenance
     source: 'builtin' | 'domain-pack' | 'ai-generated' | 'user-created';
-    domainPack?: string; // "shorts-pack"
-    createdBy?: string; // "system" | userId
-    approved: boolean;
+    domainPack?: string;
+    createdBy?: string;
+    approved: boolean; // proposal 승인 시 함께 승인됨 (단일 승인)
 }
 ```
+
+#### 2.2.1 Portable Schema DSL (보정 #2)
+
+LLM이 생성 가능하고, executor/프론트 폼/validation에서 일관되게 사용 가능한 제한된 스키마.
+JSON Schema subset — 6가지 타입만 허용:
+
+```typescript
+interface PortableSchema {
+    type: 'object';
+    properties: Record<string, PortableField>;
+    required?: string[];
+}
+
+interface PortableField {
+    type: 'string' | 'number' | 'boolean' | 'array' | 'object';
+    description?: string;
+    default?: unknown;
+    // string constraints
+    enum?: string[];
+    minLength?: number;
+    maxLength?: number;
+    // number constraints
+    minimum?: number;
+    maximum?: number;
+    // array constraints
+    items?: PortableField;
+    minItems?: number;
+    maxItems?: number;
+    // nested object
+    properties?: Record<string, PortableField>;
+    required?: string[];
+}
+```
+
+**왜 이 제약인가:**
+
+- LLM이 안정적으로 생성 가능한 범위
+- zod로 런타임 변환 가능 (`portableSchemaToZod()` 유틸)
+- 프론트 폼 자동 생성 가능
+- JSON Schema 호환 (subset)
+
+#### 2.2.2 Prompt Template + Input Binding (보정 #3)
+
+prompt-agent 블록의 입력 매핑 규칙. upstream 출력이 프롬프트 문자열로 퇴화하지 않도록 구조화.
+
+```typescript
+// BlockDefinition.promptTemplate 예시:
+`당신은 전문 블로그 작성자입니다.
+
+## 입력 데이터
+- 주제: {{input.topic}}
+- 키워드: {{input.keywords | join(", ")}}
+- 참고 자료: {{input.references | json}}
+
+## 요구사항
+- {{config.tone}} 톤으로 작성
+- {{config.wordCount}}자 이내
+
+## 출력 형식
+JSON으로 반환: { "title": "...", "body": "...", "summary": "..." }`;
+```
+
+**바인딩 규칙:**
+
+- `{{input.fieldName}}` — inputSchema의 필드를 참조
+- `{{input.fieldName | json}}` — JSON 직렬화
+- `{{input.fieldName | join(sep)}}` — 배열 조인
+- `{{config.fieldName}}` — configSchema의 필드를 참조
+- 바인딩 실패 시 → `[missing: fieldName]` 삽입 + trace 경고 (실행은 계속)
+
+**executor 흐름:**
+
+1. inputSchema로 upstream output 검증
+2. promptTemplate에 바인딩 적용 → 완성된 user message
+3. systemPrompt + user message → Claude API
+4. response를 outputSchema로 검증
 
 ### 2.3 Planner v2 Orchestrator
 
@@ -219,17 +301,32 @@ modules/domain-packs/shorts-pack/
     shorts-8step.json    # 8블록 DAG 템플릿
 ```
 
-### 2.6 Generic Deliverable
+### 2.6 Generic Deliverable (보정 #4 — 조립 책임 분리)
 
-현재: IntegrationOutputSchema (title, hashtags, video, sceneCount — 쇼츠 전용)
-목표:
+**원칙:** execution-engine은 raw outputs + artifacts만 수집.
+최종 조립은 integration block 또는 deliverable-composer 계층이 담당.
+engine이 product-aware해지면 안 됨.
+
+```
+execution-engine 책임:
+  → 각 node output을 runNode.outputPayload에 저장
+  → 각 node asset을 assetsTable에 저장
+  → run.finalOutputSummary = null (engine은 조립 안 함)
+
+deliverable-composer 책임 (별도 서비스):
+  → run 완료 후 호출됨
+  → 모든 node output + assets를 읽어서 GenericDeliverable 조립
+  → domain-pack이 있으면 pack의 composer 사용
+  → 없으면 기본 composer (outputs + artifacts 나열)
+```
 
 ```typescript
+// 기본 GenericDeliverable (engine이 아닌 composer가 생성)
 interface GenericDeliverable {
-    summary: string; // 한 줄 설명
-    outputs: Record<string, unknown>; // 블록별 output 전부
+    summary: string;
+    outputs: Record<nodeId, unknown>; // 블록별 raw output
     artifacts: Array<{
-        type: string; // "video" | "image" | "document" | "audio" | custom
+        type: string;
         url: string;
         label: string;
         mimeType: string;
@@ -238,12 +335,27 @@ interface GenericDeliverable {
     metadata: {
         domainPack?: string;
         totalCost?: number;
-        totalDurationSec?: number;
         blockCount: number;
         completedAt: string;
     };
 }
+
+// shorts-pack의 composer는 이걸 확장:
+interface ShortsDeliverable extends GenericDeliverable {
+    title: string;
+    hashtags: string[];
+    video: { url; durationSec; width; height };
+    audio: { url; durationSec };
+    // ... 쇼츠 전용 필드
+}
 ```
+
+**왜 이렇게 분리하는가:**
+
+- 블로그 pack → 결과는 markdown + images
+- 이미지 pack → 결과는 gallery
+- 쇼츠 pack → 결과는 video + metadata
+- engine에 이 모든 분기를 넣으면 core가 도메인 의존적이 됨
 
 ---
 
@@ -264,15 +376,41 @@ interface GenericDeliverable {
 
 ---
 
-## 4. 보안/운영 리스크 대응
+## 4. 보안/운영 리스크 대응 (보정 #5 — 구체화)
 
-| 리스크             | 대응                                             |
-| ------------------ | ------------------------------------------------ |
-| 임의 프롬프트 실행 | model allowlist + maxTokens 상한                 |
-| Secret 접근        | requiredSecrets 필드로 명시, settings에서만 조회 |
-| Runaway execution  | maxExecutionSec per block, run-level timeout     |
-| Cost control       | costHint 기반 예상 비용 표시 + 승인 게이트       |
-| 프롬프트 인젝션    | output zod validation으로 구조 강제              |
+| 리스크           | 대응                                                                                                | 구현 위치             |
+| ---------------- | --------------------------------------------------------------------------------------------------- | --------------------- |
+| 모델 남용        | `allowedModels` allowlist — 블록별 사용 가능 모델 제한. 기본값: `['claude-haiku-4-5']`              | BlockDefinition       |
+| 토큰 폭주        | `costBudget.maxTokensPerCall` (기본 4096) + `maxCallsPerRun` (기본 1)                               | prompt-agent-executor |
+| 비용 폭주        | `costBudget.maxCostUsd` per block + run-level 합산 상한 ($1 기본)                                   | execution-engine      |
+| Secret 범위      | `requiredSecrets` 명시. executor는 해당 secret만 settings에서 조회 가능. 미명시 secret 요청 시 거부 | prompt-agent-executor |
+| Runaway 실행     | `maxExecutionSec` per block (기본 30초) + run-level timeout (기본 300초)                            | execution-engine      |
+| 프롬프트 인젝션  | output을 PortableSchema 기반 zod로 검증 + 예상치 못한 필드 strip                                    | prompt-agent-executor |
+| 과도한 블록 생성 | workspace당 사용자 생성 블록 상한 (기본 50개)                                                       | block-catalog-service |
+| 승인 우회        | 새 블록은 반드시 proposal 승인과 함께 승인됨 (단일 게이트)                                          | proposal-service      |
+
+### Secret Scope 규칙
+
+```
+블록 정의:   requiredSecrets: ["ANTHROPIC_API_KEY"]
+실행 시:     executor가 settings.getKeyForProvider("anthropic") 호출
+             → 허용됨 ✅
+
+블록 정의:   requiredSecrets: ["ANTHROPIC_API_KEY"]
+실행 시:     executor가 settings.getKeyForProvider("openai") 호출
+             → 거부 ❌ + trace ERROR
+```
+
+### 승인 정책 (열린 질문 해결)
+
+```
+사용자: "블로그 글 만들어줘"
+→ Planner: proposal { existingBlocks + newBlocks }
+→ 사용자에게 한 번에 표시:
+  "4개 블록 중 1개가 새로 생성됩니다. [승인] [거절]"
+→ 승인 시: 새 블록 정의 저장 + DAG 배치 (단일 승인)
+→ 별도 2단계 승인 불필요 (캡스톤 범위에서 과도)
+```
 
 ---
 

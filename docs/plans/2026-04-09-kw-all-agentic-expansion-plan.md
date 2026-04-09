@@ -90,13 +90,26 @@ apps/backend/src/handlers/http/blocks/
   → get-block.ts 신규: GET /blocks/{type}
 ```
 
-### DynamoDB 테이블 추가
+### DynamoDB 테이블 추가 (보정 #1 — 버전 보존 가능한 키)
 
 ```yaml
 BlockDefinitionsTable:
     PK: type (S)
-    GSI: category-index (category + createdAt)
+    SK: version (S)          # "1.0.0", "1.1.0" — 같은 type의 여러 버전 공존
+    GSI1: category-index
+        PK: category (S)
+        SK: createdAt (S)
+    GSI2: latest-index       # 최신 버전만 빠르게 조회
+        PK: type (S)
+        SK: isLatest (S)     # "true" 고정값 — sparse index
 ```
+
+**조회 패턴:**
+
+- 특정 type의 latest → `GSI2: PK=type, SK="true"`
+- 특정 type의 모든 버전 → `PK=type` (version으로 정렬)
+- 카테고리별 목록 → `GSI1: PK=category`
+- 블록 카탈로그 (latest만) → `GSI2 scan where isLatest="true"`
 
 ### 완료 기준
 
@@ -117,19 +130,38 @@ BlockDefinitionsTable:
 apps/backend/src/modules/blocks/prompt-agent-executor.ts
 ```
 
-### 로직
+### 로직 (보정 #3 — input binding 포함)
 
 ```typescript
 export const promptAgentExecutor = {
     async execute(definition: BlockDefinition, input: unknown): Promise<BlockExecutorResult> {
-        // 1. definition.systemPrompt + input → Claude API 호출
-        // 2. response를 definition.outputFormat에 맞게 파싱
-        // 3. definition.outputSchema로 zod validation
-        // 4. 실패 시 FAILED + trace
-        // 5. 성공 시 output 반환
+        // 1. inputSchema로 upstream output 검증 (PortableSchema → zod 변환)
+        // 2. promptTemplate에 input/config binding 적용
+        //    - {{input.topic}} → upstream output의 topic 필드
+        //    - {{input.keywords | join(", ")}} → 배열 조인
+        //    - {{config.tone}} → block config 값
+        //    - 바인딩 실패 → "[missing: fieldName]" + trace 경고
+        // 3. systemPrompt + 바인딩된 user message → Claude API 호출
+        //    - allowedModels 검증: 허용된 모델만 사용
+        //    - requiredSecrets 검증: 허용된 secret만 조회
+        //    - costBudget 검증: maxTokens 상한 적용
+        // 4. response를 outputFormat에 맞게 파싱 (json → JSON.parse, text → raw)
+        // 5. outputSchema로 zod validation (PortableSchema → zod)
+        // 6. 실패 시 FAILED + trace ERROR
+        // 7. 성공 시 output + trace TOOL_RESULT 반환
     },
 };
 ```
+
+### 신규 유틸
+
+```
+apps/backend/src/utils/
+  portable-schema.ts         # portableSchemaToZod(), validateWithPortableSchema()
+  prompt-template.ts         # bindPromptTemplate(template, input, config)
+```
+
+````
 
 ### block-executor.ts 변경
 
@@ -153,7 +185,7 @@ async execute(blockType: string, input: unknown) {
 
   throw new Error(`Unsupported execution mode: ${definition.executionMode}`);
 }
-```
+````
 
 ### 완료 기준
 
@@ -266,38 +298,52 @@ DELETE /blocks/definitions/{type} — 사용자 생성 블록 삭제 (builtin �
 
 **목표:** 쇼츠 전용 IntegrationOutput → 범용 GenericDeliverable.
 
-### 변경
+### 변경 (보정 #4 — engine 밖으로 조립 분리)
 
 ```
-modules/blocks/types.ts
-  → IntegrationOutputSchema 삭제
-  → GenericDeliverableSchema 추가
+신규:
+  apps/backend/src/services/deliverable-composer.ts
+    → run 완료 후 호출
+    → node outputs + assets 수집 → GenericDeliverable 조립
+    → domain-pack composer가 있으면 위임 (shorts-pack → ShortsDeliverable)
 
-execution-engine.ts
-  → run 완료 시 모든 node output + assets를 GenericDeliverable로 조립
-  → 별도 integration block 없이도 deliverable 생성 가능
+변경:
+  execution-engine.ts
+    → run 완료 시 deliverableComposer.compose(runId) 호출
+    → engine 자체는 raw data만 저장, 조립 로직 없음
+
+  modules/domain-packs/shorts-pack/
+    → composer.ts 추가: shortsComposer(outputs, assets) → ShortsDeliverable
+
+삭제:
+  modules/blocks/types.ts → IntegrationOutputSchema (shorts-pack으로 이동)
 ```
 
-### GenericDeliverable 구조
+### Deliverable Composer 구조
 
 ```typescript
-{
-  summary: string;
-  outputs: Record<nodeId, unknown>;   // 블록별 output 전부
-  artifacts: Array<{ type, url, label, mimeType, metadata }>;
-  metadata: {
-    domainPack?: string;
-    totalCost?: number;
-    blockCount: number;
-    completedAt: string;
-  };
+// 기본 composer (domain-pack 없을 때)
+interface GenericDeliverable {
+    summary: string;
+    outputs: Record<nodeId, unknown>;
+    artifacts: Array<{ type; url; label; mimeType; metadata }>;
+    metadata: { domainPack?; totalCost?; blockCount; completedAt };
 }
+
+// domain-pack composer interface
+interface DeliverableComposer {
+    compose(outputs: Record<string, unknown>, assets: Asset[]): GenericDeliverable;
+}
+
+// shorts-pack composer는 ShortsDeliverable 반환 (GenericDeliverable 확장)
 ```
 
 ### 완료 기준
 
-- 모든 run이 GenericDeliverable 반환
-- shorts-pack은 자체 integration block으로 추가 가공 (optional)
+- execution-engine이 deliverable 조립 로직을 갖지 않음
+- deliverable-composer가 별도 서비스로 존재
+- domain-pack이 자체 composer 제공 가능
+- pack 없으면 기본 composer가 outputs + artifacts 나열
 - 프론트가 범용 결과 렌더링 가능
 
 ---
