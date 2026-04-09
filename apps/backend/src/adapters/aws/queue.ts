@@ -1,3 +1,4 @@
+import { initDomainPacks } from '../../bootstrap/init-domain-packs';
 import { executionEngine } from '../../services/execution-engine';
 
 import type { QueueMessage } from '@flows/contracts';
@@ -48,6 +49,10 @@ export const queue = {
      *   - SQS-triggered Lambda worker in prod (future)
      */
     async processLocally(message: QueueMessage): Promise<void> {
+        // Ensure domain packs are loaded — critical for SQS worker path
+        // which doesn't go through HTTP middleware
+        initDomainPacks();
+
         switch (message.type) {
             case 'EXECUTE_RUN':
                 await executionEngine.handleRunExecution(message.runId, message.executionId);

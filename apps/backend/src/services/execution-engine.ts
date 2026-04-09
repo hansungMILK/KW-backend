@@ -336,10 +336,12 @@ export const executionEngine = {
             }
         } catch (err: unknown) {
             const errorMessage = err instanceof Error ? err.message : String(err);
-            console.error(`[execution-engine] node ${nodeId} failed:`, errorMessage);
+            const errorCode =
+                err instanceof Error && err.name === 'UnknownBlockTypeError' ? 'UNKNOWN_BLOCK_TYPE' : 'EXECUTION_ERROR';
+            console.error(`[execution-engine] node ${nodeId} failed (${errorCode}):`, errorMessage);
 
             await runRepo.updateRunNodeStatus(runId, nodeId, 'FAILED', {
-                errorCode: 'EXECUTION_ERROR',
+                errorCode,
                 errorMessage,
             });
 
@@ -351,7 +353,7 @@ export const executionEngine = {
                         runId,
                         nodeId,
                         status: 'FAILED',
-                        errorCode: 'EXECUTION_ERROR',
+                        errorCode,
                         errorMessage,
                         timestamp: Date.now(),
                     });
@@ -360,7 +362,12 @@ export const executionEngine = {
                 }
             }
             try {
-                await traceService.record(runId, nodeId, 'ERROR', `Node ${nodeId} failed: ${errorMessage}`);
+                await traceService.record(
+                    runId,
+                    nodeId,
+                    'ERROR',
+                    `Node ${nodeId} failed [${errorCode}]: ${errorMessage}`
+                );
             } catch {
                 /* non-fatal */
             }

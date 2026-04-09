@@ -59,12 +59,12 @@ export function registerShortsPack(): void {
         blockRegistry.registerWithMeta(executor, meta);
     }
 
-    // ── Register orchestrator ──
+    // ── Register orchestrator (single active planning pack) ──
     const mode = process.env.ORCHESTRATOR_MODE || 'mock';
     if (mode === 'claude') {
-        registerOrchestrator(shortsOrchestrator);
+        registerOrchestrator(shortsOrchestrator, 'shorts-pack');
     } else {
-        registerOrchestrator(shortsMockOrchestrator);
+        registerOrchestrator(shortsMockOrchestrator, 'shorts-pack');
     }
 }
 
