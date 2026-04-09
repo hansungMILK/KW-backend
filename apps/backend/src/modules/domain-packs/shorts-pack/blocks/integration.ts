@@ -1,7 +1,7 @@
-import { claudeAdapter } from '../../adapters/ai/claude-adapter';
-import { log } from '../../utils/logger';
+import { claudeAdapter } from '../../../../adapters/ai/claude-adapter';
+import { log } from '../../../../utils/logger';
 
-import type { BlockExecutor, BlockExecutorResult } from './types';
+import type { BlockExecutor, BlockExecutorResult } from '../../../blocks/types';
 
 /**
  * Integration block — assembles upstream outputs into a final deliverable.

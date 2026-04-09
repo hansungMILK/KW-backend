@@ -1,8 +1,8 @@
-import { AnalysisOutputSchema } from './types';
-import { claudeAdapter } from '../../adapters/ai/claude-adapter';
-import { log } from '../../utils/logger';
+import { claudeAdapter } from '../../../../adapters/ai/claude-adapter';
+import { log } from '../../../../utils/logger';
+import { AnalysisOutputSchema } from '../../../blocks/types';
 
-import type { BlockExecutor, BlockExecutorResult } from './types';
+import type { BlockExecutor, BlockExecutorResult } from '../../../blocks/types';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 

@@ -1,24 +1,8 @@
 import { z } from 'zod';
 
-/**
- * Block type identifiers — single source of truth.
- * Used by: block catalog, mock orchestrator, claude orchestrator,
- * proposal generation, block registry, execution engine.
- */
-export const BLOCK_TYPES = [
-    'search',
-    'content',
-    'data',
-    'analysis',
-    'media-image',
-    'media-tts',
-    'media-video',
-    'integration',
-] as const;
-
-export type BlockType = (typeof BLOCK_TYPES)[number];
-
-export const BlockTypeSchema = z.enum(BLOCK_TYPES);
+// BlockType is now a plain string — no longer restricted to a hardcoded enum.
+// Domain packs register their own block types at runtime.
+export type BlockType = string;
 
 /**
  * Common block executor interface.

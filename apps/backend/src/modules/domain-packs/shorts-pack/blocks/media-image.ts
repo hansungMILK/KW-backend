@@ -1,10 +1,10 @@
 import { randomUUID } from 'crypto';
 
-import { imageAdapter } from '../../adapters/ai/image-adapter';
-import { BUCKET, putObject } from '../../adapters/aws/s3';
-import { traceService } from '../../services/trace-service';
+import { imageAdapter } from '../../../../adapters/ai/image-adapter';
+import { BUCKET, putObject } from '../../../../adapters/aws/s3';
+import { traceService } from '../../../../services/trace-service';
 
-import type { BlockExecutor, BlockExecutorResult } from './types';
+import type { BlockExecutor, BlockExecutorResult } from '../../../blocks/types';
 
 // ─── dummy output ─────────────────────────────────────────────────────────────
 

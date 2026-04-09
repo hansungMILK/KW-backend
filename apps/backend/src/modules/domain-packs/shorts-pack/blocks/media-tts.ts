@@ -1,10 +1,10 @@
 import { randomUUID } from 'crypto';
 
-import { ttsAdapter } from '../../adapters/ai/tts-adapter';
-import { BUCKET, putObject } from '../../adapters/aws/s3';
-import { traceService } from '../../services/trace-service';
+import { ttsAdapter } from '../../../../adapters/ai/tts-adapter';
+import { BUCKET, putObject } from '../../../../adapters/aws/s3';
+import { traceService } from '../../../../services/trace-service';
 
-import type { BlockExecutor, BlockExecutorResult } from './types';
+import type { BlockExecutor, BlockExecutorResult } from '../../../blocks/types';
 
 // ─── dummy output ─────────────────────────────────────────────────────────────
 

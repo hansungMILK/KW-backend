@@ -1,7 +1,7 @@
-import { DataOutputSchema } from './types';
-import { log } from '../../utils/logger';
+import { log } from '../../../../utils/logger';
+import { DataOutputSchema } from '../../../blocks/types';
 
-import type { BlockExecutor, BlockExecutorResult } from './types';
+import type { BlockExecutor, BlockExecutorResult } from '../../../blocks/types';
 
 // ── Dummy (mock mode) ─────────────────────────────────────────────────────────
 

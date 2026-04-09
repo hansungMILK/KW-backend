@@ -1,41 +1,75 @@
-import { analysisBlock } from './analysis-block';
-import { contentBlock } from './content-block';
-import { dataBlock } from './data-block';
-import { integrationBlock } from './integration-block';
-import { mediaImageBlock } from './media-image-block';
-import { mediaTtsBlock } from './media-tts-block';
-import { mediaVideoBlock } from './media-video-block';
-import { searchBlock } from './search-block';
-import { BLOCK_TYPES } from './types';
+import type { BlockExecutor } from './types';
 
-import type { BlockExecutor, BlockType } from './types';
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-const registry = new Map<BlockType, BlockExecutor>();
-
-registry.set('search', searchBlock);
-registry.set('content', contentBlock);
-registry.set('data', dataBlock);
-registry.set('analysis', analysisBlock);
-registry.set('media-image', mediaImageBlock);
-registry.set('media-tts', mediaTtsBlock);
-registry.set('media-video', mediaVideoBlock);
-registry.set('integration', integrationBlock);
-
-// Sanity check: every declared block type must be registered
-for (const blockType of BLOCK_TYPES) {
-    if (!registry.has(blockType)) {
-        throw new Error(`[block-registry] Missing executor for block type: "${blockType}"`);
-    }
+export interface BlockCatalogMeta {
+    label: string;
+    description: string;
+    stereo: 'input' | 'process' | 'output';
+    inputs: Array<{ id: string; label: string; type: string }>;
+    outputs: Array<{ id: string; label: string; type: string }>;
 }
 
+// ── Internal maps ─────────────────────────────────────────────────────────────
+
+const registry = new Map<string, BlockExecutor>();
+const catalogMetadata = new Map<string, BlockCatalogMeta>();
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
 export const blockRegistry = {
+    /** Register a block executor without catalog metadata. */
+    register(executor: BlockExecutor): void {
+        registry.set(executor.blockType, executor);
+    },
+
+    /** Register a block executor with rich catalog metadata (label, description, ports). */
+    registerWithMeta(executor: BlockExecutor, meta: BlockCatalogMeta): void {
+        registry.set(executor.blockType, executor);
+        catalogMetadata.set(executor.blockType, meta);
+    },
+
+    /** Remove a block from the registry. */
+    unregister(blockType: string): void {
+        registry.delete(blockType);
+        catalogMetadata.delete(blockType);
+    },
+
+    /** Retrieve an executor by block type. Returns undefined if not registered. */
     get(blockType: string): BlockExecutor | undefined {
-        return registry.get(blockType as BlockType);
+        return registry.get(blockType);
     },
+
+    /** Check whether a block type is registered. */
     has(blockType: string): boolean {
-        return registry.has(blockType as BlockType);
+        return registry.has(blockType);
     },
-    listTypes(): BlockType[] {
+
+    /** List all registered block type strings. */
+    listTypes(): string[] {
         return [...registry.keys()];
+    },
+
+    /** List all registered executors. */
+    listAll(): BlockExecutor[] {
+        return [...registry.values()];
+    },
+
+    /** Get catalog metadata for a block type. */
+    getMeta(blockType: string): BlockCatalogMeta | undefined {
+        return catalogMetadata.get(blockType);
+    },
+
+    /** List all executors with their metadata (if available). */
+    listAllWithMeta(): Array<{ executor: BlockExecutor; meta?: BlockCatalogMeta }> {
+        return [...registry.entries()].map(([type, executor]) => ({
+            executor,
+            meta: catalogMetadata.get(type),
+        }));
+    },
+
+    /** Number of registered block types. */
+    size(): number {
+        return registry.size;
     },
 };

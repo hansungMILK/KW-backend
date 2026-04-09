@@ -1,9 +1,19 @@
 import { log } from './logger';
 import { badRequest, serverError } from './response';
+import { registerShortsPack } from '../modules/domain-packs/shorts-pack';
 
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 
 type Handler = (event: APIGatewayProxyEvent) => Promise<APIGatewayProxyResult>;
+
+let _initialized = false;
+
+function ensureInit(): void {
+    if (!_initialized) {
+        registerShortsPack();
+        _initialized = true;
+    }
+}
 
 /**
  * Wraps a handler with common middleware:
@@ -13,6 +23,7 @@ type Handler = (event: APIGatewayProxyEvent) => Promise<APIGatewayProxyResult>;
  */
 export const withMiddleware = (handler: Handler): Handler => {
     return async event => {
+        ensureInit();
         const method = event.httpMethod || event.requestContext?.http?.method || '?';
         const path = event.path || event.rawPath || '?';
         log.info(`${method} ${path}`);

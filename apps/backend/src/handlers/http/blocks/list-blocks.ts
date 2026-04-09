@@ -1,3 +1,4 @@
+import { blockRegistry } from '../../../modules/blocks';
 import { withMiddleware } from '../../../utils/middleware';
 import { ok } from '../../../utils/response';
 
@@ -9,8 +10,8 @@ import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
  *
  * Returns: { list: BlockViewWithFrontend[] }
  *
- * Static block catalog — 8 shorts pipeline blocks + utility blocks.
- * Frontend filters by $definition.label presence and attaches execute functions.
+ * Utility blocks (frontend-only) are hardcoded here.
+ * Backend blocks come from the dynamic block registry (shorts-pack etc.).
  */
 
 interface BlockDef {
@@ -28,8 +29,9 @@ interface BlockDef {
     isRunnable: boolean;
 }
 
-const BLOCK_CATALOG: BlockDef[] = [
-    // ── Frontend utility blocks ──
+// ── Frontend utility blocks (never change — frontend-only, no executor) ───────
+
+const UTILITY_BLOCKS: BlockDef[] = [
     {
         $definition: {
             id: 'blk-input-text',
@@ -100,123 +102,28 @@ const BLOCK_CATALOG: BlockDef[] = [
         stereo: 'process',
         isRunnable: true,
     },
-    // ── Backend (Shorts pipeline) blocks ──
-    {
-        $definition: {
-            id: 'blk-search',
-            type: 'search',
-            label: '트렌드 수집',
-            description: '입시 트렌드/키워드 수집 (Search Agent)',
-            inputs: [],
-            outputs: [{ id: 'out', label: 'Keywords', type: 'json' }],
-            configSchema: [],
-        },
-        isFrontend: 0,
-        stereo: 'process',
-        isRunnable: true,
-    },
-    {
-        $definition: {
-            id: 'blk-content',
-            type: 'content',
-            label: '스크립트 생성',
-            description: '7-scene 쇼츠 스크립트 (Content Agent)',
-            inputs: [{ id: 'in', label: 'Keywords', type: 'json' }],
-            outputs: [{ id: 'out', label: 'Script', type: 'json' }],
-            configSchema: [],
-        },
-        isFrontend: 0,
-        stereo: 'process',
-        isRunnable: true,
-    },
-    {
-        $definition: {
-            id: 'blk-data',
-            type: 'data',
-            label: '데이터 정규화',
-            description: '씬별 프롬프트 구조화 (Data Agent)',
-            inputs: [{ id: 'in', label: 'Script', type: 'json' }],
-            outputs: [{ id: 'out', label: 'Normalized', type: 'json' }],
-            configSchema: [],
-        },
-        isFrontend: 0,
-        stereo: 'process',
-        isRunnable: true,
-    },
-    {
-        $definition: {
-            id: 'blk-analysis',
-            type: 'analysis',
-            label: '품질 검수',
-            description: '안전성/품질 검증 (Analysis Agent)',
-            inputs: [{ id: 'in', label: 'Data', type: 'json' }],
-            outputs: [{ id: 'out', label: 'Result', type: 'json' }],
-            configSchema: [],
-        },
-        isFrontend: 0,
-        stereo: 'process',
-        isRunnable: true,
-    },
-    {
-        $definition: {
-            id: 'blk-media-image',
-            type: 'media-image',
-            label: '이미지 생성',
-            description: '씬별 이미지 ×7장 (Media Agent)',
-            inputs: [{ id: 'in', label: 'Prompts', type: 'json' }],
-            outputs: [{ id: 'out', label: 'Images', type: 'json' }],
-            configSchema: [],
-        },
-        isFrontend: 0,
-        stereo: 'process',
-        isRunnable: true,
-    },
-    {
-        $definition: {
-            id: 'blk-media-tts',
-            type: 'media-tts',
-            label: '음성 생성',
-            description: 'TTS 음성 합성 (Media Agent)',
-            inputs: [{ id: 'in', label: 'Script', type: 'json' }],
-            outputs: [{ id: 'out', label: 'Audio', type: 'json' }],
-            configSchema: [],
-        },
-        isFrontend: 0,
-        stereo: 'process',
-        isRunnable: true,
-    },
-    {
-        $definition: {
-            id: 'blk-media-video',
-            type: 'media-video',
-            label: '영상 합성',
-            description: 'FFmpeg 영상 합성 (Media Agent)',
-            inputs: [{ id: 'in', label: 'Assets', type: 'json' }],
-            outputs: [{ id: 'out', label: 'Video', type: 'json' }],
-            configSchema: [],
-        },
-        isFrontend: 0,
-        stereo: 'process',
-        isRunnable: true,
-    },
-    {
-        $definition: {
-            id: 'blk-integration',
-            type: 'integration',
-            label: '메타데이터 생성',
-            description: 'SEO 메타 + CloudFront URL (Integration Agent)',
-            inputs: [{ id: 'in', label: 'Video', type: 'json' }],
-            outputs: [{ id: 'out', label: 'Final', type: 'json' }],
-            configSchema: [],
-        },
-        isFrontend: 0,
-        stereo: 'output',
-        isRunnable: true,
-    },
 ];
 
+// ── Handler ───────────────────────────────────────────────────────────────────
+
 const handler = async (_event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
-    return ok({ list: BLOCK_CATALOG });
+    // Build backend block list dynamically from the registry
+    const registeredBlocks: BlockDef[] = blockRegistry.listAllWithMeta().map(({ executor, meta }) => ({
+        $definition: {
+            id: `blk-${executor.blockType}`,
+            type: executor.blockType,
+            label: meta?.label ?? executor.blockType,
+            description: meta?.description ?? '',
+            inputs: meta?.inputs ?? [{ id: 'in', label: 'Input', type: 'any' }],
+            outputs: meta?.outputs ?? [{ id: 'out', label: 'Output', type: 'any' }],
+            configSchema: [],
+        },
+        isFrontend: 0,
+        stereo: meta?.stereo ?? 'process',
+        isRunnable: true,
+    }));
+
+    return ok({ list: [...UTILITY_BLOCKS, ...registeredBlocks] });
 };
 
 export const main = withMiddleware(handler);

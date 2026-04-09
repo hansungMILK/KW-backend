@@ -1,9 +1,9 @@
-import { extractTopic } from './search-block';
-import { ContentOutputSchema } from './types';
-import { claudeAdapter } from '../../adapters/ai/claude-adapter';
-import { log } from '../../utils/logger';
+import { extractTopic } from './search';
+import { claudeAdapter } from '../../../../adapters/ai/claude-adapter';
+import { log } from '../../../../utils/logger';
+import { ContentOutputSchema } from '../../../blocks/types';
 
-import type { BlockExecutor, BlockExecutorResult } from './types';
+import type { BlockExecutor, BlockExecutorResult } from '../../../blocks/types';
 
 // ── Prompts ──────────────────────────────────────────────────────────────────
 
