@@ -79,34 +79,7 @@ Assistant:
   "estimatedCostUsd": 1.25,
   "summary": "입시 트렌드를 수집하고 7씬 스크립트를 생성한 뒤, 이미지와 TTS를 병렬 합성하여 세로형 쇼츠를 완성합니다."
 }
-
-### Example 2
-User: "날씨 데이터 분석해줘"
-Assistant:
-{
-  "blocks": [
-    { "type": "search",      "label": "날씨 데이터 수집",   "config": { "query": "기상청 날씨 API" } },
-    { "type": "data",        "label": "날씨 데이터 정규화", "config": {} },
-    { "type": "analysis",    "label": "기상 패턴 분석",     "config": { "mode": "analysis" } },
-    { "type": "content",     "label": "분석 리포트 작성",   "config": {} },
-    { "type": "media-image", "label": "차트 이미지 생성",   "config": { "count": 3 } },
-    { "type": "media-tts",   "label": "리포트 음성 생성",   "config": { "lang": "ko" } },
-    { "type": "media-video", "label": "분석 영상 합성",     "config": {} },
-    { "type": "integration", "label": "최종 리포트 배포",   "config": {} }
-  ],
-  "edges": [
-    { "from": 0, "to": 1 },
-    { "from": 1, "to": 2 },
-    { "from": 2, "to": 3 },
-    { "from": 3, "to": 4 },
-    { "from": 3, "to": 5 },
-    { "from": 4, "to": 6 },
-    { "from": 5, "to": 6 },
-    { "from": 6, "to": 7 }
-  ],
-  "estimatedCostUsd": 0.85,
-  "summary": "날씨 데이터를 수집·정규화하고 기상 패턴을 분석한 뒤, 차트 이미지와 TTS를 병렬 생성하여 리포트 영상으로 배포합니다."
-}`;
+`;
 
 export const buildUserPrompt = (userMessage: string, flowContext?: string): string => {
     let prompt = `사용자 요청: "${userMessage}"`;
