@@ -32,7 +32,8 @@ export const proposalService = {
      */
     async approve(
         proposalId: string,
-        decisionNote?: string
+        decisionNote?: string,
+        layoutType?: string
     ): Promise<{ ok: true; data: ApproveResult } | { ok: false; error: string; status: number }> {
         const proposal = await proposalRepo.get(proposalId);
         if (!proposal) return { ok: false, error: `Proposal ${proposalId} not found`, status: 404 };
@@ -47,12 +48,29 @@ export const proposalService = {
 
         const now = new Date().toISOString();
 
+        // Apply layout to proposed nodes based on layoutType
+        let layoutNodes = proposal.proposedNodes as Array<Record<string, unknown>>;
+        const layout = layoutType ?? 'vertical';
+        if (layout === 'horizontal') {
+            layoutNodes = layoutNodes.map((n, i) => ({
+                ...n,
+                position: { x: 100 + i * 300, y: 200 },
+            }));
+        } else if (layout === 'grid') {
+            const cols = 3;
+            layoutNodes = layoutNodes.map((n, i) => ({
+                ...n,
+                position: { x: 100 + (i % cols) * 300, y: 100 + Math.floor(i / cols) * 200 },
+            }));
+        }
+        // 'vertical' or default: use existing positions (y-spaced by orchestrator)
+
         // Replace flow snapshot with proposal's nodes/edges
         const updatedFlow: FlowRecord = {
             ...flow,
-            nodes: proposal.proposedNodes,
+            nodes: layoutNodes,
             edges: proposal.proposedEdges,
-            state: 'active', // DRAFT → active on approval
+            state: 'READY', // DRAFT → READY on approval
             updatedAt: now,
         };
         await flowRepo.put(updatedFlow);

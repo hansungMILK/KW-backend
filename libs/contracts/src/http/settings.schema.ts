@@ -51,6 +51,17 @@ export const ApiKeyPutResponseSchema = z.object({
 export type ApiKeyPutRequest = z.infer<typeof ApiKeyPutRequestSchema>;
 export type ApiKeyPutResponse = z.infer<typeof ApiKeyPutResponseSchema>;
 
+export const ApiKeyBulkPutRequestSchema = z.object({
+    keys: z.array(ApiKeyPutRequestSchema).min(1, 'keys array cannot be empty'),
+});
+
+export const ApiKeyBulkPutResponseSchema = z.object({
+    items: z.array(ApiKeyPutResponseSchema),
+});
+
+export type ApiKeyBulkPutRequest = z.infer<typeof ApiKeyBulkPutRequestSchema>;
+export type ApiKeyBulkPutResponse = z.infer<typeof ApiKeyBulkPutResponseSchema>;
+
 // ============================================================================
 // DELETE /settings/api-keys/{provider}
 // ============================================================================

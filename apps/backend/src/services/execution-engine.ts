@@ -209,6 +209,27 @@ export const executionEngine = {
         } catch {
             /* non-fatal */
         }
+
+        // Notify webhook if configured
+        if (run.notifyWebhook) {
+            try {
+                const signal = AbortSignal.timeout(5000);
+                await fetch(run.notifyWebhook, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        event: 'run.completed',
+                        runId,
+                        flowId: run.flowId,
+                        status: 'COMPLETED',
+                        completedAt: new Date().toISOString(),
+                    }),
+                    signal,
+                });
+            } catch {
+                console.warn(`[execution-engine] webhook notify failed for run ${runId} (non-fatal)`);
+            }
+        }
     },
 
     /**
@@ -268,8 +289,41 @@ export const executionEngine = {
         }
 
         try {
+            // Broadcast node.progress at 25% before execution
+            if (runForNode) {
+                try {
+                    await wsService.broadcastToFlow(runForNode.flowId, {
+                        type: 'node.progress',
+                        runId,
+                        nodeId,
+                        progress: 25,
+                        message: `${node.blockType} 실행 준비 중...`,
+                        timestamp: Date.now(),
+                    });
+                    await runRepo.updateRunNodeStatus(runId, nodeId, 'RUNNING', { progress: 25 });
+                } catch {
+                    /* non-fatal */
+                }
+            }
+
             const result = await blockExecutor.execute(node.blockType, node.inputPayload ?? null);
             const { output, durationMs, assets } = result;
+
+            // Broadcast node.progress at 75% after execution, before save
+            if (runForNode) {
+                try {
+                    await wsService.broadcastToFlow(runForNode.flowId, {
+                        type: 'node.progress',
+                        runId,
+                        nodeId,
+                        progress: 75,
+                        message: `${node.blockType} 결과 저장 중...`,
+                        timestamp: Date.now(),
+                    });
+                } catch {
+                    /* non-fatal */
+                }
+            }
 
             await runRepo.updateRunNodeStatus(runId, nodeId, 'COMPLETED', {
                 completedAt: new Date().toISOString(),

@@ -5,13 +5,67 @@ provider:
     runtime: nodejs20.x
     region: ap-northeast-2
     stage: ${opt:stage, 'local'}
+    iam:
+        role:
+            statements:
+                - Effect: Allow
+                  Action:
+                      - dynamodb:GetItem
+                      - dynamodb:PutItem
+                      - dynamodb:DeleteItem
+                      - dynamodb:Scan
+                      - dynamodb:Query
+                  Resource:
+                      - !GetAtt FlowsTable.Arn
+                      - !GetAtt ConnectionsTable.Arn
+                      - !GetAtt RunsTable.Arn
+                      - !GetAtt RunNodesTable.Arn
+                      - !GetAtt MessagesTable.Arn
+                      - !GetAtt ProposalsTable.Arn
+                      - !GetAtt TracesTable.Arn
+                      - !GetAtt AssetsTable.Arn
+                      - !GetAtt SettingsTable.Arn
+                      - !Join ['/', [!GetAtt RunsTable.Arn, 'index/*']]
+                      - !Join ['/', [!GetAtt MessagesTable.Arn, 'index/*']]
+                      - !Join ['/', [!GetAtt ProposalsTable.Arn, 'index/*']]
+                      - !Join ['/', [!GetAtt TracesTable.Arn, 'index/*']]
+                      - !Join ['/', [!GetAtt AssetsTable.Arn, 'index/*']]
+                - Effect: Allow
+                  Action:
+                      - kms:Encrypt
+                      - kms:Decrypt
+                  Resource: ${env:KMS_KEY_ARN, '*'}
+                # WebSocket API Gateway @connections endpoint.
+                # Required by ApiGatewayManagementApi.PostToConnectionCommand used in
+                # apps/backend/src/adapters/aws/websocket-api.ts (called from
+                # wsService.broadcastToFlow and the ws/default pong handler).
+                # Resource pattern covers all stages of the WebSocket API in the account.
+                - Effect: Allow
+                  Action:
+                      - execute-api:ManageConnections
+                  Resource:
+                      - arn:aws:execute-api:${self:provider.region}:*:*/${self:provider.stage}/POST/@connections/*
+                      - arn:aws:execute-api:${self:provider.region}:*:*/${self:provider.stage}/GET/@connections/*
+                      - arn:aws:execute-api:${self:provider.region}:*:*/${self:provider.stage}/DELETE/@connections/*
     environment:
         STAGE: ${self:provider.stage}
         DYNAMODB_ENDPOINT: ${env:DYNAMODB_ENDPOINT, ''}
         FLOWS_TABLE: ${self:service}-flows-${self:provider.stage}
         CONNECTIONS_TABLE: ${self:service}-connections-${self:provider.stage}
+        RUNS_TABLE: ${self:service}-runs-${self:provider.stage}
+        RUN_NODES_TABLE: ${self:service}-run-nodes-${self:provider.stage}
+        MESSAGES_TABLE: ${self:service}-messages-${self:provider.stage}
+        PROPOSALS_TABLE: ${self:service}-proposals-${self:provider.stage}
+        TRACES_TABLE: ${self:service}-traces-${self:provider.stage}
+        ASSETS_TABLE: ${self:service}-assets-${self:provider.stage}
+        SETTINGS_TABLE: ${self:service}-settings-${self:provider.stage}
+        KMS_KEY_ID: ${env:KMS_KEY_ID, ''}
         ORCHESTRATOR_MODE: ${env:ORCHESTRATOR_MODE, 'mock'}
         ANTHROPIC_API_KEY: ${env:ANTHROPIC_API_KEY, ''}
+        # WS callback endpoint — used by the HTTP process to broadcast via API GW Mgmt API.
+        # In prod, each WS handler re-inits wsClient from event.requestContext (see handlers/ws/default.ts).
+        # In local serverless-offline, the HTTP process never touches WS events, so we lazy-init from this env var.
+        WS_CALLBACK_ENDPOINT: ${env:WS_CALLBACK_ENDPOINT, 'http://localhost:8801'}
     httpApi:
         cors: true
 
@@ -541,6 +595,226 @@ functions:
                   path: '/_api_/settings/api-keys/{provider}/verify'
                   method: post
 
+    # ══════════════════════════════════════════════════════════════════════
+    # Product API — new REST endpoints (compat API above is preserved)
+    # ══════════════════════════════════════════════════════════════════════
+
+    # ── Product: Blocks ──
+    productBlockList:
+        handler: src/handlers/http/product-blocks/list-blocks.main
+        events:
+            - httpApi:
+                  path: /blocks
+                  method: get
+            - httpApi:
+                  path: /_apis/blocks
+                  method: get
+            - httpApi:
+                  path: /_api_/blocks
+                  method: get
+
+    productBlockGet:
+        handler: src/handlers/http/product-blocks/get-block.main
+        events:
+            - httpApi:
+                  path: '/blocks/{blockType}'
+                  method: get
+            - httpApi:
+                  path: '/_apis/blocks/{blockType}'
+                  method: get
+            - httpApi:
+                  path: '/_api_/blocks/{blockType}'
+                  method: get
+
+    # ── Product: Initial Data ──
+    productInitialData:
+        handler: src/handlers/http/product-initial/get-initial-data.main
+        events:
+            - httpApi:
+                  path: /initial-data
+                  method: get
+            - httpApi:
+                  path: /_apis/initial-data
+                  method: get
+            - httpApi:
+                  path: /_api_/initial-data
+                  method: get
+
+    # ── Product: Flows ──
+    productFlowCreate:
+        handler: src/handlers/http/product-flows/create-flow.main
+        events:
+            - httpApi:
+                  path: /flows
+                  method: post
+            - httpApi:
+                  path: /_apis/flows
+                  method: post
+            - httpApi:
+                  path: /_api_/flows
+                  method: post
+
+    productFlowList:
+        handler: src/handlers/http/product-flows/list-flows.main
+        events:
+            - httpApi:
+                  path: /flows
+                  method: get
+            - httpApi:
+                  path: /_apis/flows
+                  method: get
+            - httpApi:
+                  path: /_api_/flows
+                  method: get
+
+    productFlowGet:
+        handler: src/handlers/http/product-flows/get-flow.main
+        events:
+            - httpApi:
+                  path: '/flows/{flowId}'
+                  method: get
+            - httpApi:
+                  path: '/_apis/flows/{flowId}'
+                  method: get
+            - httpApi:
+                  path: '/_api_/flows/{flowId}'
+                  method: get
+
+    productFlowSave:
+        handler: src/handlers/http/product-flows/save-flow.main
+        events:
+            - httpApi:
+                  path: '/flows/{flowId}'
+                  method: put
+            - httpApi:
+                  path: '/_apis/flows/{flowId}'
+                  method: put
+            - httpApi:
+                  path: '/_api_/flows/{flowId}'
+                  method: put
+
+    productFlowDelete:
+        handler: src/handlers/http/product-flows/delete-flow.main
+        events:
+            - httpApi:
+                  path: '/flows/{flowId}'
+                  method: delete
+            - httpApi:
+                  path: '/_apis/flows/{flowId}'
+                  method: delete
+            - httpApi:
+                  path: '/_api_/flows/{flowId}'
+                  method: delete
+
+    productFlowDuplicate:
+        handler: src/handlers/http/product-flows/duplicate-flow.main
+        events:
+            - httpApi:
+                  path: '/flows/{flowId}/duplicate'
+                  method: post
+            - httpApi:
+                  path: '/_apis/flows/{flowId}/duplicate'
+                  method: post
+            - httpApi:
+                  path: '/_api_/flows/{flowId}/duplicate'
+                  method: post
+
+    productFlowArchive:
+        handler: src/handlers/http/product-flows/archive-flow.main
+        events:
+            - httpApi:
+                  path: '/flows/{flowId}/archive'
+                  method: post
+            - httpApi:
+                  path: '/_apis/flows/{flowId}/archive'
+                  method: post
+            - httpApi:
+                  path: '/_api_/flows/{flowId}/archive'
+                  method: post
+
+    productFlowUnarchive:
+        handler: src/handlers/http/product-flows/unarchive-flow.main
+        events:
+            - httpApi:
+                  path: '/flows/{flowId}/unarchive'
+                  method: post
+            - httpApi:
+                  path: '/_apis/flows/{flowId}/unarchive'
+                  method: post
+            - httpApi:
+                  path: '/_api_/flows/{flowId}/unarchive'
+                  method: post
+
+    # ── Product: Runs (single node) ──
+    productRunSingleNode:
+        handler: src/handlers/http/product-runs/start-single-node-run.main
+        events:
+            - httpApi:
+                  path: '/flows/{flowId}/nodes/{nodeId}/runs'
+                  method: post
+            - httpApi:
+                  path: '/_apis/flows/{flowId}/nodes/{nodeId}/runs'
+                  method: post
+            - httpApi:
+                  path: '/_api_/flows/{flowId}/nodes/{nodeId}/runs'
+                  method: post
+
+    # ── Product: Runs (global) ──
+    productRunListAll:
+        handler: src/handlers/http/product-runs/list-all-runs.main
+        events:
+            - httpApi:
+                  path: /runs
+                  method: get
+            - httpApi:
+                  path: /_apis/runs
+                  method: get
+            - httpApi:
+                  path: /_api_/runs
+                  method: get
+
+    # ── Product: Run Results ──
+    productRunResults:
+        handler: src/handlers/http/product-runs/get-run-results.main
+        events:
+            - httpApi:
+                  path: '/runs/{runId}/results'
+                  method: get
+            - httpApi:
+                  path: '/_apis/runs/{runId}/results'
+                  method: get
+            - httpApi:
+                  path: '/_api_/runs/{runId}/results'
+                  method: get
+
+    # ── Product: Export ──
+    productRunExport:
+        handler: src/handlers/http/product-runs/export-run.main
+        events:
+            - httpApi:
+                  path: '/runs/{runId}/export/{platform}'
+                  method: post
+            - httpApi:
+                  path: '/_apis/runs/{runId}/export/{platform}'
+                  method: post
+            - httpApi:
+                  path: '/_api_/runs/{runId}/export/{platform}'
+                  method: post
+
+    # ── Product: Traces (node-level) ──
+    productTraceListByNode:
+        handler: src/handlers/http/product-traces/list-node-traces.main
+        events:
+            - httpApi:
+                  path: '/runs/{runId}/nodes/{nodeId}/traces'
+                  method: get
+            - httpApi:
+                  path: '/_apis/runs/{runId}/nodes/{nodeId}/traces'
+                  method: get
+            - httpApi:
+                  path: '/_api_/runs/{runId}/nodes/{nodeId}/traces'
+                  method: get
+
     # ── Workers (future: SQS triggers) ──
     # runWorker:
     #     handler: src/workers/run-worker.main
@@ -592,3 +866,168 @@ resources:
                 TimeToLiveSpecification:
                     AttributeName: ttl
                     Enabled: true
+
+        RunsTable:
+            Type: AWS::DynamoDB::Table
+            Properties:
+                TableName: ${self:provider.environment.RUNS_TABLE}
+                BillingMode: PAY_PER_REQUEST
+                AttributeDefinitions:
+                    - AttributeName: runId
+                      AttributeType: S
+                    - AttributeName: flowId
+                      AttributeType: S
+                    - AttributeName: createdAt
+                      AttributeType: S
+                KeySchema:
+                    - AttributeName: runId
+                      KeyType: HASH
+                GlobalSecondaryIndexes:
+                    - IndexName: flowId-createdAt-index
+                      KeySchema:
+                          - AttributeName: flowId
+                            KeyType: HASH
+                          - AttributeName: createdAt
+                            KeyType: RANGE
+                      Projection:
+                          ProjectionType: ALL
+
+        RunNodesTable:
+            Type: AWS::DynamoDB::Table
+            Properties:
+                TableName: ${self:provider.environment.RUN_NODES_TABLE}
+                BillingMode: PAY_PER_REQUEST
+                AttributeDefinitions:
+                    - AttributeName: runId
+                      AttributeType: S
+                    - AttributeName: nodeId
+                      AttributeType: S
+                KeySchema:
+                    - AttributeName: runId
+                      KeyType: HASH
+                    - AttributeName: nodeId
+                      KeyType: RANGE
+
+        MessagesTable:
+            Type: AWS::DynamoDB::Table
+            Properties:
+                TableName: ${self:provider.environment.MESSAGES_TABLE}
+                BillingMode: PAY_PER_REQUEST
+                AttributeDefinitions:
+                    - AttributeName: messageId
+                      AttributeType: S
+                    - AttributeName: flowId
+                      AttributeType: S
+                    - AttributeName: createdAt
+                      AttributeType: S
+                KeySchema:
+                    - AttributeName: messageId
+                      KeyType: HASH
+                GlobalSecondaryIndexes:
+                    - IndexName: flowId-createdAt-index
+                      KeySchema:
+                          - AttributeName: flowId
+                            KeyType: HASH
+                          - AttributeName: createdAt
+                            KeyType: RANGE
+                      Projection:
+                          ProjectionType: ALL
+
+        ProposalsTable:
+            Type: AWS::DynamoDB::Table
+            Properties:
+                TableName: ${self:provider.environment.PROPOSALS_TABLE}
+                BillingMode: PAY_PER_REQUEST
+                AttributeDefinitions:
+                    - AttributeName: proposalId
+                      AttributeType: S
+                    - AttributeName: flowId
+                      AttributeType: S
+                    - AttributeName: createdAt
+                      AttributeType: S
+                KeySchema:
+                    - AttributeName: proposalId
+                      KeyType: HASH
+                GlobalSecondaryIndexes:
+                    - IndexName: flowId-createdAt-index
+                      KeySchema:
+                          - AttributeName: flowId
+                            KeyType: HASH
+                          - AttributeName: createdAt
+                            KeyType: RANGE
+                      Projection:
+                          ProjectionType: ALL
+
+        TracesTable:
+            Type: AWS::DynamoDB::Table
+            Properties:
+                TableName: ${self:provider.environment.TRACES_TABLE}
+                BillingMode: PAY_PER_REQUEST
+                AttributeDefinitions:
+                    - AttributeName: traceId
+                      AttributeType: S
+                    - AttributeName: runId
+                      AttributeType: S
+                    - AttributeName: occurredAt
+                      AttributeType: S
+                    - AttributeName: runNodeKey
+                      AttributeType: S
+                KeySchema:
+                    - AttributeName: traceId
+                      KeyType: HASH
+                GlobalSecondaryIndexes:
+                    - IndexName: runId-occurredAt-index
+                      KeySchema:
+                          - AttributeName: runId
+                            KeyType: HASH
+                          - AttributeName: occurredAt
+                            KeyType: RANGE
+                      Projection:
+                          ProjectionType: ALL
+                    # Sparse GSI: only traces with a non-null runNodeKey (runId#runNodeId)
+                    # appear here, enabling direct Query without FilterExpression.
+                    - IndexName: runNodeKey-occurredAt-index
+                      KeySchema:
+                          - AttributeName: runNodeKey
+                            KeyType: HASH
+                          - AttributeName: occurredAt
+                            KeyType: RANGE
+                      Projection:
+                          ProjectionType: ALL
+
+        AssetsTable:
+            Type: AWS::DynamoDB::Table
+            Properties:
+                TableName: ${self:provider.environment.ASSETS_TABLE}
+                BillingMode: PAY_PER_REQUEST
+                AttributeDefinitions:
+                    - AttributeName: assetId
+                      AttributeType: S
+                    - AttributeName: runId
+                      AttributeType: S
+                    - AttributeName: createdAt
+                      AttributeType: S
+                KeySchema:
+                    - AttributeName: assetId
+                      KeyType: HASH
+                GlobalSecondaryIndexes:
+                    - IndexName: runId-createdAt-index
+                      KeySchema:
+                          - AttributeName: runId
+                            KeyType: HASH
+                          - AttributeName: createdAt
+                            KeyType: RANGE
+                      Projection:
+                          ProjectionType: ALL
+
+        SettingsTable:
+            Type: AWS::DynamoDB::Table
+            Properties:
+                TableName: ${self:provider.environment.SETTINGS_TABLE}
+                BillingMode: PAY_PER_REQUEST
+                AttributeDefinitions:
+                    - AttributeName: provider
+                      AttributeType: S
+                KeySchema:
+                    - AttributeName: provider
+                      KeyType: HASH

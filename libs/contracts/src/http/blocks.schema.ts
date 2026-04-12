@@ -44,3 +44,52 @@ export const BlockListResponseSchema = z.object({
 
 export type BlockListItem = z.infer<typeof BlockListItemSchema>;
 export type BlockListResponse = z.infer<typeof BlockListResponseSchema>;
+
+// ============================================================================
+// Product API — GET /blocks/{blockType}
+// ============================================================================
+
+export const BlockGetParamsSchema = z.object({
+    blockType: z.string().min(1),
+});
+
+export const BlockGetResponseSchema = z.object({
+    blockType: z.string(),
+    name: z.string(),
+    description: z.string(),
+    category: z.string(),
+    configFields: z.array(z.record(z.unknown())),
+    inputSchema: z.record(z.unknown()),
+    outputSchema: z.record(z.unknown()),
+    estimatedCost: z.record(z.unknown()).optional(),
+});
+
+export type BlockGetResponse = z.infer<typeof BlockGetResponseSchema>;
+
+// ============================================================================
+// Product API — GET /blocks (catalog list)
+// Unlike compat GET /blocks/0/list which returns $definition format,
+// this returns product-shaped items: {blockType, name, description, category, ...}
+// ============================================================================
+
+export const ProductBlockListQuerySchema = z.object({
+    scenario: z.string().optional(), // default: 'admission-shorts'
+    category: z.string().optional(), // filter: search, content, media, data, analysis, integration
+});
+
+export const ProductBlockListItemSchema = z.object({
+    blockType: z.string(),
+    name: z.string(),
+    description: z.string(),
+    category: z.string(),
+    inputSchema: z.record(z.unknown()),
+    outputSchema: z.record(z.unknown()),
+    estimatedCost: z.record(z.unknown()).nullable().optional(),
+});
+
+export const ProductBlockListResponseSchema = z.object({
+    items: z.array(ProductBlockListItemSchema),
+});
+
+export type ProductBlockListItem = z.infer<typeof ProductBlockListItemSchema>;
+export type ProductBlockListResponse = z.infer<typeof ProductBlockListResponseSchema>;

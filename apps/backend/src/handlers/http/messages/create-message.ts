@@ -4,6 +4,7 @@ import { getOrchestrator } from '../../../modules/orchestrator';
 import { flowRepo } from '../../../repositories/flow-repository';
 import { messageRepo } from '../../../repositories/message-repository';
 import { proposalRepo } from '../../../repositories/proposal-repository';
+import { wsService } from '../../../services/websocket-service';
 import { generateNumericId } from '../../../utils/id-generator';
 import { getBody, getPathParam, withMiddleware } from '../../../utils/middleware';
 import { badRequest, created, notFound } from '../../../utils/response';
@@ -79,7 +80,20 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
     };
     await messageRepo.put(assistantMessage);
 
-    // 5. Return
+    // 5. Broadcast proposal.created via WebSocket (F-17)
+    try {
+        await wsService.broadcastToFlow(fid, {
+            type: 'proposal.created',
+            flowId: fid,
+            proposalId: proposal.proposalId,
+            estimatedCost: proposal.estimatedCost,
+            timestamp: Date.now(),
+        });
+    } catch {
+        /* non-fatal */
+    }
+
+    // 6. Return
     return created({
         message: userMessage,
         proposal: {

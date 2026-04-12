@@ -25,7 +25,8 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
 
     const result = await proposalService.approve(
         paramsParsed.data.proposalId,
-        bodyParsed.success ? bodyParsed.data.decisionNote : undefined
+        bodyParsed.success ? bodyParsed.data.decisionNote : undefined,
+        bodyParsed.success ? bodyParsed.data.layoutType : undefined
     );
 
     if (!result.ok) {

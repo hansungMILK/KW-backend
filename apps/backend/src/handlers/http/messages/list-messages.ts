@@ -18,7 +18,8 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
     if (!parsed.success) return badRequest('flowId is required');
 
     const limit = Number(getQueryParam(event, 'limit') || '50');
-    const result = await messageRepo.listByFlow(parsed.data.flowId, limit);
+    const cursor = getQueryParam(event, 'cursor');
+    const result = await messageRepo.listByFlow(parsed.data.flowId, limit, cursor);
 
     return ok({
         items: result.items,

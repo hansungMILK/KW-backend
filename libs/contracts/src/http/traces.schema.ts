@@ -24,8 +24,35 @@ export const TraceListParamsSchema = z.object({
     runId: z.string().min(1),
 });
 
+export const TraceListQuerySchema = z.object({
+    limit: z.coerce.number().int().min(1).max(1000).default(100),
+    cursor: z.string().optional(),
+});
+
 export const TraceListResponseSchema = z.object({
     items: z.array(TraceSchema),
+    nextCursor: z.string().nullable(),
 });
 
 export type TraceListResponse = z.infer<typeof TraceListResponseSchema>;
+
+// ============================================================================
+// Product API — GET /runs/{runId}/nodes/{nodeId}/traces
+// ============================================================================
+
+export const TraceListByNodeParamsSchema = z.object({
+    runId: z.string().min(1),
+    nodeId: z.string().min(1),
+});
+
+export const TraceListByNodeQuerySchema = z.object({
+    limit: z.coerce.number().int().min(1).max(500).default(50),
+    cursor: z.string().optional(),
+});
+
+export const TraceListByNodeResponseSchema = z.object({
+    items: z.array(TraceSchema),
+    nextCursor: z.string().nullable(),
+});
+
+export type TraceListByNodeResponse = z.infer<typeof TraceListByNodeResponseSchema>;
