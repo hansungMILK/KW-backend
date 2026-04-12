@@ -13,8 +13,13 @@ export const main = async (event: {
 }): Promise<APIGatewayProxyResult> => {
     const connectionId = event.requestContext.connectionId;
 
-    // Initialize the WS client from the event context
-    if (event.requestContext.domainName && event.requestContext.stage) {
+    // Initialize the WS client.
+    // Prefer WS_CALLBACK_ENDPOINT env var when set (local serverless-offline),
+    // otherwise build from event.requestContext (prod API Gateway).
+    const envEndpoint = process.env.WS_CALLBACK_ENDPOINT;
+    if (envEndpoint) {
+        initWsClient(envEndpoint);
+    } else if (event.requestContext.domainName && event.requestContext.stage) {
         const endpoint = `https://${event.requestContext.domainName}/${event.requestContext.stage}`;
         initWsClient(endpoint);
     }
@@ -32,8 +37,7 @@ export const main = async (event: {
         log.info(`WS ping from ${connectionId}`);
         try {
             await postToConnection(connectionId, {
-                action: 'pong',
-                ts: new Date().toISOString(),
+                type: 'pong',
             });
         } catch (err) {
             log.warn(`WS pong failed for ${connectionId}`, err);

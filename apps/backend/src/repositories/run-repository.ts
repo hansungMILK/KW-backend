@@ -1,12 +1,14 @@
-import { memDb } from '../adapters/aws/dynamodb';
+import { GetCommand, PutCommand, QueryCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
+
+import { TableNames, USE_REAL_DYNAMO, getDocClient, memDb } from '../adapters/aws/dynamodb';
 
 import type { Run, RunNode } from '@flows/contracts';
 
 type RunStatus = Run['status'];
 type RunNodeStatus = RunNode['status'];
 
-const RUNS_TABLE = 'runs';
-const RUN_NODES_TABLE = 'run-nodes';
+const RUNS_TABLE = USE_REAL_DYNAMO ? TableNames.runs : 'runs';
+const RUN_NODES_TABLE = USE_REAL_DYNAMO ? TableNames.runNodes : 'run-nodes';
 
 // ============================================================================
 // State transition validation
@@ -37,40 +39,157 @@ export const runRepo = {
     // ── Run CRUD ──────────────────────────────────────────────────────────────
 
     async putRun(run: Run): Promise<void> {
-        memDb.put(RUNS_TABLE, run.runId, run as unknown as Record<string, unknown>);
+        if (!USE_REAL_DYNAMO) {
+            memDb.put(RUNS_TABLE, run.runId, run as unknown as Record<string, unknown>);
+            return;
+        }
+        await getDocClient().send(new PutCommand({ TableName: RUNS_TABLE, Item: run }));
     },
 
     async getRun(runId: string): Promise<Run | null> {
-        return (memDb.get(RUNS_TABLE, runId) as unknown as Run) ?? null;
+        if (!USE_REAL_DYNAMO) {
+            return (memDb.get(RUNS_TABLE, runId) as unknown as Run) ?? null;
+        }
+        const result = await getDocClient().send(new GetCommand({ TableName: RUNS_TABLE, Key: { runId } }));
+        return (result.Item as Run) ?? null;
     },
 
-    async listByFlow(flowId: string): Promise<Run[]> {
-        const all = memDb.query(
-            RUNS_TABLE,
-            item => (item as { flowId?: string }).flowId === flowId
-        ) as unknown as Run[];
-        all.sort((a, b) => b.createdAt.localeCompare(a.createdAt)); // newest first
-        return all;
+    async listByFlow(
+        flowId: string,
+        limit?: number,
+        cursorToken?: string
+    ): Promise<{ items: Run[]; nextCursor: string | null }> {
+        if (!USE_REAL_DYNAMO) {
+            let all = memDb.query(
+                RUNS_TABLE,
+                item => (item as { flowId?: string }).flowId === flowId
+            ) as unknown as Run[];
+            all.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+            if (cursorToken) {
+                const idx = all.findIndex(r => r.runId === cursorToken);
+                if (idx >= 0) all = all.slice(idx + 1);
+            }
+            const maxItems = limit ?? 20;
+            const page = all.slice(0, maxItems + 1);
+            const hasMore = page.length > maxItems;
+            const items = hasMore ? page.slice(0, maxItems) : page;
+            return { items, nextCursor: hasMore ? items[items.length - 1].runId : null };
+        }
+
+        // DynamoDB: Query with GSI + native cursor
+        const exclusiveStartKey = cursorToken
+            ? JSON.parse(Buffer.from(cursorToken, 'base64').toString('utf-8'))
+            : undefined;
+        const result = await getDocClient().send(
+            new QueryCommand({
+                TableName: RUNS_TABLE,
+                IndexName: 'flowId-createdAt-index',
+                KeyConditionExpression: 'flowId = :fid',
+                ExpressionAttributeValues: { ':fid': flowId },
+                ScanIndexForward: false,
+                Limit: limit ?? 20,
+                ...(exclusiveStartKey ? { ExclusiveStartKey: exclusiveStartKey } : {}),
+            })
+        );
+        const items = (result.Items || []) as Run[];
+        const nextCursor = result.LastEvaluatedKey
+            ? Buffer.from(JSON.stringify(result.LastEvaluatedKey)).toString('base64')
+            : null;
+        return { items, nextCursor };
+    },
+
+    async scanAll(
+        filters?: { flowId?: string; status?: string },
+        limit?: number,
+        cursorToken?: string
+    ): Promise<{ items: Run[]; nextCursor: string | null }> {
+        if (!USE_REAL_DYNAMO) {
+            let all = memDb.scan(RUNS_TABLE) as unknown as Run[];
+            if (filters?.flowId) all = all.filter(r => r.flowId === filters.flowId);
+            if (filters?.status) all = all.filter(r => r.status === filters.status);
+            all.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+            if (cursorToken) {
+                const idx = all.findIndex(r => r.runId === cursorToken);
+                if (idx >= 0) all = all.slice(idx + 1);
+            }
+            const maxItems = limit ?? 20;
+            const page = all.slice(0, maxItems + 1);
+            const hasMore = page.length > maxItems;
+            const items = hasMore ? page.slice(0, maxItems) : page;
+            return { items, nextCursor: hasMore ? items[items.length - 1].runId : null };
+        }
+
+        // DynamoDB: If flowId filter → Query GSI, else Scan
+        if (filters?.flowId) {
+            return this.listByFlow(filters.flowId, limit, cursorToken);
+        }
+        const exclusiveStartKey = cursorToken
+            ? JSON.parse(Buffer.from(cursorToken, 'base64').toString('utf-8'))
+            : undefined;
+        const result = await getDocClient().send(
+            new ScanCommand({
+                TableName: RUNS_TABLE,
+                Limit: limit ?? 20,
+                ...(exclusiveStartKey ? { ExclusiveStartKey: exclusiveStartKey } : {}),
+                ...(filters?.status
+                    ? {
+                          FilterExpression: '#st = :status',
+                          ExpressionAttributeNames: { '#st': 'status' },
+                          ExpressionAttributeValues: { ':status': filters.status },
+                      }
+                    : {}),
+            })
+        );
+        const items = (result.Items || []) as Run[];
+        items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        const nextCursor = result.LastEvaluatedKey
+            ? Buffer.from(JSON.stringify(result.LastEvaluatedKey)).toString('base64')
+            : null;
+        return { items, nextCursor };
     },
 
     // ── RunNode CRUD ──────────────────────────────────────────────────────────
 
     async putRunNode(node: RunNode): Promise<void> {
-        const key = `${node.runId}#${node.nodeId}`;
-        memDb.put(RUN_NODES_TABLE, key, node as unknown as Record<string, unknown>);
+        if (!USE_REAL_DYNAMO) {
+            const key = `${node.runId}#${node.nodeId}`;
+            memDb.put(RUN_NODES_TABLE, key, node as unknown as Record<string, unknown>);
+            return;
+        }
+        await getDocClient().send(new PutCommand({ TableName: RUN_NODES_TABLE, Item: node }));
     },
 
     async getRunNode(runId: string, nodeId: string): Promise<RunNode | null> {
-        const key = `${runId}#${nodeId}`;
-        return (memDb.get(RUN_NODES_TABLE, key) as unknown as RunNode) ?? null;
+        if (!USE_REAL_DYNAMO) {
+            const key = `${runId}#${nodeId}`;
+            return (memDb.get(RUN_NODES_TABLE, key) as unknown as RunNode) ?? null;
+        }
+        const result = await getDocClient().send(
+            new GetCommand({
+                TableName: RUN_NODES_TABLE,
+                Key: { runId, nodeId },
+            })
+        );
+        return (result.Item as RunNode) ?? null;
     },
 
     async listRunNodes(runId: string): Promise<RunNode[]> {
-        const all = memDb.query(
-            RUN_NODES_TABLE,
-            item => (item as { runId?: string }).runId === runId
-        ) as unknown as RunNode[];
-        return all;
+        if (!USE_REAL_DYNAMO) {
+            const all = memDb.query(
+                RUN_NODES_TABLE,
+                item => (item as { runId?: string }).runId === runId
+            ) as unknown as RunNode[];
+            return all;
+        }
+        // DynamoDB: Query with PK=runId (composite key: runId + nodeId)
+        const result = await getDocClient().send(
+            new QueryCommand({
+                TableName: RUN_NODES_TABLE,
+                KeyConditionExpression: 'runId = :rid',
+                ExpressionAttributeValues: { ':rid': runId },
+            })
+        );
+        return (result.Items || []) as RunNode[];
     },
 
     // ── Conditional status updates ────────────────────────────────────────────

@@ -48,6 +48,8 @@ export const RunSchema = z.object({
     targetNodeId: z.string().nullable().optional(),
     status: RunStatusSchema,
     triggerSource: z.string(),
+    executionMode: z.enum(['full', 'step']).optional(),
+    notifyWebhook: z.string().nullable().optional(),
     flowSnapshot: z.object({
         nodes: z.array(z.record(z.unknown())),
         edges: z.array(z.record(z.unknown())),
@@ -70,6 +72,8 @@ export const RunCreateParamsSchema = z.object({
 
 export const RunCreateRequestSchema = z.object({
     triggerSource: z.string().default('MANUAL'),
+    executionMode: z.enum(['full', 'step']).default('full'),
+    notifyWebhook: z.string().url().optional(),
 });
 
 export const RunCreateResponseSchema = z.object({
@@ -103,6 +107,7 @@ export const RunListResponseSchema = z.object({
             createdAt: z.string(),
         })
     ),
+    nextCursor: z.string().nullable(),
 });
 
 export type RunListResponse = z.infer<typeof RunListResponseSchema>;
@@ -172,3 +177,31 @@ export const RunNodeRetryResponseSchema = z.object({
     nodeId: z.string(),
     retryAccepted: z.boolean(),
 });
+
+// ============================================================================
+// Product API — GET /runs (all runs, global)
+// ============================================================================
+
+export const RunListAllQuerySchema = z.object({
+    limit: z.coerce.number().int().min(1).max(100).default(20),
+    cursor: z.string().optional(),
+    flowId: z.string().optional(),
+    status: RunStatusSchema.optional(),
+});
+
+export const RunListAllResponseSchema = z.object({
+    items: z.array(
+        z.object({
+            runId: z.string(),
+            flowId: z.string(),
+            runType: RunTypeSchema,
+            status: RunStatusSchema,
+            startedAt: z.string().nullable().optional(),
+            completedAt: z.string().nullable().optional(),
+            createdAt: z.string(),
+        })
+    ),
+    nextCursor: z.string().nullable(),
+});
+
+export type RunListAllResponse = z.infer<typeof RunListAllResponseSchema>;

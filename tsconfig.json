@@ -25,6 +25,12 @@
         },
         {
             "path": "./libs/socket"
+        },
+        {
+            "path": "./libs/contracts"
+        },
+        {
+            "path": "./apps/backend"
         }
     ]
 }

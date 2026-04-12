@@ -13,8 +13,15 @@ type Handler = (event: APIGatewayProxyEvent) => Promise<APIGatewayProxyResult>;
  */
 export const withMiddleware = (handler: Handler): Handler => {
     return async event => {
-        const method = event.httpMethod || event.requestContext?.http?.method || '?';
-        const path = event.path || event.rawPath || '?';
+        // Support both API Gateway REST v1 (httpMethod/path) and HTTP v2
+        // (requestContext.http.method / rawPath). Narrow via a loose cast
+        // because aws-lambda's APIGatewayProxyEvent types only cover v1.
+        const v2 = event as unknown as {
+            requestContext?: { http?: { method?: string } };
+            rawPath?: string;
+        };
+        const method = event.httpMethod || v2.requestContext?.http?.method || '?';
+        const path = event.path || v2.rawPath || '?';
         log.info(`${method} ${path}`);
 
         try {
