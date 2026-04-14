@@ -276,6 +276,19 @@ functions:
                   method: get
 
     # ── Chat ──
+    chatAnalyze:
+        handler: src/handlers/http/chat/analyze-chat.main
+        events:
+            - httpApi:
+                  path: /chat/analyze
+                  method: post
+            - httpApi:
+                  path: /_apis/chat/analyze
+                  method: post
+            - httpApi:
+                  path: /_api_/chat/analyze
+                  method: post
+
     chatInit:
         handler: src/handlers/http/chat/init-chat.main
         events:
