@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { proposalRepo } from '../../../repositories/proposal-repository';
 import { proposalService } from '../../../services/proposal-service';
 import { getBody, getPathParam, withMiddleware } from '../../../utils/middleware';
 import { badRequest, conflict, notFound, ok } from '../../../utils/response';
@@ -20,7 +21,10 @@ const GenerateRequestSchema = z.object({
 });
 
 const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
-    const workflowId = getPathParam(event, 'workflowId') ?? '';
+    // #18: reject empty/missing path params before DB lookups
+    const workflowId = getPathParam(event, 'workflowId');
+    if (!workflowId) return badRequest('workflowId path parameter is required');
+
     const body = getBody<Record<string, unknown>>(event) ?? {};
 
     const parsed = GenerateRequestSchema.safeParse(body);
@@ -30,7 +34,16 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
 
     const { approvalId, layoutType } = parsed.data;
 
-    // approvalId maps to proposalId
+    // PRE-CHECK: verify workflowId matches proposal's flowId BEFORE mutating state.
+    // Without this, approve() would mutate the proposal and flow before we reject.
+    const proposal = await proposalRepo.get(approvalId);
+    if (!proposal) return notFound(`Approval ${approvalId} not found`);
+    if (proposal.flowId !== workflowId) {
+        // #17: do NOT leak the real flowId of the approval
+        return conflict('Approval does not belong to this workflow');
+    }
+
+    // Safe to mutate: approve proposal and apply layout
     const result = await proposalService.approve(approvalId, undefined, layoutType);
 
     if (!result.ok) {
@@ -40,11 +53,6 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
     }
 
     const { flow } = result.data;
-
-    // Verify workflowId matches proposal's flowId
-    if (flow.id !== workflowId) {
-        return conflict(`Workflow ${workflowId} does not match proposal's flow ${flow.id}`);
-    }
 
     return ok({
         generationResult: {
