@@ -7,7 +7,7 @@ export default [
     ...nx.configs['flat/typescript'],
     ...nx.configs['flat/javascript'],
     {
-        ignores: ['**/dist', '**/out-tsc', '**/vite.config.*.timestamp*'],
+        ignores: ['**/dist', '**/out-tsc', '**/vite.config.*.timestamp*', '**/.esbuild', '**/.local-db'],
     },
     {
         plugins: {

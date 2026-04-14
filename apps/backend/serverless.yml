@@ -275,6 +275,20 @@ functions:
                   path: /_api_/blocks/0/list
                   method: get
 
+    # ── Chat ──
+    chatInit:
+        handler: src/handlers/http/chat/init-chat.main
+        events:
+            - httpApi:
+                  path: '/flows/{flowId}/chat/init'
+                  method: get
+            - httpApi:
+                  path: '/_apis/flows/{flowId}/chat/init'
+                  method: get
+            - httpApi:
+                  path: '/_api_/flows/{flowId}/chat/init'
+                  method: get
+
     # ── Messages ──
     messageList:
         handler: src/handlers/http/messages/list-messages.main

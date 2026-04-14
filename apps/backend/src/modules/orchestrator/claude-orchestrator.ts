@@ -26,7 +26,11 @@ const COST_ESTIMATES: Record<string, number> = {
  * On failure: returns fallback error proposal with assistant error message.
  */
 export const claudeOrchestrator: Orchestrator = {
-    async generateProposal(flowId: string, userMessage: string): Promise<ProposalResult> {
+    async generateProposal(
+        flowId: string,
+        userMessage: string,
+        currentContext?: Record<string, unknown>
+    ): Promise<ProposalResult> {
         const startMs = Date.now();
 
         try {
@@ -34,7 +38,10 @@ export const claudeOrchestrator: Orchestrator = {
             const response = await claudeAdapter.chat({
                 model: MODEL,
                 systemPrompt: ORCHESTRATOR_SYSTEM_PROMPT,
-                userMessage: buildUserPrompt(userMessage),
+                userMessage: buildUserPrompt(
+                    userMessage,
+                    currentContext ? JSON.stringify(currentContext, null, 2) : undefined
+                ),
                 maxTokens: 2048,
                 temperature: 0.3,
             });
