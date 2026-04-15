@@ -82,6 +82,7 @@ export const ProposalApproveParamsSchema = z.object({
 
 export const ProposalApproveRequestSchema = z.object({
     decisionNote: z.string().optional(),
+    layoutType: z.enum(['vertical', 'horizontal', 'grid']).default('vertical'),
 });
 
 /**

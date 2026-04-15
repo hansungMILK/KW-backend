@@ -550,6 +550,68 @@ functions:
     #               batchSize: 1
     #               functionResponseType: ReportBatchItemFailures
 
+    # ── Workflows (#5 #6 #7) ──
+    workflowGenerate:
+        handler: src/handlers/http/workflows/generate.main
+        events:
+            - http:
+                  path: '/workflows/{workflowId}/generate'
+                  method: post
+                  cors: true
+            - http:
+                  path: '/_apis/workflows/{workflowId}/generate'
+                  method: post
+                  cors: true
+            - http:
+                  path: '/_api_/workflows/{workflowId}/generate'
+                  method: post
+                  cors: true
+
+    workflowExecute:
+        handler: src/handlers/http/workflows/execute.main
+        timeout: 60
+        events:
+            - http:
+                  path: '/workflows/{workflowId}/execute'
+                  method: post
+                  cors: true
+            - http:
+                  path: '/_apis/workflows/{workflowId}/execute'
+                  method: post
+                  cors: true
+            - http:
+                  path: '/_api_/workflows/{workflowId}/execute'
+                  method: post
+                  cors: true
+            - http:
+                  path: '/workflows/{workflowId}/execute'
+                  method: get
+                  cors: true
+            - http:
+                  path: '/_apis/workflows/{workflowId}/execute'
+                  method: get
+                  cors: true
+            - http:
+                  path: '/_api_/workflows/{workflowId}/execute'
+                  method: get
+                  cors: true
+
+    workflowResults:
+        handler: src/handlers/http/workflows/results.main
+        events:
+            - http:
+                  path: '/workflows/{workflowId}/executions/{executionId}/results'
+                  method: get
+                  cors: true
+            - http:
+                  path: '/_apis/workflows/{workflowId}/executions/{executionId}/results'
+                  method: get
+                  cors: true
+            - http:
+                  path: '/_api_/workflows/{workflowId}/executions/{executionId}/results'
+                  method: get
+                  cors: true
+
     # ── WebSocket ──
     wsConnect:
         handler: src/handlers/ws/connect.main

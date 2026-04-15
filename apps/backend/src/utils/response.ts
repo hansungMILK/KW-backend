@@ -20,14 +20,18 @@ export const noContent = (): APIGatewayProxyResult => ({ statusCode: 204, header
 export const badRequest = (message: string): APIGatewayProxyResult =>
     json(400, { status: 400, error: 'BAD_REQUEST', message });
 
-export const notFound = (message: string): APIGatewayProxyResult =>
-    json(404, { status: 404, error: 'NOT_FOUND', message });
+export const notFound = (message: string, errorCode?: string): APIGatewayProxyResult =>
+    json(404, { status: 404, error: errorCode ?? 'NOT_FOUND', message });
 
-export const conflict = (message: string): APIGatewayProxyResult =>
-    json(409, { status: 409, error: 'CONFLICT', message });
+export const conflict = (message: string, errorCode?: string): APIGatewayProxyResult =>
+    json(409, { status: 409, error: errorCode ?? 'CONFLICT', message });
 
 export const unprocessable = (message: string): APIGatewayProxyResult =>
     json(422, { status: 422, error: 'UNPROCESSABLE_ENTITY', message });
+
+/** 422 with structured body — for MISSING_API_KEYS etc. */
+export const unprocessableJson = (body: Record<string, unknown>): APIGatewayProxyResult =>
+    json(422, { status: 422, ...body });
 
 export const serverError = (message: string): APIGatewayProxyResult =>
     json(500, { status: 500, error: 'INTERNAL_SERVER_ERROR', message });

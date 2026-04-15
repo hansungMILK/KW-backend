@@ -5,6 +5,11 @@ import { log } from '../utils/logger';
 /**
  * WebSocket broadcast service.
  * Sends events to all connections subscribed to a flow's channel.
+ *
+ * Event format: events are sent directly as-is (e.g., {type: "run.started", runId, ...}).
+ * No wrapper envelope — the event itself is the message payload.
+ * This matches the product API spec: client receives raw typed events.
+ *
  * IMPORTANT: Failures must never throw or break the caller.
  */
 export const wsService = {
@@ -13,14 +18,9 @@ export const wsService = {
             const connections = await connectionRepo.listByChannel(flowId);
             for (const conn of connections) {
                 try {
-                    const success = await postToConnection(conn.connectionId, {
-                        action: 'message',
-                        data: event,
-                        channel: flowId,
-                        ts: new Date().toISOString(),
-                    });
+                    // Send event directly — no {action, data, channel} wrapper
+                    const success = await postToConnection(conn.connectionId, event);
                     if (!success) {
-                        // Stale connection — clean up silently
                         try {
                             await connectionRepo.delete(conn.connectionId);
                         } catch (cleanupErr) {

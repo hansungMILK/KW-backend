@@ -13,11 +13,18 @@ export const main = async (event: {
     queryStringParameters?: Record<string, string>;
 }): Promise<APIGatewayProxyResult> => {
     const connectionId = event.requestContext.connectionId;
+    // Support both 'flowId' (product API) and 'channels' (compat) query params
+    const flowIdParam = event.queryStringParameters?.flowId ?? '';
     const channelsParam = event.queryStringParameters?.channels ?? '';
     const channels = channelsParam
         .split(',')
         .map(c => c.trim())
         .filter(Boolean);
+
+    // If flowId is provided directly, add it to channels
+    if (flowIdParam && !channels.includes(flowIdParam)) {
+        channels.unshift(flowIdParam);
+    }
 
     // Use the first channel as the primary flowId (or empty string if none)
     const flowId = channels[0] ?? '';

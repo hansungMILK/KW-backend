@@ -37,9 +37,17 @@ export const maskKey = (raw: string): string => {
 };
 
 const getRawKey = (provider: ApiKeyProvider): string | null => {
-    // Priority: stored record > env var
-    const record = settingsRepo.getKey(provider);
-    if (record?.encryptedKey) return record.encryptedKey;
+    // Priority: stored record (decrypted) > env var — sync version for local
+    const decrypted = settingsRepo.getDecryptedKey(provider);
+    if (decrypted) return decrypted;
+
+    const envKey = process.env[ENV_MAP[provider]];
+    return envKey || null;
+};
+
+const getRawKeyAsync = async (provider: ApiKeyProvider): Promise<string | null> => {
+    const decrypted = await settingsRepo.getDecryptedKeyAsync(provider);
+    if (decrypted) return decrypted;
 
     const envKey = process.env[ENV_MAP[provider]];
     return envKey || null;
@@ -150,55 +158,58 @@ const VERIFY_FN: Record<ApiKeyProvider, (key: string) => Promise<{ valid: boolea
 export const settingsService = {
     /** Return masked info for all known providers */
     async getAll(): Promise<ApiKeyInfo[]> {
-        return API_KEY_PROVIDERS.map(provider => {
-            const record = settingsRepo.getKey(provider);
+        const results: ApiKeyInfo[] = [];
+        for (const provider of API_KEY_PROVIDERS) {
+            const record = await settingsRepo.getKeyAsync(provider);
             if (record) {
-                return {
+                results.push({
                     provider,
                     configured: true,
                     maskedKey: record.maskedKey,
                     status: record.status,
                     lastVerifiedAt: record.lastVerifiedAt,
-                };
+                });
+                continue;
             }
-            // Fall back to env var
             const envKey = process.env[ENV_MAP[provider]];
             if (envKey) {
-                return {
+                results.push({
                     provider,
                     configured: true,
                     maskedKey: maskKey(envKey),
                     status: 'unverified' as const,
                     lastVerifiedAt: null,
-                };
+                });
+                continue;
             }
-            return {
+            results.push({
                 provider,
                 configured: false,
                 maskedKey: null,
                 status: 'missing' as const,
                 lastVerifiedAt: null,
-            };
-        });
+            });
+        }
+        return results;
     },
 
     /** Store a new API key. Never log the raw key. */
     async putKey(provider: ApiKeyProvider, apiKey: string): Promise<void> {
         const masked = maskKey(apiKey);
         log.info(`settings: storing key for provider`, { provider, maskedKey: masked });
-        settingsRepo.putKey(provider, apiKey, masked);
+        await settingsRepo.putKey(provider, apiKey, masked);
     },
 
     /** Remove a stored key */
     async deleteKey(provider: ApiKeyProvider): Promise<void> {
         log.info(`settings: deleting key for provider`, { provider });
-        settingsRepo.deleteKey(provider);
+        await settingsRepo.deleteKey(provider);
     },
 
     /** Verify a key by making a real lightweight HTTP call to the provider */
     async verifyKey(provider: ApiKeyProvider): Promise<ApiKeyVerifyResponse> {
         const now = new Date().toISOString();
-        const rawKey = getRawKey(provider);
+        const rawKey = await getRawKeyAsync(provider);
 
         if (!rawKey) {
             return { provider, valid: false, status: 'missing', checkedAt: now, message: 'No API key configured' };
@@ -219,9 +230,9 @@ export const settingsService = {
         const newStatus = result.valid ? 'active' : 'invalid';
 
         // Only update stored record if one exists (don't store env-only keys)
-        const stored = settingsRepo.getKey(provider);
+        const stored = await settingsRepo.getKeyAsync(provider);
         if (stored) {
-            settingsRepo.updateStatus(provider, newStatus, now);
+            await settingsRepo.updateStatus(provider, newStatus, now);
         }
 
         log.info(`settings: verify result`, { provider, valid: result.valid, status: newStatus });
@@ -235,8 +246,13 @@ export const settingsService = {
         };
     },
 
-    /** Get raw key for internal adapter use. Priority: stored > env. */
+    /** Get raw key for internal adapter use (sync, local only). */
     getKeyForProvider(provider: ApiKeyProvider): string | null {
         return getRawKey(provider);
+    },
+
+    /** Get raw key — async version that reads from DynamoDB in prod. */
+    async getKeyForProviderAsync(provider: ApiKeyProvider): Promise<string | null> {
+        return getRawKeyAsync(provider);
     },
 };

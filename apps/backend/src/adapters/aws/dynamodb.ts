@@ -90,6 +90,13 @@ export const memDb = {
 export const TableNames = {
     flows: env.flowsTable,
     connections: env.connectionsTable,
+    runs: env.runsTable,
+    runNodes: env.runNodesTable,
+    messages: env.messagesTable,
+    proposals: env.proposalsTable,
+    traces: env.tracesTable,
+    assets: env.assetsTable,
+    settings: env.settingsTable,
 } as const;
 
 export { USE_REAL_DYNAMO };
