@@ -29,6 +29,8 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
     const bodyParsed = MessageCreateRequestSchema.safeParse(body);
     if (!bodyParsed.success) return badRequest('content is required');
 
+    const currentContext = bodyParsed.data.currentContext;
+
     // Verify flow exists
     const flow = await flowRepo.get(paramsParsed.data.flowId);
     if (!flow) return notFound(`Flow ${flowId} not found`);
@@ -49,7 +51,7 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
 
     // 2. Generate proposal (mock or claude, based on ORCHESTRATOR_MODE env)
     const orchestrator = await getOrchestrator();
-    const result = await orchestrator.generateProposal(fid, bodyParsed.data.content);
+    const result = await orchestrator.generateProposal(fid, bodyParsed.data.content, currentContext);
 
     // 3. Save proposal
     const proposalId = generateNumericId();

@@ -61,6 +61,8 @@ export const MessageCreateParamsSchema = z.object({
 
 export const MessageCreateRequestSchema = z.object({
     content: z.string().min(1),
+    // Optional: existing canvas nodes/edges to give orchestrator context
+    currentContext: z.record(z.unknown()).optional(),
 });
 
 /**

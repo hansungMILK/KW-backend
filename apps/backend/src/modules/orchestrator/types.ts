@@ -15,5 +15,9 @@ export interface ProposalResult {
 }
 
 export interface Orchestrator {
-    generateProposal(flowId: string, userMessage: string): Promise<ProposalResult>;
+    generateProposal(
+        flowId: string,
+        userMessage: string,
+        currentContext?: Record<string, unknown>
+    ): Promise<ProposalResult>;
 }

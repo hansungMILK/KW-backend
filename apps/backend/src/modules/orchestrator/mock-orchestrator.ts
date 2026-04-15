@@ -30,7 +30,11 @@ const COST_PER_BLOCK: Record<string, number> = {
 };
 
 export const mockOrchestrator: Orchestrator = {
-    async generateProposal(_flowId: string, _userMessage: string): Promise<ProposalResult> {
+    async generateProposal(
+        _flowId: string,
+        _userMessage: string,
+        _currentContext?: Record<string, unknown>
+    ): Promise<ProposalResult> {
         // Generate 8 nodes in a vertical layout
         const nodes = SHORTS_BLOCKS.map((block, i) => ({
             id: generateNumericId(),
