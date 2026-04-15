@@ -13,11 +13,23 @@ import { z } from 'zod';
 export const BlockListQuerySchema = z.object({
     cores: z.string().optional(), // "1"
     limit: z.string().optional(), // "-1"
+    category: z.string().optional(), // 특정 카테고리 필터
 });
 
 /**
- * Single block item in list response.
- * The frontend checks `$definition.label` to filter valid blocks.
+ * 신규 표준 블록 규격
+ */
+export const BlockSchema = z.object({
+    id: z.string(),
+    name: z.string(),
+    description: z.string(),
+    input: z.record(z.unknown()), // { [key: string]: type_name }
+    output: z.record(z.unknown()), // { [key: string]: type_name }
+    category: z.string().optional(),
+});
+
+/**
+ * 기존 블록 아이템 규격 (하위 호환성 유지용)
  */
 export const BlockListItemSchema = z
     .object({
@@ -39,8 +51,15 @@ export const BlockListItemSchema = z
     .passthrough();
 
 export const BlockListResponseSchema = z.object({
-    list: z.array(BlockListItemSchema),
+    blocks: z.array(BlockSchema).optional(), // 신규 규격
+    list: z.array(BlockListItemSchema).optional(), // 기존 규격
 });
 
+export const BlockCategoryListResponseSchema = z.object({
+    categories: z.array(z.string()),
+});
+
+export type Block = z.infer<typeof BlockSchema>;
 export type BlockListItem = z.infer<typeof BlockListItemSchema>;
 export type BlockListResponse = z.infer<typeof BlockListResponseSchema>;
+export type BlockCategoryListResponse = z.infer<typeof BlockCategoryListResponseSchema>;

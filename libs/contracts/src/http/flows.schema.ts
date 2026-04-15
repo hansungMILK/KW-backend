@@ -118,5 +118,23 @@ export const FlowUpdateMetaResponseSchema = z.object({
     updatedAt: z.string().optional(),
 });
 
+/**
+ * 워크플로우 대시보드 조회를 위한 요약 정보
+ */
+export const FlowSummarySchema = z.object({
+    id: z.string(),
+    name: z.string(),
+    description: z.string().optional(),
+    state: z.string(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+});
+
+export const FlowListResponseSchema = z.object({
+    flows: z.array(FlowSummarySchema),
+});
+
 export type FlowUpdateMetaRequest = z.infer<typeof FlowUpdateMetaRequestSchema>;
 export type FlowUpdateMetaResponse = z.infer<typeof FlowUpdateMetaResponseSchema>;
+export type FlowSummary = z.infer<typeof FlowSummarySchema>;
+export type FlowListResponse = z.infer<typeof FlowListResponseSchema>;

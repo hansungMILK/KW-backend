@@ -266,6 +266,9 @@ functions:
         handler: src/handlers/http/blocks/list-blocks.main
         events:
             - httpApi:
+                  path: /blocks
+                  method: get
+            - httpApi:
                   path: /blocks/0/list
                   method: get
             - httpApi:
@@ -273,6 +276,33 @@ functions:
                   method: get
             - httpApi:
                   path: /_api_/blocks/0/list
+                  method: get
+
+    getBlockCategories:
+        handler: src/handlers/http/blocks/get-categories.main
+        events:
+            - httpApi:
+                  path: /blocks/categories
+                  method: get
+
+    getBlock:
+        handler: src/handlers/http/blocks/get-block.main
+        events:
+            - httpApi:
+                  path: '/blocks/{id}'
+                  method: get
+
+    flowList:
+        handler: src/handlers/http/flows/list-flows.main
+        events:
+            - httpApi:
+                  path: /flows
+                  method: get
+            - httpApi:
+                  path: /_apis/flows
+                  method: get
+            - httpApi:
+                  path: /_api_/flows
                   method: get
 
     # ── Chat ──
