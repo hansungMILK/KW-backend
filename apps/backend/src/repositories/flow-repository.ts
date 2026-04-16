@@ -51,6 +51,17 @@ const normalizeRecord = (record: FlowRecord): FlowRecord => ({
 // Repository — auto-selects DynamoDB or in-memory based on environment
 // ============================================================================
 
+export interface ListFlowsOptions {
+    limit?: number;
+    ownerId?: string;
+    nextToken?: string;
+}
+
+export interface ListFlowsResult {
+    items: FlowRecord[];
+    nextToken?: string;
+}
+
 export const flowRepo = {
     async get(id: string): Promise<FlowRecord | null> {
         let record: FlowRecord | null;
@@ -82,6 +93,54 @@ export const flowRepo = {
             items = (result.Items || []) as FlowRecord[];
         }
         return items.map(normalizeRecord);
+    },
+
+    async list(options: ListFlowsOptions = {}): Promise<ListFlowsResult> {
+        const limit = options.limit && options.limit > 0 ? options.limit : 50;
+
+        let items: FlowRecord[];
+        let nextToken: string | undefined;
+
+        if (!USE_REAL_DYNAMO) {
+            let all = memDb.scan(TABLE) as unknown as FlowRecord[];
+            if (options.ownerId) {
+                all = all.filter(f => f.ownerId === options.ownerId);
+            }
+
+            let startIndex = 0;
+            if (options.nextToken) {
+                // In mock we just find the item after the token
+                const idx = all.findIndex(f => f.id === options.nextToken);
+                if (idx !== -1) startIndex = idx;
+            }
+
+            const paged = all.slice(startIndex, startIndex + limit);
+            items = paged;
+
+            if (startIndex + limit < all.length) {
+                nextToken = all[startIndex + limit]?.id;
+            }
+        } else {
+            const params: any = {
+                TableName: TABLE,
+                Limit: limit,
+            };
+            if (options.ownerId) {
+                params.FilterExpression = 'ownerId = :ownerId';
+                params.ExpressionAttributeValues = { ':ownerId': options.ownerId };
+            }
+            if (options.nextToken) {
+                params.ExclusiveStartKey = { id: options.nextToken };
+            }
+
+            const result = await getDocClient().send(new ScanCommand(params));
+            items = (result.Items || []) as FlowRecord[];
+            if (result.LastEvaluatedKey?.id) {
+                nextToken = result.LastEvaluatedKey.id;
+            }
+        }
+
+        return { items: items.map(normalizeRecord), nextToken };
     },
 
     async save(id: string, nodes: unknown[], edges: unknown[]): Promise<FlowRecord> {

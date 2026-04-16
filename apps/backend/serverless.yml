@@ -284,12 +284,24 @@ functions:
             - httpApi:
                   path: /blocks/categories
                   method: get
+            - httpApi:
+                  path: /_apis/blocks/categories
+                  method: get
+            - httpApi:
+                  path: /_api_/blocks/categories
+                  method: get
 
     getBlock:
         handler: src/handlers/http/blocks/get-block.main
         events:
             - httpApi:
                   path: '/blocks/{id}'
+                  method: get
+            - httpApi:
+                  path: '/_apis/blocks/{id}'
+                  method: get
+            - httpApi:
+                  path: '/_api_/blocks/{id}'
                   method: get
 
     flowList:

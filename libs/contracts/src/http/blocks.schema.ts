@@ -51,7 +51,7 @@ export const BlockListItemSchema = z
     .passthrough();
 
 export const BlockListResponseSchema = z.object({
-    blocks: z.array(BlockSchema).optional(), // 신규 규격
+    blocks: z.array(BlockSchema), // 신규 규격
     list: z.array(BlockListItemSchema).optional(), // 기존 규격
 });
 

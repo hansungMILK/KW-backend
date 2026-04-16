@@ -7,13 +7,18 @@ import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 /**
  * GET /flows
  *
- * 저장된 모든 워크플로우 목록을 반환합니다.
+ * 저장된 워크플로우 목록을 반환합니다 (pagination 지원).
  */
-const handler = async (_event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
-    const flows = await flowRepo.scan();
+const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
+    const limitParams = parseInt(event.queryStringParameters?.limit || '50', 10);
+    const limit = isNaN(limitParams) ? 50 : Math.min(limitParams, 100);
+    const nextToken = event.queryStringParameters?.nextToken;
+    const ownerId = event.queryStringParameters?.ownerId;
+
+    const result = await flowRepo.list({ limit, nextToken, ownerId });
 
     // 요약 정보 형식으로 매핑
-    const summary = flows.map(f => ({
+    const summary = result.items.map(f => ({
         id: f.id,
         name: f.name || 'Untitled Flow',
         description: f.description,
@@ -24,6 +29,7 @@ const handler = async (_event: APIGatewayProxyEvent): Promise<APIGatewayProxyRes
 
     return ok({
         flows: summary,
+        nextToken: result.nextToken,
     });
 };
 

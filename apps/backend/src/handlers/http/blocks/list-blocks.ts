@@ -77,6 +77,36 @@ export const BLOCK_CATALOG: BlockDef[] = [
         isRunnable: true,
         category: 'Utility',
     },
+    {
+        $definition: {
+            id: 'blk-buffer-delay',
+            type: 'buffer-delay',
+            label: 'Delay',
+            description: 'Add delay between blocks',
+            inputs: [{ id: 'in', label: 'Input', type: 'any' }],
+            outputs: [{ id: 'out', label: 'Output', type: 'any' }],
+            configSchema: [{ key: 'delayMs', label: 'Delay (ms)', type: 'number', default: '1000' }],
+        },
+        isFrontend: 1,
+        stereo: 'process',
+        isRunnable: true,
+        category: 'Utility',
+    },
+    {
+        $definition: {
+            id: 'blk-text-transform',
+            type: 'text-transform',
+            label: 'Text Transform',
+            description: 'Transform text',
+            inputs: [{ id: 'in', label: 'Input', type: 'text' }],
+            outputs: [{ id: 'out', label: 'Output', type: 'text' }],
+            configSchema: [{ key: 'mode', label: 'Mode', type: 'text', default: 'uppercase' }],
+        },
+        isFrontend: 1,
+        stereo: 'process',
+        isRunnable: true,
+        category: 'Utility',
+    },
     // ── Backend (Search Agent) ──
     {
         $definition: {
@@ -109,6 +139,37 @@ export const BLOCK_CATALOG: BlockDef[] = [
         isRunnable: true,
         category: 'Content',
     },
+    // ── Backend (Data & Analysis) ──
+    {
+        $definition: {
+            id: 'blk-data',
+            type: 'data',
+            label: '데이터 정규화',
+            description: '씬별 프롬프트 구조화 (Data Agent)',
+            inputs: [{ id: 'in', label: 'Script', type: 'json' }],
+            outputs: [{ id: 'out', label: 'Normalized', type: 'json' }],
+            configSchema: [],
+        },
+        isFrontend: 0,
+        stereo: 'process',
+        isRunnable: true,
+        category: 'Data',
+    },
+    {
+        $definition: {
+            id: 'blk-analysis',
+            type: 'analysis',
+            label: '품질 검수',
+            description: '안전성/품질 검증 (Analysis Agent)',
+            inputs: [{ id: 'in', label: 'Data', type: 'json' }],
+            outputs: [{ id: 'out', label: 'Result', type: 'json' }],
+            configSchema: [],
+        },
+        isFrontend: 0,
+        stereo: 'process',
+        isRunnable: true,
+        category: 'Analysis',
+    },
     // ── Backend (Media Agent) ──
     {
         $definition: {
@@ -118,6 +179,21 @@ export const BLOCK_CATALOG: BlockDef[] = [
             description: '이미지 생성 및 에셋 관리',
             inputs: [{ id: 'in', label: 'Prompts', type: 'json' }],
             outputs: [{ id: 'out', label: 'Images', type: 'json' }],
+            configSchema: [],
+        },
+        isFrontend: 0,
+        stereo: 'process',
+        isRunnable: true,
+        category: 'Media',
+    },
+    {
+        $definition: {
+            id: 'blk-media-tts',
+            type: 'media-tts',
+            label: '음성 생성',
+            description: 'TTS 음성 합성 (Media Agent)',
+            inputs: [{ id: 'in', label: 'Script', type: 'json' }],
+            outputs: [{ id: 'out', label: 'Audio', type: 'json' }],
             configSchema: [],
         },
         isFrontend: 0,
@@ -139,6 +215,22 @@ export const BLOCK_CATALOG: BlockDef[] = [
         stereo: 'process',
         isRunnable: true,
         category: 'Media',
+    },
+    // ── Backend (Integration Agent) ──
+    {
+        $definition: {
+            id: 'blk-integration',
+            type: 'integration',
+            label: '메타데이터 생성',
+            description: 'SEO 메타 + CloudFront URL (Integration Agent)',
+            inputs: [{ id: 'in', label: 'Video', type: 'json' }],
+            outputs: [{ id: 'out', label: 'Final', type: 'json' }],
+            configSchema: [],
+        },
+        isFrontend: 0,
+        stereo: 'output',
+        isRunnable: true,
+        category: 'Integration',
     },
 ];
 
