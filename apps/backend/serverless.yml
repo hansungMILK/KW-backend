@@ -396,6 +396,32 @@ functions:
                   path: '/_api_/flows/{flowId}/runs'
                   method: post
 
+    runStartSingleNode:
+        handler: src/handlers/http/runs/start-single-node-run.main
+        events:
+            - httpApi:
+                  path: '/flows/{flowId}/nodes/{nodeId}/runs'
+                  method: post
+            - httpApi:
+                  path: '/_apis/flows/{flowId}/nodes/{nodeId}/runs'
+                  method: post
+            - httpApi:
+                  path: '/_api_/flows/{flowId}/nodes/{nodeId}/runs'
+                  method: post
+
+    runListAll:
+        handler: src/handlers/http/runs/list-all-runs.main
+        events:
+            - httpApi:
+                  path: /runs
+                  method: get
+            - httpApi:
+                  path: /_apis/runs
+                  method: get
+            - httpApi:
+                  path: /_api_/runs
+                  method: get
+
     runList:
         handler: src/handlers/http/runs/list-runs.main
         events:
@@ -486,6 +512,19 @@ functions:
                   method: get
             - httpApi:
                   path: '/_api_/runs/{runId}/traces'
+                  method: get
+
+    traceListByNode:
+        handler: src/handlers/http/traces/list-node-traces.main
+        events:
+            - httpApi:
+                  path: '/runs/{runId}/nodes/{nodeId}/traces'
+                  method: get
+            - httpApi:
+                  path: '/_apis/runs/{runId}/nodes/{nodeId}/traces'
+                  method: get
+            - httpApi:
+                  path: '/_api_/runs/{runId}/nodes/{nodeId}/traces'
                   method: get
 
     # ── Assets ──
