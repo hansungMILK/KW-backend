@@ -51,7 +51,7 @@ interface WorkflowStateWithPorts extends WorkflowState {
 }
 
 export interface WorkflowCanvasRef {
-    addNode: (type: string) => void;
+    addNode: (type: string, customLabel?: string) => void;
     getWorkflow: () => WorkflowState;
     /** Load workflow from server data. Fetches missing port data (data: null) via API. */
     loadWorkflow: (state: WorkflowStateWithPorts) => Promise<void>;
@@ -431,7 +431,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
         useImperativeHandle(
             ref,
             () => ({
-                addNode: (type: string) => {
+                addNode: (type: string, customLabel?: string) => {
                     if (readOnly) return;
                     saveCheckpoint();
 
@@ -505,6 +505,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                         inputData: {},
                         outputData: {},
                         autoExecutionEnabled: true,
+                        ...(customLabel ? { customLabel } : {}),
                     };
 
                     // Generate temp edge ID if connection will be created
@@ -569,6 +570,8 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     if (newConnection) {
                         setConnections(prev => [...prev, newConnection]);
                     }
+                    // Auto-select newly added node to open DetailPanel
+                    setSelectedNodeIds(new Set([tempNodeId]));
 
                     // Store connection info for later edge creation
                     const connectionToCreate = newConnection;
@@ -581,6 +584,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                             position: { x: snappedX, y: snappedY },
                             config: { ...blockRegistry[type].defaultConfig },
                             autoExecutionEnabled: true,
+                            ...(customLabel ? { customLabel } : {}),
                         },
                         (oldTempId, newServerId) => {
                             replaceNodeIdInState(oldTempId, newServerId, setNodes, setConnections, setSelectedNodeIds);
@@ -2391,6 +2395,23 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                             onReset={handleResetView}
                             className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 hidden sm:flex"
                         />
+                    )}
+
+                    {/* Connection type legend */}
+                    {!readOnly && (
+                        <div className="absolute bottom-4 left-4 z-20 hidden sm:flex flex-col gap-1 bg-background/80 backdrop-blur-sm border border-border/50 rounded-lg px-3 py-2 pointer-events-none">
+                            {[
+                                { label: '텍스트', color: 'bg-port-text' },
+                                { label: '이미지', color: 'bg-port-image' },
+                                { label: '음성', color: 'bg-port-json' },
+                                { label: '영상', color: 'bg-destructive' },
+                            ].map(({ label, color }) => (
+                                <div key={label} className="flex items-center gap-1.5">
+                                    <span className={`w-2 h-2 rounded-full ${color}`} />
+                                    <span className="text-[10px] text-muted-foreground">{label}</span>
+                                </div>
+                            ))}
+                        </div>
                     )}
 
                     {/* Mobile Zoom Controls - visible only on mobile */}
