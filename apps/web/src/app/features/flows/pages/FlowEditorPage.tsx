@@ -8,6 +8,7 @@ import { useWebCoreStore } from '@flows/web-core';
 
 // [추가] Flow Agent 채팅 패널 컴포넌트 import
 // - 원본에는 없던 컴포넌트로, 우측에 열리는 AI 채팅 패널을 담당합니다.
+import { AssetPreviewPanel } from '../components/AssetPreviewPanel';
 import { FlowAgentPanel } from '../components/FlowAgentPanel';
 import { Header } from '../components/Header';
 import { HelpDialog } from '../components/HelpDialog';
@@ -17,7 +18,7 @@ import { WorkflowCanvas } from '../components/WorkflowCanvas';
 import type { HelpTab } from '../components/help';
 import type { SidebarRef } from '../components/Sidebar';
 import type { WorkflowCanvasRef } from '../components/WorkflowCanvas';
-import type { NodeUpdateInfo, PortUpdateInfo, ProposalCreatedMessage } from '@flows/socket';
+import type { AssetCreatedMessage, NodeUpdateInfo, PortUpdateInfo, ProposalCreatedMessage } from '@flows/socket';
 
 const serializeWorkflowState = (data: { nodes?: unknown[]; connections?: unknown[]; edges?: unknown[] }): string =>
     JSON.stringify({ nodes: data.nodes ?? [], connections: data.connections ?? data.edges ?? [] });
@@ -299,10 +300,23 @@ export const FlowEditorPage = () => {
             setLatestProposal(msg);
             setIsAgentOpen(true);
         },
-        onRunStarted: () => showNotification(t('flowEditor.processing'), 'success'),
-        onRunCompleted: () => showNotification('실행 완료', 'success'),
-        onRunFailed: msg => showNotification(`실행 실패${msg.error ? `: ${msg.error}` : ''}`, 'error'),
-        onAssetCreated: msg => showNotification(`결과물 생성 완료 (ID: ${msg.assetId})`, 'success'),
+        onRunStarted: () => {
+            setRunStatus('running');
+            setRunFailedError(null);
+            if (runStatusTimerRef.current) window.clearTimeout(runStatusTimerRef.current);
+        },
+        onRunCompleted: () => {
+            setRunStatus('completed');
+            runStatusTimerRef.current = window.setTimeout(() => setRunStatus(null), 4000);
+        },
+        onRunFailed: msg => {
+            setRunStatus('failed');
+            setRunFailedError(msg.error ?? null);
+            if (msg.failedNodeId) {
+                canvasRef.current?.updateNodeFromServer(msg.failedNodeId, { status: 'ERROR' });
+            }
+        },
+        onAssetCreated: msg => setLatestAsset(msg),
     });
 
     const [isAppReady, setIsAppReady] = useState(false);
@@ -315,6 +329,10 @@ export const FlowEditorPage = () => {
     // - false: 패널이 닫히고 우측 하단에 채팅 버튼이 표시됨
     const [isAgentOpen, setIsAgentOpen] = useState(false);
     const [latestProposal, setLatestProposal] = useState<ProposalCreatedMessage | null>(null);
+    const [runStatus, setRunStatus] = useState<'running' | 'completed' | 'failed' | null>(null);
+    const [runFailedError, setRunFailedError] = useState<string | null>(null);
+    const [latestAsset, setLatestAsset] = useState<AssetCreatedMessage | null>(null);
+    const runStatusTimerRef = useRef<number | null>(null);
     const [helpDialogTab, setHelpDialogTab] = useState<HelpTab>('gettingStarted');
     const [agentBtnPos, setAgentBtnPos] = useState<{ x: number; y: number } | null>(null);
     const agentBtnDragRef = useRef<{ mouseX: number; mouseY: number; btnX: number; btnY: number } | null>(null);
@@ -840,6 +858,37 @@ export const FlowEditorPage = () => {
                     </svg>
                 </button>
             )}
+
+            {/* Run status banner */}
+            {runStatus && (
+                <div
+                    className={`absolute top-16 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-full shadow-lg text-sm font-medium animate-in slide-in-from-top-2 fade-in z-50 backdrop-blur-sm ${
+                        runStatus === 'running'
+                            ? 'bg-status-running/20 text-status-running border border-status-running/30'
+                            : runStatus === 'completed'
+                              ? 'bg-status-completed/20 text-status-completed border border-status-completed/30'
+                              : 'bg-destructive/20 text-destructive border border-destructive/30'
+                    }`}
+                >
+                    {runStatus === 'running' && (
+                        <span className="w-2 h-2 rounded-full bg-status-running animate-pulse" />
+                    )}
+                    {runStatus === 'running' && '실행 중...'}
+                    {runStatus === 'completed' && '✓ 실행 완료'}
+                    {runStatus === 'failed' && `실행 실패${runFailedError ? `: ${runFailedError}` : ''}`}
+                    {runStatus !== 'running' && (
+                        <button
+                            onClick={() => setRunStatus(null)}
+                            className="ml-1 opacity-60 hover:opacity-100 transition-opacity text-xs"
+                        >
+                            ✕
+                        </button>
+                    )}
+                </div>
+            )}
+
+            {/* Asset preview panel */}
+            {latestAsset && <AssetPreviewPanel asset={latestAsset} onClose={() => setLatestAsset(null)} />}
 
             {/* Notification Toast */}
             {notification && (
