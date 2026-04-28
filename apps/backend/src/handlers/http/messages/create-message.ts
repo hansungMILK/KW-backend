@@ -4,6 +4,7 @@ import { getOrchestrator } from '../../../modules/orchestrator';
 import { flowRepo } from '../../../repositories/flow-repository';
 import { messageRepo } from '../../../repositories/message-repository';
 import { proposalRepo } from '../../../repositories/proposal-repository';
+import { wsService } from '../../../services/websocket-service';
 import { generateNumericId } from '../../../utils/id-generator';
 import { getBody, getPathParam, withMiddleware } from '../../../utils/middleware';
 import { badRequest, created, notFound } from '../../../utils/response';
@@ -68,6 +69,17 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
         updatedAt: now,
     };
     await proposalRepo.put(proposal);
+
+    // 3-1. Broadcast proposal.created via WebSocket (non-blocking)
+    void wsService.broadcastToFlow(fid, {
+        type: 'proposal.created',
+        proposalId,
+        flowId: fid,
+        status: 'PENDING',
+        estimatedCost: proposal.estimatedCost,
+        approvalRequired: proposal.approvalRequired,
+        timestamp: Date.now(),
+    });
 
     // 4. Save ASSISTANT message
     const assistantMessage: Message = {
