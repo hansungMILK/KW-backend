@@ -17,7 +17,7 @@ import { WorkflowCanvas } from '../components/WorkflowCanvas';
 import type { HelpTab } from '../components/help';
 import type { SidebarRef } from '../components/Sidebar';
 import type { WorkflowCanvasRef } from '../components/WorkflowCanvas';
-import type { NodeUpdateInfo, PortUpdateInfo } from '@flows/socket';
+import type { NodeUpdateInfo, PortUpdateInfo, ProposalCreatedMessage } from '@flows/socket';
 
 const serializeWorkflowState = (data: { nodes?: unknown[]; connections?: unknown[]; edges?: unknown[] }): string =>
     JSON.stringify({ nodes: data.nodes ?? [], connections: data.connections ?? data.edges ?? [] });
@@ -295,6 +295,14 @@ export const FlowEditorPage = () => {
         onFlowUpdate: handleFlowUpdate,
         onNodeReload: handleNodeUpdate,
         onPortUpdate: handlePortUpdate,
+        onProposalCreated: msg => {
+            setLatestProposal(msg);
+            setIsAgentOpen(true);
+        },
+        onRunStarted: () => showNotification(t('flowEditor.processing'), 'success'),
+        onRunCompleted: () => showNotification('실행 완료', 'success'),
+        onRunFailed: msg => showNotification(`실행 실패${msg.error ? `: ${msg.error}` : ''}`, 'error'),
+        onAssetCreated: msg => showNotification(`결과물 생성 완료 (ID: ${msg.assetId})`, 'success'),
     });
 
     const [isAppReady, setIsAppReady] = useState(false);
@@ -306,6 +314,7 @@ export const FlowEditorPage = () => {
     // - true: 우측에 채팅 패널이 열림
     // - false: 패널이 닫히고 우측 하단에 채팅 버튼이 표시됨
     const [isAgentOpen, setIsAgentOpen] = useState(false);
+    const [latestProposal, setLatestProposal] = useState<ProposalCreatedMessage | null>(null);
     const [helpDialogTab, setHelpDialogTab] = useState<HelpTab>('gettingStarted');
     const [agentBtnPos, setAgentBtnPos] = useState<{ x: number; y: number } | null>(null);
     const agentBtnDragRef = useRef<{ mouseX: number; mouseY: number; btnX: number; btnY: number } | null>(null);
@@ -509,6 +518,23 @@ export const FlowEditorPage = () => {
     const handleAddNode = useCallback((type: string, customLabel?: string) => {
         canvasRef.current?.addNode(type, customLabel);
     }, []);
+
+    const handleApproveProposal = useCallback(
+        async (nodes: unknown[], edges: unknown[]) => {
+            if (!canvasRef.current || (!nodes.length && !edges.length)) return;
+            try {
+                await canvasRef.current.loadWorkflow({ nodes, edges } as Parameters<
+                    WorkflowCanvasRef['loadWorkflow']
+                >[0]);
+                lastSavedStateRef.current = null;
+                showNotification('캔버스에 블록이 배치되었습니다.', 'success');
+                triggerAutoSave();
+            } catch {
+                showNotification('캔버스 업데이트 실패', 'error');
+            }
+        },
+        [triggerAutoSave]
+    );
 
     const handleSelectionChange = (nodeId: string | null) => {
         updateUrl(currentFlowId, nodeId);
@@ -744,7 +770,13 @@ export const FlowEditorPage = () => {
              * - open: 패널 열림 여부 전달
              * - onClose: X 버튼 클릭 시 패널을 닫는 함수 전달
              */}
-            <FlowAgentPanel open={isAgentOpen} onClose={() => setIsAgentOpen(false)} />
+            <FlowAgentPanel
+                open={isAgentOpen}
+                onClose={() => setIsAgentOpen(false)}
+                flowId={currentFlowId}
+                onApproveProposal={handleApproveProposal}
+                externalProposal={latestProposal}
+            />
 
             {/*
              * [추가] Flow Agent 실행 버튼 (채팅 버튼)

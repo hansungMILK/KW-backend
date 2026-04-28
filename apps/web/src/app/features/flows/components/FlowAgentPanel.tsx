@@ -2,63 +2,30 @@ import { useEffect, useRef, useState } from 'react';
 
 import { Send, X } from 'lucide-react';
 
-interface BlockSuggestion {
-    count: number;
-    blocks: string[];
-    estimatedCost: string;
-}
+import { approveProposal, sendFlowMessage } from '@flows/flows';
+
+import type { MessageProposal } from '@flows/flows';
+import type { ProposalCreatedMessage } from '@flows/socket';
 
 interface Message {
     id: string;
     role: 'user' | 'agent';
     text?: string;
     thinking?: boolean;
-    suggestion?: BlockSuggestion;
+    proposal?: MessageProposal;
 }
 
 interface FlowAgentPanelProps {
     open: boolean;
     onClose: () => void;
-    onCreateBlocks?: (blocks: string[]) => void;
+    flowId: string | null;
+    /** Called after proposal approved — passes nodes/edges to place on canvas */
+    onApproveProposal?: (nodes: unknown[], edges: unknown[]) => void;
+    /** Externally pushed proposal.created WS event */
+    externalProposal?: ProposalCreatedMessage | null;
 }
 
-const MOCK_RESPONSES: Record<string, { reply: string; suggestion?: BlockSuggestion }> = {
-    default: {
-        reply: '워크플로우를 구성하는 데 도움을 드릴게요. 어떤 결과물을 만들고 싶으신가요?',
-    },
-};
-
-const getMockResponse = (input: string): { reply: string; suggestion?: BlockSuggestion } => {
-    const lower = input.toLowerCase();
-    if (lower.includes('쇼츠') || lower.includes('영상') || lower.includes('동영상')) {
-        return {
-            reply: '해당 영상을 워크플로우를 이용하여 제작할게요.',
-            suggestion: {
-                count: 6,
-                blocks: [
-                    '트렌드 분석 → 스크립트 생성',
-                    '→ 이미지 생성 + 음성 생성',
-                    '→ 콘텐츠 다운로드',
-                    '→ 다운로드 결과',
-                ],
-                estimatedCost: '1,300원',
-            },
-        };
-    }
-    if (lower.includes('이미지') || lower.includes('그림')) {
-        return {
-            reply: '이미지 생성 워크플로우를 구성할게요.',
-            suggestion: {
-                count: 3,
-                blocks: ['트렌드 분석 → 이미지 생성', '→ 콘텐츠 다운로드'],
-                estimatedCost: '500원',
-            },
-        };
-    }
-    return MOCK_RESPONSES.default;
-};
-
-export const FlowAgentPanel = ({ open, onClose, onCreateBlocks }: FlowAgentPanelProps) => {
+export const FlowAgentPanel = ({ open, onClose, flowId, onApproveProposal, externalProposal }: FlowAgentPanelProps) => {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [isThinking, setIsThinking] = useState(false);
@@ -73,43 +40,68 @@ export const FlowAgentPanel = ({ open, onClose, onCreateBlocks }: FlowAgentPanel
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
-    const sendMessage = () => {
+    // Handle externally pushed proposal.created WS event
+    useEffect(() => {
+        if (!externalProposal) return;
+        const proposal: MessageProposal = {
+            id: externalProposal.proposalId,
+            blocks: externalProposal.blocks ?? [],
+            estimatedCost: externalProposal.estimatedCost,
+            description: externalProposal.description,
+        };
+        setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'agent', proposal }]);
+    }, [externalProposal]);
+
+    const sendMessage = async () => {
         const text = input.trim();
-        if (!text || isThinking) return;
+        if (!text || isThinking || !flowId) return;
 
         const userMsg: Message = { id: crypto.randomUUID(), role: 'user', text };
         setMessages(prev => [...prev, userMsg]);
         setInput('');
         setIsThinking(true);
 
-        // thinking indicator
         const thinkingMsg: Message = { id: crypto.randomUUID(), role: 'agent', thinking: true };
         setMessages(prev => [...prev, thinkingMsg]);
 
-        setTimeout(() => {
-            const { reply, suggestion } = getMockResponse(text);
+        try {
+            const response = await sendFlowMessage(flowId, { content: text });
+
             setMessages(prev => {
                 const withoutThinking = prev.filter(m => !m.thinking);
-                const replyMsg: Message = { id: crypto.randomUUID(), role: 'agent', text: reply };
-                const msgs = [...withoutThinking, replyMsg];
-                if (suggestion) {
-                    const suggestionMsg: Message = {
-                        id: crypto.randomUUID(),
-                        role: 'agent',
-                        suggestion,
-                    };
-                    msgs.push(suggestionMsg);
+                const msgs: Message[] = [
+                    ...withoutThinking,
+                    { id: crypto.randomUUID(), role: 'agent', text: response.content },
+                ];
+                if (response.proposal) {
+                    msgs.push({ id: crypto.randomUUID(), role: 'agent', proposal: response.proposal });
                 }
                 return msgs;
             });
+        } catch {
+            setMessages(prev => [
+                ...prev.filter(m => !m.thinking),
+                { id: crypto.randomUUID(), role: 'agent', text: '오류가 발생했습니다. 다시 시도해주세요.' },
+            ]);
+        } finally {
             setIsThinking(false);
-        }, 1200);
+        }
+    };
+
+    const handleApprove = async (proposal: MessageProposal) => {
+        try {
+            const result = await approveProposal(proposal.id);
+            onApproveProposal?.(result.nodes, result.edges);
+            setMessages(prev => prev.filter(m => m.proposal?.id !== proposal.id));
+        } catch {
+            // keep proposal card visible on error
+        }
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            sendMessage();
+            void sendMessage();
         }
     };
 
@@ -144,34 +136,39 @@ export const FlowAgentPanel = ({ open, onClose, onCreateBlocks }: FlowAgentPanel
                         );
                     }
 
-                    if (msg.suggestion) {
-                        const { count, blocks, estimatedCost } = msg.suggestion;
+                    if (msg.proposal) {
+                        const { blocks, estimatedCost, description } = msg.proposal;
                         return (
                             <div key={msg.id} className="flex items-start gap-2">
                                 <div className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center shrink-0 mt-0.5">
                                     <div className="w-2 h-2 rounded-full bg-primary" />
                                 </div>
                                 <div className="bg-muted rounded-lg px-3 py-3 text-[12px] text-foreground flex flex-col gap-2 w-full">
-                                    <div className="font-semibold">{count}개 블록 생성</div>
+                                    <div className="font-semibold">{blocks.length}개 블록 생성</div>
+                                    {description && (
+                                        <div className="text-muted-foreground leading-relaxed">{description}</div>
+                                    )}
                                     <div className="text-muted-foreground leading-relaxed">
                                         {blocks.map((b, i) => (
-                                            <div key={i}>{b}</div>
+                                            <div key={i}>{b.label}</div>
                                         ))}
                                     </div>
-                                    <div className="text-muted-foreground">
-                                        예상 비용 : {estimatedCost}
-                                        <br />
-                                        생성 하시겠습니까?
-                                    </div>
+                                    {estimatedCost && (
+                                        <div className="text-muted-foreground">
+                                            예상 비용 : {estimatedCost}
+                                            <br />
+                                            생성 하시겠습니까?
+                                        </div>
+                                    )}
                                     <div className="flex gap-2 mt-1">
                                         <button
-                                            className="flex-1 text-[11px] py-1.5 rounded-md bg-muted-foreground/10 hover:bg-muted-foreground/20 text-foreground transition-colors border border-border"
-                                            onClick={() => onCreateBlocks?.(blocks)}
+                                            className="flex-1 text-[11px] py-1.5 rounded-md bg-foreground text-background hover:bg-foreground/80 transition-colors"
+                                            onClick={() => void handleApprove(msg.proposal!)}
                                         >
-                                            블록 나열
+                                            승인
                                         </button>
                                         <button
-                                            className="flex-1 text-[11px] py-1.5 rounded-md bg-foreground text-background hover:bg-foreground/80 transition-colors"
+                                            className="flex-1 text-[11px] py-1.5 rounded-md bg-muted-foreground/10 hover:bg-muted-foreground/20 text-foreground transition-colors border border-border"
                                             onClick={() => setMessages(prev => prev.filter(m => m.id !== msg.id))}
                                         >
                                             cancel
@@ -220,8 +217,8 @@ export const FlowAgentPanel = ({ open, onClose, onCreateBlocks }: FlowAgentPanel
                         style={{ maxHeight: '80px' }}
                     />
                     <button
-                        onClick={sendMessage}
-                        disabled={!input.trim() || isThinking}
+                        onClick={() => void sendMessage()}
+                        disabled={!input.trim() || isThinking || !flowId}
                         className="w-6 h-6 rounded-full bg-foreground flex items-center justify-center shrink-0 disabled:opacity-30 transition-opacity"
                     >
                         <Send className="w-3 h-3 text-background" />
