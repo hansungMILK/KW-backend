@@ -144,6 +144,18 @@ export const WsAssetCreatedSchema = z.object({
     timestamp: z.number(),
 });
 
+export const WsProposalCreatedSchema = z.object({
+    type: z.literal('proposal.created'),
+    proposalId: z.string(),
+    flowId: z.string(),
+    status: z.literal('PENDING'),
+    estimatedCost: z.number().optional(),
+    approvalRequired: z.boolean(),
+    timestamp: z.number(),
+});
+
+export type WsProposalCreated = z.infer<typeof WsProposalCreatedSchema>;
+
 export type WsRunStarted = z.infer<typeof WsRunStartedSchema>;
 export type WsRunCompleted = z.infer<typeof WsRunCompletedSchema>;
 export type WsRunFailed = z.infer<typeof WsRunFailedSchema>;
@@ -169,6 +181,7 @@ export const WsDataEventSchema = z.discriminatedUnion('type', [
     WsNodeCompletedSchema,
     WsNodeFailedSchema,
     WsAssetCreatedSchema,
+    WsProposalCreatedSchema,
 ]);
 
 export type WsDataEvent = z.infer<typeof WsDataEventSchema>;
