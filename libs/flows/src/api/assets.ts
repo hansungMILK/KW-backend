@@ -1,4 +1,6 @@
-// TODO: import api from '@flows/web-core' when backend is ready
+import { api } from '@flows/web-core';
+
+// TODO: remove mock when backend is fully ready for getAsset
 const _log = console.log.bind(console, '[assets-api]');
 
 export type AssetType = 'image' | 'audio' | 'video' | 'file';
@@ -18,8 +20,7 @@ export interface AssetView {
  * GET /assets/{assetId}
  *
  * TODO: backend not ready — replace mock with real call:
- * const response = await api.get<AssetView>(`/assets/${assetId}`);
- * return response.data;
+ * return (await api.get<AssetView>(`/assets/${assetId}`)).data;
  */
 export const getAsset = async (assetId: string): Promise<AssetView> => {
     _log(`> getAsset(${assetId})`);
@@ -30,4 +31,14 @@ export const getAsset = async (assetId: string): Promise<AssetView> => {
         name: assetId,
         createdAt: Date.now(),
     });
+};
+
+/**
+ * Get all assets for a run
+ * GET /runs/{runId}/assets
+ */
+export const getRunAssets = async (runId: string): Promise<AssetView[]> => {
+    _log(`> getRunAssets(${runId})`);
+    const response = await api.get<AssetView[]>(`/runs/${runId}/assets`);
+    return response.data;
 };
