@@ -11,8 +11,21 @@ import { log } from '../../utils/logger';
 // Schema for Claude's expected output
 // ============================================================================
 
+export const ALLOWED_BLOCK_TYPES = [
+    'search',
+    'content',
+    'media-image',
+    'media-tts',
+    'data',
+    'analysis',
+    'media-video',
+    'integration',
+] as const;
+
+export type AllowedBlockType = (typeof ALLOWED_BLOCK_TYPES)[number];
+
 const BlockSchema = z.object({
-    type: z.string(),
+    type: z.enum(ALLOWED_BLOCK_TYPES),
     label: z.string(),
     config: z.record(z.unknown()).optional().default({}),
 });
