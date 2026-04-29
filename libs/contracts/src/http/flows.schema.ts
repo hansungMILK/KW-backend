@@ -120,3 +120,85 @@ export const FlowUpdateMetaResponseSchema = z.object({
 
 export type FlowUpdateMetaRequest = z.infer<typeof FlowUpdateMetaRequestSchema>;
 export type FlowUpdateMetaResponse = z.infer<typeof FlowUpdateMetaResponseSchema>;
+
+// ============================================================================
+// FlowStatus  (spec)
+// Canonical uppercase values used across spec endpoints.
+// ============================================================================
+
+export const FlowStatusSchema = z.enum(['DRAFT', 'READY', 'ARCHIVED']);
+export type FlowStatus = z.infer<typeof FlowStatusSchema>;
+
+// ============================================================================
+// POST /flows  (spec)
+// Body: { title (required), description?, scenario? }
+// 201 → FlowSummary, status: DRAFT
+// ============================================================================
+
+export const FlowCreateRequestSchema = z.object({
+    title: z.string().min(1),
+    description: z.string().optional(),
+    scenario: z.string().optional(),
+});
+
+export const FlowSummarySchema = z.object({
+    flowId: z.string(),
+    title: z.string(),
+    description: z.string().optional(),
+    status: FlowStatusSchema,
+    createdAt: z.string(),
+    updatedAt: z.string(),
+});
+
+export type FlowCreateRequest = z.infer<typeof FlowCreateRequestSchema>;
+export type FlowSummary = z.infer<typeof FlowSummarySchema>;
+
+// ============================================================================
+// GET /flows  (spec)
+// Query: limit, cursor, status
+// Returns: { items: FlowSummary[], nextCursor?: string }
+// ============================================================================
+
+export const FlowListQuerySchema = z.object({
+    limit: z.string().optional(),
+    cursor: z.string().optional(),
+    status: FlowStatusSchema.optional(),
+});
+
+export const FlowListResponseSchema = z.object({
+    items: z.array(FlowSummarySchema),
+    nextCursor: z.string().optional(),
+});
+
+export type FlowListQuery = z.infer<typeof FlowListQuerySchema>;
+export type FlowListResponse = z.infer<typeof FlowListResponseSchema>;
+
+// ============================================================================
+// GET /flows/{flowId}  (spec)
+// Returns: FlowDetail (summary + nodes/edges + latestProposalId/lastRunId join)
+// latestProposalId/lastRunId join is owned by 강연경/민경욱 — surfaced as null in P1.
+// ============================================================================
+
+export const FlowDetailResponseSchema = FlowSummarySchema.extend({
+    nodes: z.array(z.record(z.unknown())),
+    edges: z.array(z.record(z.unknown())),
+    latestProposalId: z.string().nullable().optional(),
+    lastRunId: z.string().nullable().optional(),
+});
+
+export type FlowDetailResponse = z.infer<typeof FlowDetailResponseSchema>;
+
+// ============================================================================
+// PUT /flows/{flowId}  (spec) — unified canvas save
+// Body: { title?, description?, nodes, edges }
+// Auto status transition: DRAFT → READY when nodes.length >= 1
+// ============================================================================
+
+export const FlowPutRequestSchema = z.object({
+    title: z.string().optional(),
+    description: z.string().optional(),
+    nodes: z.array(z.record(z.unknown())),
+    edges: z.array(z.record(z.unknown())),
+});
+
+export type FlowPutRequest = z.infer<typeof FlowPutRequestSchema>;
