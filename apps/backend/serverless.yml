@@ -10,10 +10,63 @@ provider:
         DYNAMODB_ENDPOINT: ${env:DYNAMODB_ENDPOINT, ''}
         FLOWS_TABLE: ${self:service}-flows-${self:provider.stage}
         CONNECTIONS_TABLE: ${self:service}-connections-${self:provider.stage}
+        MESSAGES_TABLE: ${self:service}-messages-${self:provider.stage}
+        PROPOSALS_TABLE: ${self:service}-proposals-${self:provider.stage}
+        RUNS_TABLE: ${self:service}-runs-${self:provider.stage}
+        RUN_NODES_TABLE: ${self:service}-run-nodes-${self:provider.stage}
+        TRACES_TABLE: ${self:service}-traces-${self:provider.stage}
+        ASSETS_TABLE: ${self:service}-assets-${self:provider.stage}
+        SETTINGS_TABLE: ${self:service}-settings-${self:provider.stage}
+        KMS_KEY_ID: !If [IsLocalStage, '', !Ref SettingsKmsKey]
         ORCHESTRATOR_MODE: ${env:ORCHESTRATOR_MODE, 'mock'}
         ANTHROPIC_API_KEY: ${env:ANTHROPIC_API_KEY, ''}
     httpApi:
         cors: true
+    iam:
+        role:
+            statements:
+                # DynamoDB CRUD on all 9 tables + their GSIs
+                - Effect: Allow
+                  Action:
+                      - dynamodb:GetItem
+                      - dynamodb:PutItem
+                      - dynamodb:UpdateItem
+                      - dynamodb:DeleteItem
+                      - dynamodb:Query
+                      - dynamodb:Scan
+                      - dynamodb:BatchGetItem
+                      - dynamodb:BatchWriteItem
+                  Resource:
+                      - !GetAtt FlowsTable.Arn
+                      - !GetAtt ConnectionsTable.Arn
+                      - !GetAtt MessagesTable.Arn
+                      - !Sub '${MessagesTable.Arn}/index/*'
+                      - !GetAtt ProposalsTable.Arn
+                      - !Sub '${ProposalsTable.Arn}/index/*'
+                      - !GetAtt RunsTable.Arn
+                      - !Sub '${RunsTable.Arn}/index/*'
+                      - !GetAtt RunNodesTable.Arn
+                      - !GetAtt TracesTable.Arn
+                      - !Sub '${TracesTable.Arn}/index/*'
+                      - !GetAtt AssetsTable.Arn
+                      - !Sub '${AssetsTable.Arn}/index/*'
+                      - !GetAtt SettingsTable.Arn
+                # KMS for Settings (real stages only — Local stage skips KMS via base64 fallback)
+                - Effect: Allow
+                  Action:
+                      - kms:Encrypt
+                      - kms:Decrypt
+                      - kms:GenerateDataKey
+                  Resource:
+                      !If [
+                          IsLocalStage,
+                          !Sub 'arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/_dummy_',
+                          !GetAtt SettingsKmsKey.Arn,
+                      ]
+                # WebSocket — POST to @connections/* (used by execution-engine push notifications)
+                - Effect: Allow
+                  Action: execute-api:ManageConnections
+                  Resource: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:*/*/POST/@connections/*'
 
 plugins:
     - serverless-esbuild
@@ -101,6 +154,59 @@ functions:
                   method: post
             - httpApi:
                   path: '/_api_/flows/{id}'
+                  method: post
+
+    # ── Flows P2: lifecycle ──
+    flowDelete:
+        handler: src/handlers/http/flows/delete-flow.main
+        events:
+            - httpApi:
+                  path: '/flows/{flowId}'
+                  method: delete
+            - httpApi:
+                  path: '/_apis/flows/{flowId}'
+                  method: delete
+            - httpApi:
+                  path: '/_api_/flows/{flowId}'
+                  method: delete
+
+    flowArchive:
+        handler: src/handlers/http/flows/archive-flow.main
+        events:
+            - httpApi:
+                  path: '/flows/{flowId}/archive'
+                  method: post
+            - httpApi:
+                  path: '/_apis/flows/{flowId}/archive'
+                  method: post
+            - httpApi:
+                  path: '/_api_/flows/{flowId}/archive'
+                  method: post
+
+    flowUnarchive:
+        handler: src/handlers/http/flows/unarchive-flow.main
+        events:
+            - httpApi:
+                  path: '/flows/{flowId}/unarchive'
+                  method: post
+            - httpApi:
+                  path: '/_apis/flows/{flowId}/unarchive'
+                  method: post
+            - httpApi:
+                  path: '/_api_/flows/{flowId}/unarchive'
+                  method: post
+
+    flowDuplicate:
+        handler: src/handlers/http/flows/duplicate-flow.main
+        events:
+            - httpApi:
+                  path: '/flows/{flowId}/duplicate'
+                  method: post
+            - httpApi:
+                  path: '/_apis/flows/{flowId}/duplicate'
+                  method: post
+            - httpApi:
+                  path: '/_api_/flows/{flowId}/duplicate'
                   method: post
 
     # ── Nodes ──
@@ -654,6 +760,14 @@ functions:
             - websocket: $default
 
 resources:
+    Conditions:
+        # Local stage uses memDb (file-based) and KMS base64 fallback — skip KMS resource creation.
+        IsLocalStage:
+            Fn::Equals: ['${self:provider.stage}', 'local']
+        IsRealStage:
+            Fn::Not:
+                - Fn::Equals: ['${self:provider.stage}', 'local']
+
     Resources:
         FlowsTable:
             Type: AWS::DynamoDB::Table
@@ -681,3 +795,198 @@ resources:
                 TimeToLiveSpecification:
                     AttributeName: ttl
                     Enabled: true
+
+        # ── Messages (PK=messageId, GSI=flowId+createdAt for listByFlow) ──
+        MessagesTable:
+            Type: AWS::DynamoDB::Table
+            Properties:
+                TableName: ${self:provider.environment.MESSAGES_TABLE}
+                BillingMode: PAY_PER_REQUEST
+                AttributeDefinitions:
+                    - AttributeName: messageId
+                      AttributeType: S
+                    - AttributeName: flowId
+                      AttributeType: S
+                    - AttributeName: createdAt
+                      AttributeType: S
+                KeySchema:
+                    - AttributeName: messageId
+                      KeyType: HASH
+                GlobalSecondaryIndexes:
+                    - IndexName: flowId-createdAt-index
+                      KeySchema:
+                          - AttributeName: flowId
+                            KeyType: HASH
+                          - AttributeName: createdAt
+                            KeyType: RANGE
+                      Projection:
+                          ProjectionType: ALL
+
+        # ── Proposals (PK=proposalId, GSI=flowId+createdAt) ──
+        ProposalsTable:
+            Type: AWS::DynamoDB::Table
+            Properties:
+                TableName: ${self:provider.environment.PROPOSALS_TABLE}
+                BillingMode: PAY_PER_REQUEST
+                AttributeDefinitions:
+                    - AttributeName: proposalId
+                      AttributeType: S
+                    - AttributeName: flowId
+                      AttributeType: S
+                    - AttributeName: createdAt
+                      AttributeType: S
+                KeySchema:
+                    - AttributeName: proposalId
+                      KeyType: HASH
+                GlobalSecondaryIndexes:
+                    - IndexName: flowId-createdAt-index
+                      KeySchema:
+                          - AttributeName: flowId
+                            KeyType: HASH
+                          - AttributeName: createdAt
+                            KeyType: RANGE
+                      Projection:
+                          ProjectionType: ALL
+
+        # ── Runs (PK=runId, GSI=flowId+createdAt) ──
+        # NOTE: 감사표 비고는 startedAt 이지만 run-repository.ts 코드는 createdAt 사용 → 코드에 맞춤.
+        RunsTable:
+            Type: AWS::DynamoDB::Table
+            Properties:
+                TableName: ${self:provider.environment.RUNS_TABLE}
+                BillingMode: PAY_PER_REQUEST
+                AttributeDefinitions:
+                    - AttributeName: runId
+                      AttributeType: S
+                    - AttributeName: flowId
+                      AttributeType: S
+                    - AttributeName: createdAt
+                      AttributeType: S
+                KeySchema:
+                    - AttributeName: runId
+                      KeyType: HASH
+                GlobalSecondaryIndexes:
+                    - IndexName: flowId-createdAt-index
+                      KeySchema:
+                          - AttributeName: flowId
+                            KeyType: HASH
+                          - AttributeName: createdAt
+                            KeyType: RANGE
+                      Projection:
+                          ProjectionType: ALL
+
+        # ── RunNodes (composite PK=runId + SK=nodeId) ──
+        RunNodesTable:
+            Type: AWS::DynamoDB::Table
+            Properties:
+                TableName: ${self:provider.environment.RUN_NODES_TABLE}
+                BillingMode: PAY_PER_REQUEST
+                AttributeDefinitions:
+                    - AttributeName: runId
+                      AttributeType: S
+                    - AttributeName: nodeId
+                      AttributeType: S
+                KeySchema:
+                    - AttributeName: runId
+                      KeyType: HASH
+                    - AttributeName: nodeId
+                      KeyType: RANGE
+
+        # ── Traces (PK=traceId, GSI1=runId+occurredAt, GSI2=runNodeKey+occurredAt sparse) ──
+        TracesTable:
+            Type: AWS::DynamoDB::Table
+            Properties:
+                TableName: ${self:provider.environment.TRACES_TABLE}
+                BillingMode: PAY_PER_REQUEST
+                AttributeDefinitions:
+                    - AttributeName: traceId
+                      AttributeType: S
+                    - AttributeName: runId
+                      AttributeType: S
+                    - AttributeName: runNodeKey
+                      AttributeType: S
+                    - AttributeName: occurredAt
+                      AttributeType: S
+                KeySchema:
+                    - AttributeName: traceId
+                      KeyType: HASH
+                GlobalSecondaryIndexes:
+                    - IndexName: runId-occurredAt-index
+                      KeySchema:
+                          - AttributeName: runId
+                            KeyType: HASH
+                          - AttributeName: occurredAt
+                            KeyType: RANGE
+                      Projection:
+                          ProjectionType: ALL
+                    - IndexName: runNodeKey-occurredAt-index
+                      KeySchema:
+                          - AttributeName: runNodeKey
+                            KeyType: HASH
+                          - AttributeName: occurredAt
+                            KeyType: RANGE
+                      Projection:
+                          ProjectionType: ALL
+
+        # ── Assets (PK=assetId, GSI=runId+createdAt) ──
+        AssetsTable:
+            Type: AWS::DynamoDB::Table
+            Properties:
+                TableName: ${self:provider.environment.ASSETS_TABLE}
+                BillingMode: PAY_PER_REQUEST
+                AttributeDefinitions:
+                    - AttributeName: assetId
+                      AttributeType: S
+                    - AttributeName: runId
+                      AttributeType: S
+                    - AttributeName: createdAt
+                      AttributeType: S
+                KeySchema:
+                    - AttributeName: assetId
+                      KeyType: HASH
+                GlobalSecondaryIndexes:
+                    - IndexName: runId-createdAt-index
+                      KeySchema:
+                          - AttributeName: runId
+                            KeyType: HASH
+                          - AttributeName: createdAt
+                            KeyType: RANGE
+                      Projection:
+                          ProjectionType: ALL
+
+        # ── Settings (PK=provider) ──
+        SettingsTable:
+            Type: AWS::DynamoDB::Table
+            Properties:
+                TableName: ${self:provider.environment.SETTINGS_TABLE}
+                BillingMode: PAY_PER_REQUEST
+                AttributeDefinitions:
+                    - AttributeName: provider
+                      AttributeType: S
+                KeySchema:
+                    - AttributeName: provider
+                      KeyType: HASH
+
+        # ── KMS key for Settings encryption (real stages only) ──
+        SettingsKmsKey:
+            Type: AWS::KMS::Key
+            Condition: IsRealStage
+            Properties:
+                Description: 'Encrypts API keys stored in SettingsTable for ${self:service}-${self:provider.stage}'
+                EnableKeyRotation: true
+                KeyPolicy:
+                    Version: '2012-10-17'
+                    Statement:
+                        - Sid: AllowRootAccountAdmin
+                          Effect: Allow
+                          Principal:
+                              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+                          Action: 'kms:*'
+                          Resource: '*'
+
+        SettingsKmsKeyAlias:
+            Type: AWS::KMS::Alias
+            Condition: IsRealStage
+            Properties:
+                AliasName: 'alias/${self:service}-settings-${self:provider.stage}'
+                TargetKeyId: !Ref SettingsKmsKey

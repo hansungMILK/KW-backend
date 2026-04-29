@@ -120,3 +120,45 @@ export const FlowUpdateMetaResponseSchema = z.object({
 
 export type FlowUpdateMetaRequest = z.infer<typeof FlowUpdateMetaRequestSchema>;
 export type FlowUpdateMetaResponse = z.infer<typeof FlowUpdateMetaResponseSchema>;
+
+// ============================================================================
+// P2 — FlowStatus + lifecycle response shapes
+//
+// NOTE for merge: P1 (feat/flows-blocks-spec) introduces the same FlowStatusSchema
+// and FlowSummarySchema. On merge, dedupe — these are identical shapes.
+// ============================================================================
+
+export const FlowStatusSchema = z.enum(['DRAFT', 'READY', 'ARCHIVED']);
+export type FlowStatus = z.infer<typeof FlowStatusSchema>;
+
+export const FlowSummarySchema = z.object({
+    flowId: z.string(),
+    title: z.string(),
+    description: z.string().optional(),
+    status: FlowStatusSchema,
+    createdAt: z.string(),
+    updatedAt: z.string(),
+});
+export type FlowSummary = z.infer<typeof FlowSummarySchema>;
+
+// ============================================================================
+// DELETE /flows/{flowId}  (audit #7)
+// Cascade: Messages/Proposals deleted, Runs/Assets preserved.
+// ============================================================================
+
+export const FlowDeleteResponseSchema = z.object({
+    deleted: z.literal(true),
+    messagesDeleted: z.number().int().nonnegative(),
+    proposalsDeleted: z.number().int().nonnegative(),
+});
+export type FlowDeleteResponse = z.infer<typeof FlowDeleteResponseSchema>;
+
+// ============================================================================
+// POST /flows/{flowId}/archive   (audit #9 / F-31)
+// POST /flows/{flowId}/unarchive (audit #10 / F-35)
+// POST /flows/{flowId}/duplicate (audit #8 / F-19)
+// All return a FlowSummary of the affected (or newly created) flow.
+// ============================================================================
+
+export const FlowLifecycleResponseSchema = FlowSummarySchema;
+export type FlowLifecycleResponse = z.infer<typeof FlowLifecycleResponseSchema>;
