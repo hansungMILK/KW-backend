@@ -195,6 +195,11 @@ export const useCanvasLayout = ({ readOnly, onBeforeLayout }: UseCanvasLayoutOpt
         const nodeYPositions: Record<string, number> = {};
         const positionedNodes = [...nodes];
 
+        // When every node is unconnected (all at level 0), use a multi-column grid
+        // to avoid stacking dozens of nodes in one tall column at x=50.
+        const allUnconnected = sortedLevels.length === 1 && sortedLevels[0] === 0;
+        const GRID_MAX_ROWS = 4;
+
         sortedLevels.forEach(level => {
             const group = levelGroups[level];
 
@@ -215,26 +220,53 @@ export const useCanvasLayout = ({ readOnly, onBeforeLayout }: UseCanvasLayoutOpt
                 return avgA - avgB;
             });
 
-            // Position each node in the group with dynamic height-based spacing
-            let currentY = LAYOUT_CONFIG.START_Y;
-            group.forEach(node => {
-                const x = LAYOUT_CONFIG.START_X + level * LAYOUT_CONFIG.LEVEL_WIDTH;
-                const y = currentY;
+            if (allUnconnected && group.length > GRID_MAX_ROWS) {
+                // Grid layout: wrap into multiple columns so the canvas doesn't become
+                // one impossibly tall column of unconnected nodes.
+                const rowHeights: number[] = [];
+                group.forEach((node, index) => {
+                    const col = Math.floor(index / GRID_MAX_ROWS);
+                    const row = index % GRID_MAX_ROWS;
+                    const x = LAYOUT_CONFIG.START_X + col * LAYOUT_CONFIG.LEVEL_WIDTH;
+                    // Accumulate y within each column using estimated heights
+                    if (row === 0) rowHeights[col] = LAYOUT_CONFIG.START_Y;
+                    const y = rowHeights[col];
 
-                nodeYPositions[node.id] = y;
+                    nodeYPositions[node.id] = y;
 
-                const nodeIndex = positionedNodes.findIndex(n => n.id === node.id);
-                if (nodeIndex !== -1) {
-                    positionedNodes[nodeIndex] = {
-                        ...positionedNodes[nodeIndex],
-                        position: { x, y },
-                    };
-                }
+                    const nodeIndex = positionedNodes.findIndex(n => n.id === node.id);
+                    if (nodeIndex !== -1) {
+                        positionedNodes[nodeIndex] = {
+                            ...positionedNodes[nodeIndex],
+                            position: { x, y },
+                        };
+                    }
 
-                // Advance Y by estimated node height + gap
-                const nodeHeight = estimateNodeHeight(node, blockRegistry[node.type]);
-                currentY += nodeHeight + LAYOUT_CONFIG.MIN_GAP;
-            });
+                    const nodeHeight = estimateNodeHeight(node, blockRegistry[node.type]);
+                    rowHeights[col] = y + nodeHeight + LAYOUT_CONFIG.MIN_GAP;
+                });
+            } else {
+                // Normal: single vertical column per level
+                let currentY = LAYOUT_CONFIG.START_Y;
+                group.forEach(node => {
+                    const x = LAYOUT_CONFIG.START_X + level * LAYOUT_CONFIG.LEVEL_WIDTH;
+                    const y = currentY;
+
+                    nodeYPositions[node.id] = y;
+
+                    const nodeIndex = positionedNodes.findIndex(n => n.id === node.id);
+                    if (nodeIndex !== -1) {
+                        positionedNodes[nodeIndex] = {
+                            ...positionedNodes[nodeIndex],
+                            position: { x, y },
+                        };
+                    }
+
+                    // Advance Y by estimated node height + gap
+                    const nodeHeight = estimateNodeHeight(node, blockRegistry[node.type]);
+                    currentY += nodeHeight + LAYOUT_CONFIG.MIN_GAP;
+                });
+            }
         });
 
         // Apply new positions and reset viewport

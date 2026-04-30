@@ -30,6 +30,7 @@ import { DetailPanel } from './DetailPanel';
 import { LogModal } from './LogModal';
 import { MobileControls } from './MobileControls';
 import { NodeBlock } from './NodeBlock';
+import { NodeConfigPanel, isCustomNode } from './NodeConfigPanel';
 import { ZoomControls } from './ZoomControls';
 import { TOUCH_GESTURE_THRESHOLD, useTouchCanvas } from '../hooks';
 import {
@@ -481,12 +482,20 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     if (sourceNode) {
                         startX = sourceNode.position.x + 300;
                         startY = sourceNode.position.y;
+                    } else if (nodes.length > 0) {
+                        // No compatible source — stack below the bottommost existing node
+                        const bottomNode = nodes.reduce((prev, curr) =>
+                            curr.position.y > prev.position.y ? curr : prev
+                        );
+                        startX = bottomNode.position.x;
+                        startY = bottomNode.position.y + 230;
                     } else {
+                        // First node on empty canvas — use canvas center
                         const rect = canvasRef.current?.getBoundingClientRect();
-                        const centerX = rect ? (rect.width / 2 - viewport.x) / viewport.zoom : 100;
-                        const centerY = rect ? (rect.height / 2 - viewport.y) / viewport.zoom : 100;
-                        startX = centerX - 100 + (Math.random() * 40 - 20);
-                        startY = centerY - 50 + (Math.random() * 40 - 20);
+                        const centerX = rect ? (rect.width / 2 - viewport.x) / viewport.zoom : 200;
+                        const centerY = rect ? (rect.height / 2 - viewport.y) / viewport.zoom : 200;
+                        startX = centerX - 100;
+                        startY = centerY - 50;
                     }
 
                     const snappedX = Math.round(startX / GRID_SIZE) * GRID_SIZE;
@@ -1444,21 +1453,13 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
         );
 
         const handleWheel = (e: React.WheelEvent) => {
-            const rect = canvasRef.current?.getBoundingClientRect();
-            if (!rect) return;
-            const delta = -e.deltaY * 0.001;
-            const newZoom = Math.min(Math.max(viewport.zoom + delta, MIN_ZOOM), MAX_ZOOM);
-
-            const mouseX = e.clientX - rect.left;
-            const mouseY = e.clientY - rect.top;
-
-            const worldX = (mouseX - viewport.x) / viewport.zoom;
-            const worldY = (mouseY - viewport.y) / viewport.zoom;
-
-            const newX = mouseX - worldX * newZoom;
-            const newY = mouseY - worldY * newZoom;
-
-            setViewport({ x: newX, y: newY, zoom: newZoom });
+            // 줌 비활성화: 마우스 휠은 캔버스 패닝(상하/좌우 이동)만 허용
+            e.preventDefault();
+            setViewport(prev => ({
+                ...prev,
+                x: prev.x - e.deltaX,
+                y: prev.y - e.deltaY,
+            }));
         };
 
         const handleZoomIn = useCallback(() => {
@@ -2450,30 +2451,43 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
 
                     {logViewerNodeId && <LogModal nodeId={logViewerNodeId} onClose={() => setLogViewerNodeId(null)} />}
 
-                    <DetailPanel
-                        selectedNode={detailNode}
-                        selectedConnection={detailConnection}
-                        nodes={nodes}
-                        connections={connections}
-                        onConfigChange={handleConfigChange}
-                        onDescriptionChange={handleDescriptionChange}
-                        onLabelChange={handleLabelChange}
-                        onToggleAuto={handleToggleAuto}
-                        onViewLogs={() => selectedNodeId && setLogViewerNodeId(selectedNodeId)}
-                        onDeleteNode={deleteNode}
-                        onDeleteConnection={deleteConnection}
-                        onTriggerNode={executeNode}
-                        onSelectNode={id => handleSelectionChange(id)}
-                        onSelectConnection={id => {
-                            setSelectedConnectionId(id);
-                            handleSelectionChange(null);
-                        }}
-                        onClose={() => {
-                            handleSelectionChange(null);
-                            setSelectedConnectionId(null);
-                        }}
-                        onShowNotification={onShowNotification}
-                    />
+                    {isCustomNode(detailNode) ? (
+                        <NodeConfigPanel
+                            selectedNode={detailNode}
+                            onClose={() => {
+                                handleSelectionChange(null);
+                                setSelectedConnectionId(null);
+                            }}
+                            onLabelChange={handleLabelChange}
+                            onDescriptionChange={handleDescriptionChange}
+                            onConfigChange={handleConfigChange}
+                        />
+                    ) : (
+                        <DetailPanel
+                            selectedNode={detailNode}
+                            selectedConnection={detailConnection}
+                            nodes={nodes}
+                            connections={connections}
+                            onConfigChange={handleConfigChange}
+                            onDescriptionChange={handleDescriptionChange}
+                            onLabelChange={handleLabelChange}
+                            onToggleAuto={handleToggleAuto}
+                            onViewLogs={() => selectedNodeId && setLogViewerNodeId(selectedNodeId)}
+                            onDeleteNode={deleteNode}
+                            onDeleteConnection={deleteConnection}
+                            onTriggerNode={executeNode}
+                            onSelectNode={id => handleSelectionChange(id)}
+                            onSelectConnection={id => {
+                                setSelectedConnectionId(id);
+                                handleSelectionChange(null);
+                            }}
+                            onClose={() => {
+                                handleSelectionChange(null);
+                                setSelectedConnectionId(null);
+                            }}
+                            onShowNotification={onShowNotification}
+                        />
+                    )}
                 </div>
             </div>
         );
