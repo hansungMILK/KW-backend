@@ -13,14 +13,15 @@ import type { ApiKeyProvider, Run, RunNode } from '@flows/contracts';
 
 /**
  * Parse flow edges to build parentNodeIds for each node.
- * Edge format: { source: string, target: string, ... }
+ * Edge format can come from the legacy canvas ({ source, target }) or from
+ * proposal approval ({ sourceNodeId, targetNodeId }).
  */
 function buildParentMap(nodeIds: string[], edges: Array<Record<string, unknown>>): Map<string, string[]> {
     const parentMap = new Map<string, string[]>(nodeIds.map(id => [id, []]));
 
     for (const edge of edges) {
-        const source = edge['source'] as string | undefined;
-        const target = edge['target'] as string | undefined;
+        const source = (edge['source'] ?? edge['sourceNodeId']) as string | undefined;
+        const target = (edge['target'] ?? edge['targetNodeId']) as string | undefined;
         if (source && target && parentMap.has(target)) {
             parentMap.get(target)!.push(source);
         }
@@ -74,7 +75,8 @@ async function checkMissingApiKeys(nodes: Array<Record<string, unknown>>): Promi
         checked.add(provider);
 
         // Check block-level override first
-        const config = (node['data'] as Record<string, unknown>)?.['config'] as Record<string, unknown> | undefined;
+        const data = node['data'] as Record<string, unknown> | undefined;
+        const config = (node['config'] ?? data?.['config']) as Record<string, unknown> | undefined;
         const override = config?.['apiKeyOverride'] as string | undefined;
         if (override && override.trim().length > 0) continue;
 
@@ -154,7 +156,11 @@ export const runService = {
                 runId,
                 nodeId,
                 blockType: (node['type'] ?? node['blockType'] ?? 'unknown') as string,
-                label: ((node['data'] as Record<string, unknown>)?.['label'] as string) ?? nodeId,
+                label:
+                    ((node['data'] as Record<string, unknown>)?.['label'] as string | undefined) ??
+                    (node['name'] as string | undefined) ??
+                    (node['label'] as string | undefined) ??
+                    nodeId,
                 status: 'PENDING',
                 progress: 0,
                 retryCount: 0,
@@ -219,7 +225,11 @@ export const runService = {
             runId,
             nodeId,
             blockType: (targetNode['type'] ?? targetNode['blockType'] ?? 'unknown') as string,
-            label: ((targetNode['data'] as Record<string, unknown>)?.['label'] as string) ?? nodeId,
+            label:
+                ((targetNode['data'] as Record<string, unknown>)?.['label'] as string | undefined) ??
+                (targetNode['name'] as string | undefined) ??
+                (targetNode['label'] as string | undefined) ??
+                nodeId,
             status: 'PENDING',
             progress: 0,
             retryCount: 0,
