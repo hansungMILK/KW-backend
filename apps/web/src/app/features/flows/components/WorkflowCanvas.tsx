@@ -467,11 +467,16 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                         }
 
                         if (!sourceNode && nodes.length > 0) {
-                            const lastNode = nodes[nodes.length - 1];
-                            const out = findCompatibleOutput(lastNode);
-                            if (out) {
-                                sourceNode = lastNode;
-                                sourcePortId = out.id;
+                            // Try all nodes in reverse order (most recently added first)
+                            // to find any node with a compatible output port
+                            for (let i = nodes.length - 1; i >= 0; i--) {
+                                const candidate = nodes[i];
+                                const out = findCompatibleOutput(candidate);
+                                if (out) {
+                                    sourceNode = candidate;
+                                    sourcePortId = out.id;
+                                    break;
+                                }
                             }
                         }
                     }
@@ -862,6 +867,11 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     const nodeYPositions: Record<string, number> = {};
                     const positionedNodes = [...nodes];
 
+                    // When all nodes are unconnected, use a multi-column grid instead of
+                    // one impossibly tall column at x=50.
+                    const allUnconnected = sortedLevels.length === 1 && sortedLevels[0] === 0;
+                    const GRID_MAX_ROWS = 4;
+
                     sortedLevels.forEach(level => {
                         const group = levelGroups[level];
                         group.sort((a, b) => {
@@ -877,21 +887,39 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                             return avgA - avgB;
                         });
 
-                        let currentY = LAYOUT_CONFIG.START_Y;
-                        group.forEach(node => {
-                            const x = LAYOUT_CONFIG.START_X + level * LAYOUT_CONFIG.LEVEL_WIDTH;
-                            const y = currentY;
-                            nodeYPositions[node.id] = y;
-                            const nodeIndex = positionedNodes.findIndex(n => n.id === node.id);
-                            if (nodeIndex !== -1) {
-                                positionedNodes[nodeIndex] = {
-                                    ...positionedNodes[nodeIndex],
-                                    position: { x, y },
-                                };
-                            }
-                            const nodeHeight = estimateNodeHeight(node, blockRegistry[node.type]);
-                            currentY += nodeHeight + LAYOUT_CONFIG.MIN_GAP;
-                        });
+                        if (allUnconnected && group.length > GRID_MAX_ROWS) {
+                            const colHeights: number[] = [];
+                            group.forEach((node, index) => {
+                                const col = Math.floor(index / GRID_MAX_ROWS);
+                                const row = index % GRID_MAX_ROWS;
+                                const x = LAYOUT_CONFIG.START_X + col * LAYOUT_CONFIG.LEVEL_WIDTH;
+                                if (row === 0) colHeights[col] = LAYOUT_CONFIG.START_Y;
+                                const y = colHeights[col];
+                                nodeYPositions[node.id] = y;
+                                const nodeIndex = positionedNodes.findIndex(n => n.id === node.id);
+                                if (nodeIndex !== -1) {
+                                    positionedNodes[nodeIndex] = { ...positionedNodes[nodeIndex], position: { x, y } };
+                                }
+                                const nodeHeight = estimateNodeHeight(node, blockRegistry[node.type]);
+                                colHeights[col] = y + nodeHeight + LAYOUT_CONFIG.MIN_GAP;
+                            });
+                        } else {
+                            let currentY = LAYOUT_CONFIG.START_Y;
+                            group.forEach(node => {
+                                const x = LAYOUT_CONFIG.START_X + level * LAYOUT_CONFIG.LEVEL_WIDTH;
+                                const y = currentY;
+                                nodeYPositions[node.id] = y;
+                                const nodeIndex = positionedNodes.findIndex(n => n.id === node.id);
+                                if (nodeIndex !== -1) {
+                                    positionedNodes[nodeIndex] = {
+                                        ...positionedNodes[nodeIndex],
+                                        position: { x, y },
+                                    };
+                                }
+                                const nodeHeight = estimateNodeHeight(node, blockRegistry[node.type]);
+                                currentY += nodeHeight + LAYOUT_CONFIG.MIN_GAP;
+                            });
+                        }
                     });
 
                     setNodes(positionedNodes);
