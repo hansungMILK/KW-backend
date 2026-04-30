@@ -83,16 +83,16 @@ const connectWebSocket = config => {
 
     // Build WebSocket URL with query parameters
     // channels parameter specifies which flow channel to subscribe to
-    let wsUrl = endpoint + '?' + authQueryParam + '=' + token;
+    let wsUrl = endpoint + '?' + encodeURIComponent(authQueryParam) + '=' + encodeURIComponent(token);
     if (!channels) {
         wsUrl += '&default=';
     }
     wsUrl += '&info=';
     if (sessionId) {
-        wsUrl += '&deviceId=' + sessionId;
+        wsUrl += '&deviceId=' + encodeURIComponent(sessionId);
     }
     if (channels) {
-        wsUrl += '&channels=' + channels;
+        wsUrl += '&channels=' + encodeURIComponent(channels);
     }
 
     self.postMessage({ type: 'status', status: 'connecting' });

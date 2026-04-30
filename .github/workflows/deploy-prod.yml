@@ -184,6 +184,7 @@ jobs:
             - name: Deploy backend to PROD
               if: ${{ matrix.project == 'backend' }}
               env:
+                  APP_API_KEY: ${{ secrets.APP_API_KEY }}
                   OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
                   ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
                   ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}

@@ -1,4 +1,5 @@
 import { connectionRepo } from '../../repositories/connection-repository';
+import { authorizeApiKeyValue } from '../../utils/auth';
 import { log } from '../../utils/logger';
 
 import type { APIGatewayProxyResult } from 'aws-lambda';
@@ -13,6 +14,12 @@ export const main = async (event: {
     queryStringParameters?: Record<string, string>;
 }): Promise<APIGatewayProxyResult> => {
     const connectionId = event.requestContext.connectionId;
+    const auth = authorizeApiKeyValue(event.queryStringParameters?.['x-api-key']);
+    if (!auth.ok) {
+        log.warn(`WS $connect rejected: ${connectionId}, ${auth.error}`);
+        return { statusCode: auth.statusCode, body: auth.message };
+    }
+
     // Support both 'flowId' (product API) and 'channels' (compat) query params
     const flowIdParam = event.queryStringParameters?.flowId ?? '';
     const channelsParam = event.queryStringParameters?.channels ?? '';

@@ -45,6 +45,8 @@ provider:
         OPENAI_TTS_MODEL: ${env:OPENAI_TTS_MODEL, 'gpt-4o-mini-tts'}
         OPENAI_TTS_VOICE: ${env:OPENAI_TTS_VOICE, 'nova'}
         LOCAL_ASSET_BASE_URL: ${env:LOCAL_ASSET_BASE_URL, 'http://localhost:8800/_local-assets'}
+        CORS_ALLOWED_ORIGINS: ${self:custom.corsAllowedOriginsCsv.${self:provider.stage}, self:custom.corsAllowedOriginsCsv.local}
+        APP_API_KEY: ${env:APP_API_KEY, ''}
         OPENAI_API_KEY: ${env:OPENAI_API_KEY, ''}
         ANTHROPIC_API_KEY: ${env:ANTHROPIC_API_KEY, ''}
         ELEVENLABS_API_KEY: ${env:ELEVENLABS_API_KEY, ''}
@@ -145,6 +147,10 @@ custom:
             - http://localhost:3001
         prod:
             - https://flow.eureka.codes
+    corsAllowedOriginsCsv:
+        local: http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001
+        dev: https://flow-dev.eureka.codes,http://localhost:3000,http://localhost:3001
+        prod: https://flow.eureka.codes
     ffmpegPath:
         local: ${env:FFMPEG_PATH, '/opt/bin/ffmpeg'}
         dev: /opt/bin/ffmpeg

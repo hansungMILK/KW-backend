@@ -4,9 +4,7 @@ import { ulid } from 'ulid';
 export const generateId = (): string => ulid();
 
 /**
- * Generate a numeric-style ID for backward compat with existing frontend.
- * The frontend currently uses numeric string IDs like "1000637".
- * This generates a 7-digit number starting from 2000000 range.
+ * Backward-compatible function name for older call sites.
+ * Values are ULIDs so independent Lambda processes cannot collide.
  */
-let counter = 2000000 + Math.floor(Math.random() * 100000);
-export const generateNumericId = (): string => String(++counter);
+export const generateNumericId = (): string => generateId();

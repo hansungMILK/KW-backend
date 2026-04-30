@@ -1,5 +1,14 @@
+import { authorizeHttpRequest } from './auth';
 import { log } from './logger';
-import { badRequest, serverError } from './response';
+import {
+    badRequest,
+    forbidden,
+    getRequestOrigin,
+    preflight,
+    serverError,
+    unauthorized,
+    withCorsHeaders,
+} from './response';
 
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 
@@ -22,23 +31,35 @@ export const withMiddleware = (handler: Handler): Handler => {
         };
         const method = event.httpMethod || v2.requestContext?.http?.method || '?';
         const path = event.path || v2.rawPath || '?';
+        const origin = getRequestOrigin(event);
         log.info(`${method} ${path}`);
 
         try {
+            if (method === 'OPTIONS') {
+                return preflight(origin);
+            }
+
+            const auth = authorizeHttpRequest(event);
+            if (!auth.ok) {
+                if (auth.statusCode === 401) return withCorsHeaders(unauthorized(auth.message), origin);
+                if (auth.statusCode === 403) return withCorsHeaders(forbidden(auth.message), origin);
+                return withCorsHeaders(serverError(auth.message), origin);
+            }
+
             // Parse JSON body if present
             if (event.body) {
                 try {
                     (event as APIGatewayProxyEvent & { parsedBody: unknown }).parsedBody = JSON.parse(event.body);
                 } catch {
-                    return badRequest('Invalid JSON body');
+                    return withCorsHeaders(badRequest('Invalid JSON body'), origin);
                 }
             }
 
-            return await handler(event);
+            return withCorsHeaders(await handler(event), origin);
         } catch (err) {
             log.error(`Handler error: ${method} ${path}`, err);
             const message = err instanceof Error ? err.message : 'Internal server error';
-            return serverError(message);
+            return withCorsHeaders(serverError(message), origin);
         }
     };
 };

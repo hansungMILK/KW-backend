@@ -1,19 +1,15 @@
 import { readFile } from 'fs/promises';
 
 import { getLocalAssetContentType, getLocalAssetPath } from '../../../adapters/aws/s3';
+import { getCorsHeaders, getRequestOrigin } from '../../../utils/response';
 
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 
-const CORS_HEADERS = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type,x-api-key',
-    'Access-Control-Allow-Methods': 'GET,OPTIONS',
-};
-
 export const main = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
+    const corsHeaders = getCorsHeaders(getRequestOrigin(event));
     const key = event.pathParameters?.['proxy'];
     if (!key) {
-        return { statusCode: 404, headers: CORS_HEADERS, body: 'Not found' };
+        return { statusCode: 404, headers: corsHeaders, body: 'Not found' };
     }
 
     try {
@@ -25,7 +21,7 @@ export const main = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxy
         return {
             statusCode: 200,
             headers: {
-                ...CORS_HEADERS,
+                ...corsHeaders,
                 'Content-Type': await getLocalAssetContentType(decodedKey),
                 'Cache-Control': 'no-store',
             },
@@ -33,6 +29,6 @@ export const main = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxy
             isBase64Encoded: true,
         };
     } catch {
-        return { statusCode: 404, headers: CORS_HEADERS, body: 'Not found' };
+        return { statusCode: 404, headers: corsHeaders, body: 'Not found' };
     }
 };
