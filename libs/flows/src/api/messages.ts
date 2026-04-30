@@ -73,7 +73,7 @@ const toMessageProposal = (response: MessageCreateResponse): MessageProposal | u
             .map(toProposalEdge)
             .filter((edge): edge is { source: string; target: string } => Boolean(edge)),
         estimatedCost: formatEstimatedCost(response.proposal.estimatedCost),
-        description: response.assistantMessage.content,
+        description: response.assistantMessage?.content,
     };
 };
 
@@ -82,9 +82,11 @@ const toMessageProposal = (response: MessageCreateResponse): MessageProposal | u
  * POST /flows/{flowId}/messages
  *
  */
-export const sendFlowMessage = async (flowId: string, body: SendMessageBody): Promise<MessageView> => {
+export const sendFlowMessage = async (flowId: string, body: SendMessageBody): Promise<MessageView | null> => {
     _log(`> sendFlowMessage(${flowId})`, body);
     const response = await api.post<MessageCreateResponse>(`/flows/${flowId}/messages`, body);
+    if (!response.data.assistantMessage) return null;
+
     return {
         id: response.data.assistantMessage.messageId,
         flowId: response.data.assistantMessage.flowId,

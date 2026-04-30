@@ -68,8 +68,8 @@ export const MessageCreateRequestSchema = z.object({
 /**
  * Response includes:
  * - The user message that was stored
- * - The proposal generated (mock or real)
- * - The assistant message describing the proposal
+ * - The proposal generated when a workflow proposal exists
+ * - The assistant message describing the proposal when one was created
  */
 export const MessageCreateResponseSchema = z.object({
     message: MessageSchema,
@@ -90,7 +90,7 @@ export const MessageCreateResponseSchema = z.object({
             createdAt: z.string(),
         })
         .optional(),
-    assistantMessage: MessageSchema,
+    assistantMessage: MessageSchema.optional(),
 });
 
 export type MessageCreateRequest = z.infer<typeof MessageCreateRequestSchema>;

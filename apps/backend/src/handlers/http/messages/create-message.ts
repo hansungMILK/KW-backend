@@ -1,25 +1,46 @@
 import { MessageCreateParamsSchema, MessageCreateRequestSchema } from '@flows/contracts';
 
+import { env } from '../../../config/env';
 import { getOrchestrator } from '../../../modules/orchestrator';
 import { flowRepo } from '../../../repositories/flow-repository';
 import { messageRepo } from '../../../repositories/message-repository';
 import { proposalRepo } from '../../../repositories/proposal-repository';
+import { settingsService } from '../../../services/settings-service';
 import { wsService } from '../../../services/websocket-service';
 import { generateNumericId } from '../../../utils/id-generator';
 import { getBody, getPathParam, withMiddleware } from '../../../utils/middleware';
-import { badRequest, created, notFound } from '../../../utils/response';
+import { badGateway, badRequest, created, notFound, unprocessableJson } from '../../../utils/response';
 
-import type { Message, Proposal } from '@flows/contracts';
+import type { ApiKeyProvider, Message, Proposal } from '@flows/contracts';
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 
 const WORKFLOW_INTENT_PATTERN =
     /(만들|제작|생성|설계|자동화|실행|쇼츠|영상|비디오|워크플로|플로우|블록|노드|workflow|flow|make|create|generate|build|run|shorts|video)/i;
 
+const ORCHESTRATOR_PROVIDER_BY_MODE: Record<string, ApiKeyProvider | undefined> = {
+    openai: 'openai',
+    claude: 'anthropic',
+};
+
+const ensureOrchestratorProviderKey = async (): Promise<APIGatewayProxyResult | null> => {
+    const provider = ORCHESTRATOR_PROVIDER_BY_MODE[env.orchestratorMode];
+    if (!provider) return null;
+
+    const apiKey = await settingsService.getKeyForProviderAsync(provider);
+    if (apiKey) return null;
+
+    return unprocessableJson({
+        error: 'MISSING_API_KEYS',
+        message: `Required API keys not configured: ${provider}`,
+        missingProviders: [provider],
+    });
+};
+
 /**
  * POST /flows/{flowId}/messages
  *
  * 1. Save USER message
- * 2. Call orchestrator (mock) → generate proposal
+ * 2. Call orchestrator → generate proposal
  * 3. Save proposal
  * 4. Save ASSISTANT message
  * 5. Return { message, proposal, assistantMessage }
@@ -39,6 +60,9 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
     const flow = await flowRepo.get(paramsParsed.data.flowId);
     if (!flow) return notFound(`Flow ${flowId} not found`);
 
+    const missingKeyResponse = await ensureOrchestratorProviderKey();
+    if (missingKeyResponse) return missingKeyResponse;
+
     const now = new Date().toISOString();
     const fid = paramsParsed.data.flowId;
 
@@ -54,19 +78,8 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
     await messageRepo.put(userMessage);
 
     if (!WORKFLOW_INTENT_PATTERN.test(bodyParsed.data.content)) {
-        const assistantMessage: Message = {
-            messageId: generateNumericId(),
-            flowId: fid,
-            role: 'ASSISTANT',
-            messageType: 'TEXT',
-            content: '안녕하세요. 어떤 워크플로우나 쇼츠를 만들고 싶은지 말해주시면 필요한 블록을 제안하겠습니다.',
-            createdAt: now,
-        };
-        await messageRepo.put(assistantMessage);
-
         return created({
             message: userMessage,
-            assistantMessage,
         });
     }
 
@@ -75,20 +88,7 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
     const result = await orchestrator.generateProposal(fid, bodyParsed.data.content, currentContext);
 
     if (!result.approvalRequired || result.proposedNodes.length === 0) {
-        const assistantMessage: Message = {
-            messageId: generateNumericId(),
-            flowId: fid,
-            role: 'ASSISTANT',
-            messageType: 'TEXT',
-            content: result.assistantMessage,
-            createdAt: now,
-        };
-        await messageRepo.put(assistantMessage);
-
-        return created({
-            message: userMessage,
-            assistantMessage,
-        });
+        return badGateway(result.assistantMessage, 'AI_PROVIDER_ERROR');
     }
 
     // 3. Save proposal

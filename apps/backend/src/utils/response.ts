@@ -66,6 +66,9 @@ export const unprocessable = (message: string): APIGatewayProxyResult =>
 export const unprocessableJson = (body: Record<string, unknown>): APIGatewayProxyResult =>
     json(422, { status: 422, ...body });
 
+export const badGateway = (message: string, errorCode = 'BAD_GATEWAY'): APIGatewayProxyResult =>
+    json(502, { status: 502, error: errorCode, message });
+
 export const serverError = (message: string): APIGatewayProxyResult =>
     json(500, { status: 500, error: 'INTERNAL_SERVER_ERROR', message });
 

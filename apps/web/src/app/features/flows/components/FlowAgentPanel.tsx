@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Send, X } from 'lucide-react';
 
 import { approveProposal, sendFlowMessage } from '@flows/flows';
+import { extractErrorMessage } from '@flows/web-core';
 
 import type { MessageProposal } from '@flows/flows';
 import type { ProposalCreatedMessage } from '@flows/socket';
@@ -85,6 +86,8 @@ export const FlowAgentPanel = ({ open, onClose, flowId, onApproveProposal, exter
 
             setMessages(prev => {
                 const withoutThinking = prev.filter(m => !m.thinking);
+                if (!response) return withoutThinking;
+
                 const msgs: Message[] = [
                     ...withoutThinking,
                     { id: crypto.randomUUID(), role: 'agent', text: response.content },
@@ -94,10 +97,10 @@ export const FlowAgentPanel = ({ open, onClose, flowId, onApproveProposal, exter
                 }
                 return msgs;
             });
-        } catch {
+        } catch (error) {
             setMessages(prev => [
                 ...prev.filter(m => !m.thinking),
-                { id: crypto.randomUUID(), role: 'agent', text: '오류가 발생했습니다. 다시 시도해주세요.' },
+                { id: crypto.randomUUID(), role: 'agent', text: extractErrorMessage(error) },
             ]);
         } finally {
             setIsThinking(false);

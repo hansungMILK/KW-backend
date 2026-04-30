@@ -150,6 +150,15 @@ export const extractErrorMessage = (error: unknown): string => {
 
     const err = error as ErrorLike & { toString?: () => string };
 
+    if (err.response?.data) {
+        if (err.response.data.message) {
+            return err.response.data.message;
+        }
+        if (err.response.data.error) {
+            return err.response.data.error;
+        }
+    }
+
     if (err.message) {
         return err.message;
     }
@@ -160,15 +169,6 @@ export const extractErrorMessage = (error: unknown): string => {
 
     if (err.toString && err.toString() !== '[object Object]') {
         return err.toString();
-    }
-
-    if (err.response?.data) {
-        if (err.response.data.error) {
-            return err.response.data.error;
-        }
-        if (err.response.data.message) {
-            return err.response.data.message;
-        }
     }
 
     return DEFAULT_ERROR_MESSAGE;
