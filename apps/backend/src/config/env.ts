@@ -34,7 +34,7 @@ export const env = {
     openaiSearchModel: readEnv('OPENAI_SEARCH_MODEL', readEnv('OPENAI_MODEL', 'gpt-5.4-nano')),
     openaiBaseUrl: readEnv('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
     openaiImageModel: readEnv('OPENAI_IMAGE_MODEL', 'gpt-image-2'),
-    openaiImageQuality: readEnv('OPENAI_IMAGE_QUALITY', 'low'),
+    openaiImageQuality: readEnv('OPENAI_IMAGE_QUALITY', 'medium'),
     openaiTtsModel: readEnv('OPENAI_TTS_MODEL', 'gpt-4o-mini-tts'),
     openaiTtsVoice: readEnv('OPENAI_TTS_VOICE', 'nova'),
     nanobananaBaseUrl: readEnv('NANOBANANA_BASE_URL', 'https://www.nananobanana.com/api/v1'),
