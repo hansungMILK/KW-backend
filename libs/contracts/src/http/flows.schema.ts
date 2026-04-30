@@ -122,24 +122,12 @@ export type FlowUpdateMetaRequest = z.infer<typeof FlowUpdateMetaRequestSchema>;
 export type FlowUpdateMetaResponse = z.infer<typeof FlowUpdateMetaResponseSchema>;
 
 // ============================================================================
-// FlowStatus  (spec)
+// FlowStatus (spec)
 // Canonical uppercase values used across spec endpoints.
 // ============================================================================
 
 export const FlowStatusSchema = z.enum(['DRAFT', 'READY', 'ARCHIVED']);
 export type FlowStatus = z.infer<typeof FlowStatusSchema>;
-
-// ============================================================================
-// POST /flows  (spec)
-// Body: { title (required), description?, scenario? }
-// 201 → FlowSummary, status: DRAFT
-// ============================================================================
-
-export const FlowCreateRequestSchema = z.object({
-    title: z.string().min(1),
-    description: z.string().optional(),
-    scenario: z.string().optional(),
-});
 
 export const FlowSummarySchema = z.object({
     flowId: z.string(),
@@ -149,9 +137,20 @@ export const FlowSummarySchema = z.object({
     createdAt: z.string(),
     updatedAt: z.string(),
 });
-
-export type FlowCreateRequest = z.infer<typeof FlowCreateRequestSchema>;
 export type FlowSummary = z.infer<typeof FlowSummarySchema>;
+
+// ============================================================================
+// POST /flows  (spec)
+// Body: { title (required), description?, scenario? }
+// 201 -> FlowSummary, status: DRAFT
+// ============================================================================
+
+export const FlowCreateRequestSchema = z.object({
+    title: z.string().min(1),
+    description: z.string().optional(),
+    scenario: z.string().optional(),
+});
+export type FlowCreateRequest = z.infer<typeof FlowCreateRequestSchema>;
 
 // ============================================================================
 // GET /flows  (spec)
@@ -176,7 +175,7 @@ export type FlowListResponse = z.infer<typeof FlowListResponseSchema>;
 // ============================================================================
 // GET /flows/{flowId}  (spec)
 // Returns: FlowDetail (summary + nodes/edges + latestProposalId/lastRunId join)
-// latestProposalId/lastRunId join is owned by 강연경/민경욱 — surfaced as null in P1.
+// latestProposalId/lastRunId join is owned by 강연경/민경욱 - surfaced as null in P1.
 // ============================================================================
 
 export const FlowDetailResponseSchema = FlowSummarySchema.extend({
@@ -185,13 +184,12 @@ export const FlowDetailResponseSchema = FlowSummarySchema.extend({
     latestProposalId: z.string().nullable().optional(),
     lastRunId: z.string().nullable().optional(),
 });
-
 export type FlowDetailResponse = z.infer<typeof FlowDetailResponseSchema>;
 
 // ============================================================================
-// PUT /flows/{flowId}  (spec) — unified canvas save
+// PUT /flows/{flowId}  (spec) - unified canvas save
 // Body: { title?, description?, nodes, edges }
-// Auto status transition: DRAFT → READY when nodes.length >= 1
+// Auto status transition: DRAFT -> READY when nodes.length >= 1
 // ============================================================================
 
 export const FlowPutRequestSchema = z.object({
@@ -200,5 +198,26 @@ export const FlowPutRequestSchema = z.object({
     nodes: z.array(z.record(z.unknown())),
     edges: z.array(z.record(z.unknown())),
 });
-
 export type FlowPutRequest = z.infer<typeof FlowPutRequestSchema>;
+
+// ============================================================================
+// DELETE /flows/{flowId}  (audit #7)
+// Cascade: Messages/Proposals deleted, Runs/Assets preserved.
+// ============================================================================
+
+export const FlowDeleteResponseSchema = z.object({
+    deleted: z.literal(true),
+    messagesDeleted: z.number().int().nonnegative(),
+    proposalsDeleted: z.number().int().nonnegative(),
+});
+export type FlowDeleteResponse = z.infer<typeof FlowDeleteResponseSchema>;
+
+// ============================================================================
+// POST /flows/{flowId}/archive   (audit #9 / F-31)
+// POST /flows/{flowId}/unarchive (audit #10 / F-35)
+// POST /flows/{flowId}/duplicate (audit #8 / F-19)
+// All return a FlowSummary of the affected or newly created flow.
+// ============================================================================
+
+export const FlowLifecycleResponseSchema = FlowSummarySchema;
+export type FlowLifecycleResponse = z.infer<typeof FlowLifecycleResponseSchema>;
