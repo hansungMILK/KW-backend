@@ -51,6 +51,58 @@ functions:
                   method: get
 
     # ── Flows ──
+    flowCreate:
+        handler: src/handlers/http/flows/create-flow.main
+        events:
+            - httpApi:
+                  path: /flows
+                  method: post
+            - httpApi:
+                  path: /_apis/flows
+                  method: post
+            - httpApi:
+                  path: /_api_/flows
+                  method: post
+
+    flowListSpec:
+        handler: src/handlers/http/flows/list-flows.main
+        events:
+            - httpApi:
+                  path: /flows
+                  method: get
+            - httpApi:
+                  path: /_apis/flows
+                  method: get
+            - httpApi:
+                  path: /_api_/flows
+                  method: get
+
+    flowGetSpec:
+        handler: src/handlers/http/flows/get-flow.main
+        events:
+            - httpApi:
+                  path: '/flows/{flowId}'
+                  method: get
+            - httpApi:
+                  path: '/_apis/flows/{flowId}'
+                  method: get
+            - httpApi:
+                  path: '/_api_/flows/{flowId}'
+                  method: get
+
+    flowPutSpec:
+        handler: src/handlers/http/flows/put-flow.main
+        events:
+            - httpApi:
+                  path: '/flows/{flowId}'
+                  method: put
+            - httpApi:
+                  path: '/_apis/flows/{flowId}'
+                  method: put
+            - httpApi:
+                  path: '/_api_/flows/{flowId}'
+                  method: put
+
     flowLoad:
         handler: src/handlers/http/flows/load-flow.main
         events:
@@ -273,6 +325,32 @@ functions:
                   method: get
             - httpApi:
                   path: /_api_/blocks/0/list
+                  method: get
+
+    blockListSpec:
+        handler: src/handlers/http/blocks/get-blocks.main
+        events:
+            - httpApi:
+                  path: /blocks
+                  method: get
+            - httpApi:
+                  path: /_apis/blocks
+                  method: get
+            - httpApi:
+                  path: /_api_/blocks
+                  method: get
+
+    blockGetSpec:
+        handler: src/handlers/http/blocks/get-block.main
+        events:
+            - httpApi:
+                  path: '/blocks/{blockType}'
+                  method: get
+            - httpApi:
+                  path: '/_apis/blocks/{blockType}'
+                  method: get
+            - httpApi:
+                  path: '/_api_/blocks/{blockType}'
                   method: get
 
     # ── Chat ──

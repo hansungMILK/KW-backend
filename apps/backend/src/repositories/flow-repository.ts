@@ -200,6 +200,34 @@ export const flowRepo = {
         return updated;
     },
 
+    /**
+     * List flows with optional status filter + simple offset cursor pagination.
+     *
+     * P1 implementation: scan + in-memory sort/filter/slice.
+     * P2 (audit #18): replace with GSI query (flowId+updatedAt) — owned by 강연경/민경욱.
+     * The handler-side surface (limit/cursor/status, items+nextCursor) won't change.
+     */
+    async list(opts: {
+        limit?: number;
+        cursor?: string;
+        status?: FlowStatus;
+    }): Promise<{ items: FlowRecord[]; nextCursor?: string }> {
+        const limit = Math.max(1, Math.min(opts.limit ?? 20, 100));
+        const offset = opts.cursor ? Math.max(0, parseInt(opts.cursor, 10) || 0) : 0;
+
+        const all = await this.scan();
+        const filtered = opts.status ? all.filter(r => normalizeFlowStatus(r.state) === opts.status) : all;
+
+        // Sort by updatedAt desc (newest first)
+        filtered.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
+
+        const items = filtered.slice(offset, offset + limit);
+        const nextOffset = offset + items.length;
+        const nextCursor = nextOffset < filtered.length ? String(nextOffset) : undefined;
+
+        return { items, nextCursor };
+    },
+
     async updateState(id: string, newState: string): Promise<FlowRecord | null> {
         const existing = await this.get(id);
         if (!existing) return null;

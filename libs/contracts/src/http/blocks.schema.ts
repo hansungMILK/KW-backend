@@ -44,3 +44,42 @@ export const BlockListResponseSchema = z.object({
 
 export type BlockListItem = z.infer<typeof BlockListItemSchema>;
 export type BlockListResponse = z.infer<typeof BlockListResponseSchema>;
+
+// ============================================================================
+// GET /blocks  (spec)
+// Returns: { items: [{ blockType, name, description, category, inputSchema, outputSchema, estimatedCost }] }
+// ============================================================================
+
+export const BlockSpecSummarySchema = z.object({
+    blockType: z.string(),
+    name: z.string(),
+    description: z.string(),
+    category: z.enum(['input', 'process', 'output']),
+    inputSchema: z.array(z.unknown()),
+    outputSchema: z.array(z.unknown()),
+    estimatedCost: z.number(),
+});
+
+export const BlockSpecListResponseSchema = z.object({
+    items: z.array(BlockSpecSummarySchema),
+});
+
+export type BlockSpecSummary = z.infer<typeof BlockSpecSummarySchema>;
+export type BlockSpecListResponse = z.infer<typeof BlockSpecListResponseSchema>;
+
+// ============================================================================
+// GET /blocks/{blockType}  (spec)
+// 404 BLOCK_NOT_FOUND if blockType is not in catalog
+// Returns summary fields + configFields
+// ============================================================================
+
+export const BlockSpecDetailParamsSchema = z.object({
+    blockType: z.string().min(1),
+});
+
+export const BlockSpecDetailResponseSchema = BlockSpecSummarySchema.extend({
+    configFields: z.array(z.unknown()),
+});
+
+export type BlockSpecDetailParams = z.infer<typeof BlockSpecDetailParamsSchema>;
+export type BlockSpecDetailResponse = z.infer<typeof BlockSpecDetailResponseSchema>;
