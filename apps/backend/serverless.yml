@@ -50,7 +50,20 @@ provider:
         ELEVENLABS_API_KEY: ${env:ELEVENLABS_API_KEY, ''}
         NANOBANANA_API_KEY: ${env:NANOBANANA_API_KEY, ''}
     httpApi:
-        cors: true
+        cors:
+            allowedOrigins: ${self:custom.corsAllowedOrigins.${self:provider.stage}, self:custom.corsAllowedOrigins.local}
+            allowedHeaders:
+                - Content-Type
+                - Authorization
+                - X-Api-Key
+            allowedMethods:
+                - GET
+                - POST
+                - PUT
+                - PATCH
+                - DELETE
+                - OPTIONS
+            allowCredentials: false
     iam:
         role:
             statements:
@@ -120,6 +133,18 @@ plugins:
     - serverless-offline
 
 custom:
+    corsAllowedOrigins:
+        local:
+            - http://localhost:3000
+            - http://127.0.0.1:3000
+            - http://localhost:3001
+            - http://127.0.0.1:3001
+        dev:
+            - https://flow-dev.eureka.codes
+            - http://localhost:3000
+            - http://localhost:3001
+        prod:
+            - https://flow.eureka.codes
     ffmpegPath:
         local: ${env:FFMPEG_PATH, '/opt/bin/ffmpeg'}
         dev: /opt/bin/ffmpeg
@@ -972,7 +997,7 @@ resources:
                 CorsConfiguration:
                     CorsRules:
                         - AllowedMethods: [GET, HEAD]
-                          AllowedOrigins: ['*']
+                          AllowedOrigins: ${self:custom.corsAllowedOrigins.${self:provider.stage}, self:custom.corsAllowedOrigins.local}
                           AllowedHeaders: ['*']
                           MaxAge: 3000
 

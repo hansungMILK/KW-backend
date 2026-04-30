@@ -7,8 +7,18 @@ on:
                 required: true
                 type: boolean
                 default: false
+            deploy_backend_dev:
+                description: 'Deploy Backend to DEV'
+                required: true
+                type: boolean
+                default: false
             deploy_web_prod:
                 description: 'Deploy Web to PROD'
+                required: true
+                type: boolean
+                default: false
+            deploy_backend_prod:
+                description: 'Deploy Backend to PROD'
                 required: true
                 type: boolean
                 default: false
@@ -47,7 +57,7 @@ jobs:
 
     deploy-dev:
         needs: [get-versions]
-        if: ${{ github.event.inputs.deploy_web_dev == 'true' }}
+        if: ${{ github.event.inputs.deploy_web_dev == 'true' || github.event.inputs.deploy_backend_dev == 'true' }}
         runs-on: ubuntu-latest
         name: Deploy to DEV
 
@@ -89,7 +99,8 @@ jobs:
                   aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
                   aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
 
-            - name: Deploy to DEV
+            - name: Deploy web to DEV
+              if: ${{ github.event.inputs.deploy_web_dev == 'true' }}
               env:
                   BUCKET_NAME: ${{ secrets.BUCKET_NAME }}
                   DEV_CF_DISTRIBUTION_ID: ${{ secrets.DEV_CF_DISTRIBUTION_ID }}
@@ -103,9 +114,22 @@ jobs:
                   chmod +x scripts/deploy-web.sh
                   NODE_OPTIONS="--max-old-space-size=4096" yarn web:deploy:dev
 
+            - name: Deploy backend to DEV
+              if: ${{ github.event.inputs.deploy_backend_dev == 'true' }}
+              env:
+                  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+                  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+                  ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+                  NANOBANANA_API_KEY: ${{ secrets.NANOBANANA_API_KEY }}
+                  AI_PROVIDER: openai
+                  SLS_TELEMETRY_DISABLED: '1'
+              run: |
+                  set -e
+                  NODE_OPTIONS="--max-old-space-size=4096" yarn backend:deploy:dev
+
     deploy-prod:
         needs: [get-versions]
-        if: ${{ github.event.inputs.deploy_web_prod == 'true' }}
+        if: ${{ github.event.inputs.deploy_web_prod == 'true' || github.event.inputs.deploy_backend_prod == 'true' }}
         runs-on: ubuntu-latest
         name: Deploy to PROD
 
@@ -147,7 +171,8 @@ jobs:
                   aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
                   aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
 
-            - name: Deploy to PROD
+            - name: Deploy web to PROD
+              if: ${{ github.event.inputs.deploy_web_prod == 'true' }}
               env:
                   BUCKET_NAME: ${{ secrets.BUCKET_NAME }}
                   PROD_CF_DISTRIBUTION_ID: ${{ secrets.PROD_CF_DISTRIBUTION_ID }}
@@ -160,6 +185,19 @@ jobs:
                   set -e
                   chmod +x scripts/deploy-web.sh
                   NODE_OPTIONS="--max-old-space-size=4096" yarn web:deploy:prod
+
+            - name: Deploy backend to PROD
+              if: ${{ github.event.inputs.deploy_backend_prod == 'true' }}
+              env:
+                  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+                  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+                  ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+                  NANOBANANA_API_KEY: ${{ secrets.NANOBANANA_API_KEY }}
+                  AI_PROVIDER: openai
+                  SLS_TELEMETRY_DISABLED: '1'
+              run: |
+                  set -e
+                  NODE_OPTIONS="--max-old-space-size=4096" yarn backend:deploy:prod
 
     notify-slack:
         needs: [get-versions, deploy-dev, deploy-prod]
@@ -174,7 +212,9 @@ jobs:
                   set -e
 
                   DEV_WEB="${{ github.event.inputs.deploy_web_dev }}"
+                  DEV_BACKEND="${{ github.event.inputs.deploy_backend_dev }}"
                   PROD_WEB="${{ github.event.inputs.deploy_web_prod }}"
+                  PROD_BACKEND="${{ github.event.inputs.deploy_backend_prod }}"
                   WEB_VER="${{ needs.get-versions.outputs.web-version }}"
 
                   TIMESTAMP=$(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M:%S')
@@ -184,11 +224,15 @@ jobs:
                   PROD_COUNT=0
 
                   [[ "$DEV_WEB" == "true" && "${{ needs.deploy-dev.result }}" == "success" ]] && ((DEV_COUNT++)) || true
+                  [[ "$DEV_BACKEND" == "true" && "${{ needs.deploy-dev.result }}" == "success" ]] && ((DEV_COUNT++)) || true
                   [[ "$PROD_WEB" == "true" && "${{ needs.deploy-prod.result }}" == "success" ]] && ((PROD_COUNT++)) || true
+                  [[ "$PROD_BACKEND" == "true" && "${{ needs.deploy-prod.result }}" == "success" ]] && ((PROD_COUNT++)) || true
 
                   {
                     echo "dev_web=${DEV_WEB}"
+                    echo "dev_backend=${DEV_BACKEND}"
                     echo "prod_web=${PROD_WEB}"
+                    echo "prod_backend=${PROD_BACKEND}"
                     echo "web_version=${WEB_VER}"
                     echo "timestamp=${TIMESTAMP}"
                     echo "commit_sha=${COMMIT_SHA}"
@@ -234,6 +278,17 @@ jobs:
                       }'
                   fi
 
+                  if [[ "${{ steps.deploy-info.outputs.dev_backend }}" == "true" && "${{ steps.deploy-info.outputs.dev_success }}" == "true" ]]; then
+                      BLOCKS+=',
+                      {
+                          "type": "section",
+                          "text": {
+                              "type": "mrkdwn",
+                              "text": "*개발 환경*\n• *Backend API* Serverless DEV 배포 완료"
+                          }
+                      }'
+                  fi
+
                   if [[ "${{ steps.deploy-info.outputs.prod_web }}" == "true" && "${{ steps.deploy-info.outputs.prod_success }}" == "true" ]]; then
                       BLOCKS+=',
                       {
@@ -241,6 +296,17 @@ jobs:
                           "text": {
                               "type": "mrkdwn",
                               "text": "*운영 환경*\n• *Flows* <https://flow.eureka.codes/|운영 서버> `v'"${{ steps.deploy-info.outputs.web_version }}"'`"
+                          }
+                      }'
+                  fi
+
+                  if [[ "${{ steps.deploy-info.outputs.prod_backend }}" == "true" && "${{ steps.deploy-info.outputs.prod_success }}" == "true" ]]; then
+                      BLOCKS+=',
+                      {
+                          "type": "section",
+                          "text": {
+                              "type": "mrkdwn",
+                              "text": "*운영 환경*\n• *Backend API* Serverless PROD 배포 완료"
                           }
                       }'
                   fi
@@ -309,7 +375,9 @@ jobs:
                   set -e
 
                   DEV_WEB="${{ github.event.inputs.deploy_web_dev }}"
+                  DEV_BACKEND="${{ github.event.inputs.deploy_backend_dev }}"
                   PROD_WEB="${{ github.event.inputs.deploy_web_prod }}"
+                  PROD_BACKEND="${{ github.event.inputs.deploy_backend_prod }}"
 
                   TIMESTAMP=$(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M:%S')
                   COMMIT_SHA="${GITHUB_SHA:0:7}"
@@ -318,11 +386,15 @@ jobs:
                   PROD_FAILED="false"
 
                   [[ "$DEV_WEB" == "true" && "${{ needs.deploy-dev.result }}" == "failure" ]] && DEV_FAILED="true"
+                  [[ "$DEV_BACKEND" == "true" && "${{ needs.deploy-dev.result }}" == "failure" ]] && DEV_FAILED="true"
                   [[ "$PROD_WEB" == "true" && "${{ needs.deploy-prod.result }}" == "failure" ]] && PROD_FAILED="true"
+                  [[ "$PROD_BACKEND" == "true" && "${{ needs.deploy-prod.result }}" == "failure" ]] && PROD_FAILED="true"
 
                   {
                     echo "dev_web=${DEV_WEB}"
+                    echo "dev_backend=${DEV_BACKEND}"
                     echo "prod_web=${PROD_WEB}"
+                    echo "prod_backend=${PROD_BACKEND}"
                     echo "dev_failed=${DEV_FAILED}"
                     echo "prod_failed=${PROD_FAILED}"
                     echo "timestamp=${TIMESTAMP}"
@@ -360,7 +432,7 @@ jobs:
                           "type": "section",
                           "text": {
                               "type": "mrkdwn",
-                              "text": "*개발 환경 배포 실패*\n• *Flows* <https://flow-dev.eureka.codes/|개발 서버>"
+                              "text": "*개발 환경 배포 실패*\n• 선택된 Web/Backend 배포 중 하나 이상 실패"
                           }
                       }'
                   fi
@@ -371,7 +443,7 @@ jobs:
                           "type": "section",
                           "text": {
                               "type": "mrkdwn",
-                              "text": "*운영 환경 배포 실패*\n• *Flows* <https://flow.eureka.codes/|운영 서버>"
+                              "text": "*운영 환경 배포 실패*\n• 선택된 Web/Backend 배포 중 하나 이상 실패"
                           }
                       }'
                   fi

@@ -10,6 +10,7 @@ jobs:
         runs-on: ubuntu-latest
         outputs:
             web: ${{ steps.set-matrix.outputs.web }}
+            backend: ${{ steps.set-matrix.outputs.backend }}
             matrix: ${{ steps.set-matrix.outputs.matrix }}
             has-changes: ${{ steps.set-matrix.outputs.has-changes }}
 
@@ -27,7 +28,7 @@ jobs:
                           - 'apps/web/src/**'
                           - 'apps/web/public/**'
                           - 'apps/web/index.html'
-                          - 'apps/web/vite.config.ts'
+                          - 'apps/web/vite.config.*'
                           - 'apps/web/project.json'
                           - 'apps/web/tsconfig*.json'
                           - 'apps/web/tailwind.config.js'
@@ -36,16 +37,26 @@ jobs:
                           - 'libs/**'
                           - 'package.json'
                           - 'yarn.lock'
+                      backend:
+                          - 'apps/backend/**'
+                          - 'libs/contracts/**'
+                          - 'package.json'
+                          - 'yarn.lock'
 
             - name: Set matrix for changed projects
               id: set-matrix
               run: |
                   PROJECTS=()
                   WEB_CHANGED="false"
+                  BACKEND_CHANGED="false"
 
                   if [[ "${{ steps.filter.outputs.web }}" == "true" && -d "apps/web" ]]; then
                       PROJECTS+=('"web"')
                       WEB_CHANGED="true"
+                  fi
+                  if [[ "${{ steps.filter.outputs.backend }}" == "true" && -d "apps/backend" ]]; then
+                      PROJECTS+=('"backend"')
+                      BACKEND_CHANGED="true"
                   fi
 
                   if [ ${#PROJECTS[@]} -eq 0 ]; then
@@ -58,6 +69,7 @@ jobs:
                   fi
 
                   echo "web=${WEB_CHANGED}" >> $GITHUB_OUTPUT
+                  echo "backend=${BACKEND_CHANGED}" >> $GITHUB_OUTPUT
 
     get-version:
         needs: changes
@@ -154,7 +166,8 @@ jobs:
                   aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
                   aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
 
-            - name: Deploy to PROD
+            - name: Deploy web to PROD
+              if: ${{ matrix.project == 'web' }}
               env:
                   BUCKET_NAME: ${{ secrets.BUCKET_NAME }}
                   PROD_CF_DISTRIBUTION_ID: ${{ secrets.PROD_CF_DISTRIBUTION_ID }}
@@ -167,6 +180,19 @@ jobs:
                   set -e
                   chmod +x scripts/deploy-${{ matrix.project }}.sh
                   NODE_OPTIONS="--max-old-space-size=4096" yarn ${{ matrix.project }}:deploy:prod
+
+            - name: Deploy backend to PROD
+              if: ${{ matrix.project == 'backend' }}
+              env:
+                  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+                  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+                  ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+                  NANOBANANA_API_KEY: ${{ secrets.NANOBANANA_API_KEY }}
+                  AI_PROVIDER: openai
+                  SLS_TELEMETRY_DISABLED: '1'
+              run: |
+                  set -e
+                  NODE_OPTIONS="--max-old-space-size=4096" yarn backend:deploy:prod
 
     notify-slack:
         needs: [changes, get-version, build-and-deploy]
@@ -203,6 +229,9 @@ jobs:
 
                   if [[ "${{ needs.changes.outputs.web }}" == "true" ]]; then
                       DEPLOY_MESSAGES+=("• *Flows* <https://flow.eureka.codes/|운영 서버> \`v${{ needs.get-version.outputs.web-version }}\`")
+                  fi
+                  if [[ "${{ needs.changes.outputs.backend }}" == "true" ]]; then
+                      DEPLOY_MESSAGES+=("• *Backend API* Serverless PROD 배포 완료")
                   fi
 
                   if [ ${#DEPLOY_MESSAGES[@]} -eq 0 ]; then
@@ -302,6 +331,9 @@ jobs:
 
                   if [[ "${{ needs.changes.outputs.web }}" == "true" ]]; then
                       DEPLOY_MESSAGES+=("• *Flows* <https://flow.eureka.codes/|운영 서버>")
+                  fi
+                  if [[ "${{ needs.changes.outputs.backend }}" == "true" ]]; then
+                      DEPLOY_MESSAGES+=("• *Backend API* Serverless PROD")
                   fi
 
                   if [ ${#DEPLOY_MESSAGES[@]} -eq 0 ]; then
