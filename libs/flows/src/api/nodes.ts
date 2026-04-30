@@ -26,6 +26,7 @@ export interface RunNodeBody {
 }
 
 /**
+ * @deprecated Use GET /flows/{flowId} nodes array instead. Removal in P3.
  * List nodes by flow ID
  * POST /nodes/0/list
  */
@@ -67,6 +68,7 @@ export const getPortData = async (portId: string, direction: 'in' | 'out'): Prom
 };
 
 /**
+ * @deprecated Use upsertFlow() from flows.ts instead. Removal in P3.
  * Create new node
  * POST /nodes/0
  *
@@ -84,6 +86,7 @@ export const createNode = async (body: NodeBody): Promise<NodeView> => {
 };
 
 /**
+ * @deprecated Use upsertFlow() from flows.ts for canvas saves. Removal in P3.
  * Upsert node (create or update)
  * POST /nodes/:id/upsert?flowId=<flowId>
  *

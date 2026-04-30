@@ -117,9 +117,74 @@ export interface PortUpdateMessage {
 }
 
 /**
+ * Proposal created event — show PreflightCard in chat panel
+ */
+export interface ProposalCreatedMessage {
+    type: 'proposal.created';
+    id: string;
+    flowId?: string;
+    timestamp?: number;
+    proposalId: string;
+    blocks?: Array<{ type: string; label: string }>;
+    estimatedCost?: string;
+    description?: string;
+}
+
+/**
+ * Run lifecycle events
+ */
+export interface RunStartedMessage {
+    type: 'run.started';
+    id: string;
+    flowId?: string;
+    runId?: string;
+    timestamp?: number;
+}
+
+export interface RunCompletedMessage {
+    type: 'run.completed';
+    id: string;
+    flowId?: string;
+    runId?: string;
+    timestamp?: number;
+}
+
+export interface RunFailedMessage {
+    type: 'run.failed';
+    id: string;
+    flowId?: string;
+    runId?: string;
+    timestamp?: number;
+    error?: string;
+    /** ID of the node that caused the failure — used to highlight it on canvas */
+    failedNodeId?: string;
+}
+
+/**
+ * Asset created event — show download/preview in OutputPanel
+ */
+export interface AssetCreatedMessage {
+    type: 'asset.created';
+    id: string;
+    flowId?: string;
+    assetId: string;
+    assetType?: 'image' | 'audio' | 'video' | 'file';
+    url?: string;
+    timestamp?: number;
+}
+
+/**
  * Union type for socket data messages
  */
-export type SocketDataMessage = FlowUpdateMessage | NodeUpdateMessage | PortUpdateMessage;
+export type SocketDataMessage =
+    | FlowUpdateMessage
+    | NodeUpdateMessage
+    | PortUpdateMessage
+    | ProposalCreatedMessage
+    | RunStartedMessage
+    | RunCompletedMessage
+    | RunFailedMessage
+    | AssetCreatedMessage;
 
 /**
  * Raw WebSocket message wrapper from server

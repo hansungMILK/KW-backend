@@ -5,7 +5,18 @@ import { useWebCoreStore } from '@flows/web-core';
 import { useWebSocketWorker } from './useWebSocketWorker';
 import { useWebSocketStore } from '../stores/useWebSocketStore';
 
-import type { FlowUpdateMessage, NodeState, NodeUpdateMessage, PortUpdateMessage, WebSocketMessage } from '../types';
+import type {
+    AssetCreatedMessage,
+    FlowUpdateMessage,
+    NodeState,
+    NodeUpdateMessage,
+    PortUpdateMessage,
+    ProposalCreatedMessage,
+    RunCompletedMessage,
+    RunFailedMessage,
+    RunStartedMessage,
+    WebSocketMessage,
+} from '../types';
 
 const WS_ENDPOINT = import.meta.env.VITE_WS_ENDPOINT || '';
 
@@ -36,6 +47,31 @@ const parseWebSocketMessage = (data: unknown): WebSocketMessage | null => {
     }
 
     return null;
+};
+
+export const isProposalCreatedMessage = (data: unknown): data is ProposalCreatedMessage => {
+    if (typeof data !== 'object' || data === null) return false;
+    return (data as Record<string, unknown>)['type'] === 'proposal.created';
+};
+
+export const isRunStartedMessage = (data: unknown): data is RunStartedMessage => {
+    if (typeof data !== 'object' || data === null) return false;
+    return (data as Record<string, unknown>)['type'] === 'run.started';
+};
+
+export const isRunCompletedMessage = (data: unknown): data is RunCompletedMessage => {
+    if (typeof data !== 'object' || data === null) return false;
+    return (data as Record<string, unknown>)['type'] === 'run.completed';
+};
+
+export const isRunFailedMessage = (data: unknown): data is RunFailedMessage => {
+    if (typeof data !== 'object' || data === null) return false;
+    return (data as Record<string, unknown>)['type'] === 'run.failed';
+};
+
+export const isAssetCreatedMessage = (data: unknown): data is AssetCreatedMessage => {
+    if (typeof data !== 'object' || data === null) return false;
+    return (data as Record<string, unknown>)['type'] === 'asset.created';
 };
 
 /**
@@ -175,6 +211,16 @@ export interface UseInitFlowSocketOptions {
     onNodeReload?: (info: NodeUpdateInfo) => void;
     /** Callback when port update notification is received - should fetch port data */
     onPortUpdate?: (info: PortUpdateInfo) => void;
+    /** Callback when proposal.created event is received */
+    onProposalCreated?: (msg: ProposalCreatedMessage) => void;
+    /** Callback when run.started event is received */
+    onRunStarted?: (msg: RunStartedMessage) => void;
+    /** Callback when run.completed event is received */
+    onRunCompleted?: (msg: RunCompletedMessage) => void;
+    /** Callback when run.failed event is received */
+    onRunFailed?: (msg: RunFailedMessage) => void;
+    /** Callback when asset.created event is received */
+    onAssetCreated?: (msg: AssetCreatedMessage) => void;
 }
 
 /**
@@ -201,7 +247,19 @@ export interface UseInitFlowSocketOptions {
  * });
  */
 export const useInitFlowSocket = (options: UseInitFlowSocketOptions = {}) => {
-    const { channelId, currentFlowId, getLastLocalUpdateTimestamp, onFlowUpdate, onNodeReload, onPortUpdate } = options;
+    const {
+        channelId,
+        currentFlowId,
+        getLastLocalUpdateTimestamp,
+        onFlowUpdate,
+        onNodeReload,
+        onPortUpdate,
+        onProposalCreated,
+        onRunStarted,
+        onRunCompleted,
+        onRunFailed,
+        onAssetCreated,
+    } = options;
 
     const apiKey = useWebCoreStore(state => state.apiKey);
     const setId = useWebSocketStore(state => state.setId);
@@ -319,6 +377,39 @@ export const useInitFlowSocket = (options: UseInitFlowSocketOptions = {}) => {
                 return;
             }
 
+            // Handle proposal.created — show PreflightCard in chat panel
+            if (isProposalCreatedMessage(data)) {
+                const isForCurrentFlow = !data.flowId || data.flowId === currentFlowId;
+                if (isForCurrentFlow && onProposalCreated) {
+                    onProposalCreated(data);
+                }
+                return;
+            }
+
+            // Handle run lifecycle events
+            if (isRunStartedMessage(data)) {
+                const isForCurrentFlow = !data.flowId || data.flowId === currentFlowId;
+                if (isForCurrentFlow && onRunStarted) onRunStarted(data);
+                return;
+            }
+            if (isRunCompletedMessage(data)) {
+                const isForCurrentFlow = !data.flowId || data.flowId === currentFlowId;
+                if (isForCurrentFlow && onRunCompleted) onRunCompleted(data);
+                return;
+            }
+            if (isRunFailedMessage(data)) {
+                const isForCurrentFlow = !data.flowId || data.flowId === currentFlowId;
+                if (isForCurrentFlow && onRunFailed) onRunFailed(data);
+                return;
+            }
+
+            // Handle asset.created — show download/preview in OutputPanel
+            if (isAssetCreatedMessage(data)) {
+                const isForCurrentFlow = !data.flowId || data.flowId === currentFlowId;
+                if (isForCurrentFlow && onAssetCreated) onAssetCreated(data);
+                return;
+            }
+
             // Handle port update notification (type: 'node/port')
             // Triggered when port data (input/output) changes
             // Used for real-time data synchronization between browser tabs
@@ -357,6 +448,11 @@ export const useInitFlowSocket = (options: UseInitFlowSocketOptions = {}) => {
         onFlowUpdate,
         onNodeReload,
         onPortUpdate,
+        onProposalCreated,
+        onRunStarted,
+        onRunCompleted,
+        onRunFailed,
+        onAssetCreated,
     ]);
 
     // Cleanup on unmount

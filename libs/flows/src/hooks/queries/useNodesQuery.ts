@@ -1,9 +1,9 @@
 import { useMutation } from '@tanstack/react-query';
 
-import { upsertEdge, upsertNode } from '../../api';
+import { upsertEdge, upsertFlow } from '../../api';
 
-import type { NodeView, UpsertNodeResult } from '../../types';
-import type { EdgeData } from '@lemoncloud/eureka-flows-api';
+import type { NodeView } from '../../types';
+import type { EdgeData, NodeData } from '@lemoncloud/eureka-flows-api';
 import type { UseMutationResult } from '@tanstack/react-query';
 
 interface UpsertNodeVariables {
@@ -13,17 +13,15 @@ interface UpsertNodeVariables {
 }
 
 /**
- * Mutation hook for upserting a node (create or update)
- * POST /nodes/:id/upsert?flowId=<flowId>
+ * Mutation hook for upserting a node via Flow PUT
+ * POST /flows/:id/upsert (transitioning to PUT /flows/{flowId} in P3)
  *
- * New unified endpoint for node operations.
- * - id="0" with no body.id → create new node
- * - id="0" with body.id → upsert by body.id
- * - id=<nodeId> → upsert existing node
+ * @deprecated individual /nodes/:id/upsert path removed — now routes through upsertFlow
  */
-export const useUpsertNodeMutation = (): UseMutationResult<UpsertNodeResult, Error, UpsertNodeVariables> => {
+export const useUpsertNodeMutation = () => {
     return useMutation({
-        mutationFn: ({ id, flowId, body }: UpsertNodeVariables) => upsertNode(id, flowId, body),
+        mutationFn: ({ id, flowId, body }: UpsertNodeVariables) =>
+            upsertFlow(flowId, { nodes: [{ id, ...(body as NodeData) }], edges: [] }),
         onError: (error: Error, { id }) => {
             console.error(`[useUpsertNodeMutation] Failed to upsert node ${id}:`, error);
         },
@@ -36,20 +34,17 @@ interface CreateNodeVariables {
 }
 
 /**
- * Mutation hook for creating a new node with server-assigned ID
- * POST /nodes/0/upsert?flowId=<flowId>
+ * Mutation hook for creating a new node via Flow upsert
+ * POST /flows/:id/upsert (transitioning to PUT /flows/{flowId} in P3)
  *
- * Server assigns the node ID and returns it in the response.
- * Use this for optimistic UI pattern:
- * 1. Create node in UI with temp ID
- * 2. Call this mutation
- * 3. Replace temp ID with server-assigned ID from response
+ * Server assigns the node ID and returns it in response.nodes[0].
  *
- * @returns UpsertNodeResult with nodes$$[0].id containing server-assigned ID
+ * @deprecated individual /nodes/0/upsert path removed — now routes through upsertFlow
  */
-export const useCreateNodeMutation = (): UseMutationResult<UpsertNodeResult, Error, CreateNodeVariables> => {
+export const useCreateNodeMutation = () => {
     return useMutation({
-        mutationFn: ({ flowId, body }: CreateNodeVariables) => upsertNode('0', flowId, body),
+        mutationFn: ({ flowId, body }: CreateNodeVariables) =>
+            upsertFlow(flowId, { nodes: [body as NodeData], edges: [] }),
         onError: (error: Error) => {
             console.error('[useCreateNodeMutation] Failed to create node:', error);
         },
@@ -67,7 +62,11 @@ interface CreateEdgeVariables {
  *
  * This hook incorrectly uses upsertEdge() which calls the wrong API endpoint.
  */
-export const useCreateEdgeMutation = (): UseMutationResult<UpsertNodeResult, Error, CreateEdgeVariables> => {
+export const useCreateEdgeMutation = (): UseMutationResult<
+    Awaited<ReturnType<typeof upsertEdge>>,
+    Error,
+    CreateEdgeVariables
+> => {
     return useMutation({
         mutationFn: ({ flowId, edge }: CreateEdgeVariables) => upsertEdge(flowId, edge),
         onError: (error: Error) => {

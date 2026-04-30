@@ -6,6 +6,10 @@ import { ApiKeyDialog } from '@flows/shared';
 import { useInitFlowSocket } from '@flows/socket';
 import { useWebCoreStore } from '@flows/web-core';
 
+// [추가] Flow Agent 채팅 패널 컴포넌트 import
+// - 원본에는 없던 컴포넌트로, 우측에 열리는 AI 채팅 패널을 담당합니다.
+import { AssetPreviewPanel } from '../components/AssetPreviewPanel';
+import { FlowAgentPanel } from '../components/FlowAgentPanel';
 import { Header } from '../components/Header';
 import { HelpDialog } from '../components/HelpDialog';
 import { Sidebar } from '../components/Sidebar';
@@ -14,7 +18,7 @@ import { WorkflowCanvas } from '../components/WorkflowCanvas';
 import type { HelpTab } from '../components/help';
 import type { SidebarRef } from '../components/Sidebar';
 import type { WorkflowCanvasRef } from '../components/WorkflowCanvas';
-import type { NodeUpdateInfo, PortUpdateInfo } from '@flows/socket';
+import type { AssetCreatedMessage, NodeUpdateInfo, PortUpdateInfo, ProposalCreatedMessage } from '@flows/socket';
 
 const serializeWorkflowState = (data: { nodes?: unknown[]; connections?: unknown[]; edges?: unknown[] }): string =>
     JSON.stringify({ nodes: data.nodes ?? [], connections: data.connections ?? data.edges ?? [] });
@@ -292,6 +296,27 @@ export const FlowEditorPage = () => {
         onFlowUpdate: handleFlowUpdate,
         onNodeReload: handleNodeUpdate,
         onPortUpdate: handlePortUpdate,
+        onProposalCreated: msg => {
+            setLatestProposal(msg);
+            setIsAgentOpen(true);
+        },
+        onRunStarted: () => {
+            setRunStatus('running');
+            setRunFailedError(null);
+            if (runStatusTimerRef.current) window.clearTimeout(runStatusTimerRef.current);
+        },
+        onRunCompleted: () => {
+            setRunStatus('completed');
+            runStatusTimerRef.current = window.setTimeout(() => setRunStatus(null), 4000);
+        },
+        onRunFailed: msg => {
+            setRunStatus('failed');
+            setRunFailedError(msg.error ?? null);
+            if (msg.failedNodeId) {
+                canvasRef.current?.updateNodeFromServer(msg.failedNodeId, { status: 'ERROR' });
+            }
+        },
+        onAssetCreated: msg => setLatestAsset(msg),
     });
 
     const [isAppReady, setIsAppReady] = useState(false);
@@ -299,7 +324,19 @@ export const FlowEditorPage = () => {
     const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
     const [isApiKeyDialogOpen, setIsApiKeyDialogOpen] = useState(false);
     const [isHelpDialogOpen, setIsHelpDialogOpen] = useState(false);
+    // [추가] Flow Agent 패널 열림/닫힘 상태
+    // - true: 우측에 채팅 패널이 열림
+    // - false: 패널이 닫히고 우측 하단에 채팅 버튼이 표시됨
+    const [isAgentOpen, setIsAgentOpen] = useState(false);
+    const [latestProposal, setLatestProposal] = useState<ProposalCreatedMessage | null>(null);
+    const [runStatus, setRunStatus] = useState<'running' | 'completed' | 'failed' | null>(null);
+    const [runFailedError, setRunFailedError] = useState<string | null>(null);
+    const [latestAsset, setLatestAsset] = useState<AssetCreatedMessage | null>(null);
+    const runStatusTimerRef = useRef<number | null>(null);
     const [helpDialogTab, setHelpDialogTab] = useState<HelpTab>('gettingStarted');
+    const [agentBtnPos, setAgentBtnPos] = useState<{ x: number; y: number } | null>(null);
+    const agentBtnDragRef = useRef<{ mouseX: number; mouseY: number; btnX: number; btnY: number } | null>(null);
+    const agentBtnIsDraggingRef = useRef(false);
 
     const { apiKey, setApiKey } = useWebCoreStore();
     const autoSaveTimerRef = useRef<number | null>(null);
@@ -496,9 +533,26 @@ export const FlowEditorPage = () => {
         }
     };
 
-    const handleAddNode = useCallback((type: string) => {
-        canvasRef.current?.addNode(type);
+    const handleAddNode = useCallback((type: string, customLabel?: string) => {
+        canvasRef.current?.addNode(type, customLabel);
     }, []);
+
+    const handleApproveProposal = useCallback(
+        async (nodes: unknown[], edges: unknown[]) => {
+            if (!canvasRef.current || (!nodes.length && !edges.length)) return;
+            try {
+                await canvasRef.current.loadWorkflow({ nodes, edges } as Parameters<
+                    WorkflowCanvasRef['loadWorkflow']
+                >[0]);
+                lastSavedStateRef.current = null;
+                showNotification('캔버스에 블록이 배치되었습니다.', 'success');
+                triggerAutoSave();
+            } catch {
+                showNotification('캔버스 업데이트 실패', 'error');
+            }
+        },
+        [triggerAutoSave]
+    );
 
     const handleSelectionChange = (nodeId: string | null) => {
         updateUrl(currentFlowId, nodeId);
@@ -641,7 +695,7 @@ export const FlowEditorPage = () => {
             <div className="flex h-screen bg-background text-foreground font-sans items-center justify-center flex-col gap-4">
                 <div className="relative w-16 h-16">
                     <div className="absolute inset-0 border-4 border-border rounded-full"></div>
-                    <div className="absolute inset-0 border-4 border-primary rounded-full border-t-transparent animate-spin"></div>
+                    <div className="absolute inset-0 border-4 border-primary rounded-full border-t-transparent animate-spin-slow"></div>
                 </div>
                 <div className="text-muted-foreground font-mono text-sm animate-pulse">{loadingText}</div>
             </div>
@@ -727,6 +781,114 @@ export const FlowEditorPage = () => {
 
             {/* Help Dialog */}
             <HelpDialog open={isHelpDialogOpen} onOpenChange={setIsHelpDialogOpen} defaultTab={helpDialogTab} />
+
+            {/*
+             * [추가] Flow Agent 채팅 패널
+             * - isAgentOpen이 true일 때 화면 우측에 채팅 패널이 열립니다.
+             * - open: 패널 열림 여부 전달
+             * - onClose: X 버튼 클릭 시 패널을 닫는 함수 전달
+             */}
+            <FlowAgentPanel
+                open={isAgentOpen}
+                onClose={() => setIsAgentOpen(false)}
+                flowId={currentFlowId}
+                onApproveProposal={handleApproveProposal}
+                externalProposal={latestProposal}
+            />
+
+            {/*
+             * [추가] Flow Agent 실행 버튼 (채팅 버튼)
+             * - 패널이 닫혀 있을 때(!isAgentOpen)만 화면 우측 하단에 표시됩니다.
+             * - 클릭하면 isAgentOpen을 true로 바꿔 패널을 엽니다.
+             * - 패널이 열리면 이 버튼은 자동으로 사라집니다(중복 방지).
+             */}
+            {!isAgentOpen && (
+                <button
+                    onMouseDown={e => {
+                        e.preventDefault();
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        agentBtnDragRef.current = {
+                            mouseX: e.clientX,
+                            mouseY: e.clientY,
+                            btnX: rect.left,
+                            btnY: rect.top,
+                        };
+                        agentBtnIsDraggingRef.current = false;
+
+                        const onMouseMove = (mv: MouseEvent) => {
+                            if (!agentBtnDragRef.current) return;
+                            const dx = mv.clientX - agentBtnDragRef.current.mouseX;
+                            const dy = mv.clientY - agentBtnDragRef.current.mouseY;
+                            if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
+                                agentBtnIsDraggingRef.current = true;
+                            }
+                            setAgentBtnPos({
+                                x: Math.max(0, Math.min(agentBtnDragRef.current.btnX + dx, window.innerWidth - 48)),
+                                y: Math.max(0, Math.min(agentBtnDragRef.current.btnY + dy, window.innerHeight - 48)),
+                            });
+                        };
+                        const onMouseUp = () => {
+                            agentBtnDragRef.current = null;
+                            window.removeEventListener('mousemove', onMouseMove);
+                            window.removeEventListener('mouseup', onMouseUp);
+                        };
+                        window.addEventListener('mousemove', onMouseMove);
+                        window.addEventListener('mouseup', onMouseUp);
+                    }}
+                    onClick={() => {
+                        if (agentBtnIsDraggingRef.current) return;
+                        setIsAgentOpen(true);
+                    }}
+                    style={agentBtnPos ? { left: agentBtnPos.x, top: agentBtnPos.y } : undefined}
+                    className={`z-30 w-12 h-12 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center hover:bg-primary/90 cursor-grab active:cursor-grabbing select-none ${agentBtnPos ? 'fixed' : 'absolute bottom-6 right-6'}`}
+                    title="Flow Agent"
+                >
+                    {/* 말풍선 아이콘 (lucide-react에 없어서 SVG 직접 사용) */}
+                    <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="w-5 h-5"
+                    >
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                    </svg>
+                </button>
+            )}
+
+            {/* Run status banner */}
+            {runStatus && (
+                <div
+                    className={`absolute top-16 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-full shadow-lg text-sm font-medium animate-in slide-in-from-top-2 fade-in z-50 backdrop-blur-sm ${
+                        runStatus === 'running'
+                            ? 'bg-status-running/20 text-status-running border border-status-running/30'
+                            : runStatus === 'completed'
+                              ? 'bg-status-completed/20 text-status-completed border border-status-completed/30'
+                              : 'bg-destructive/20 text-destructive border border-destructive/30'
+                    }`}
+                >
+                    {runStatus === 'running' && (
+                        <span className="w-2 h-2 rounded-full bg-status-running animate-pulse" />
+                    )}
+                    {runStatus === 'running' && '실행 중...'}
+                    {runStatus === 'completed' && '✓ 실행 완료'}
+                    {runStatus === 'failed' && `실행 실패${runFailedError ? `: ${runFailedError}` : ''}`}
+                    {runStatus !== 'running' && (
+                        <button
+                            onClick={() => setRunStatus(null)}
+                            className="ml-1 opacity-60 hover:opacity-100 transition-opacity text-xs"
+                        >
+                            ✕
+                        </button>
+                    )}
+                </div>
+            )}
+
+            {/* Asset preview panel */}
+            {latestAsset && <AssetPreviewPanel asset={latestAsset} onClose={() => setLatestAsset(null)} />}
 
             {/* Notification Toast */}
             {notification && (

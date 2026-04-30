@@ -9,6 +9,7 @@ const _log = console.log.bind(console, '[edges-api]');
 // ============================================================================
 
 /**
+ * @deprecated Use GET /flows/{flowId} edges array instead. Removal in P3.
  * List edges by flow ID
  * POST /edges/0/list
  */
@@ -23,6 +24,7 @@ export const listEdges = async (flowId: string): Promise<EdgeView[]> => {
 };
 
 /**
+ * @deprecated Use upsertFlow() from flows.ts instead. Removal in P3.
  * Get edge by ID
  * GET /edges/:id
  */
@@ -33,6 +35,7 @@ export const getEdge = async (id: string): Promise<EdgeView> => {
 };
 
 /**
+ * @deprecated Use upsertFlow() from flows.ts instead. Removal in P3.
  * Create new edge
  * POST /edges/0
  */
@@ -43,6 +46,7 @@ export const createEdge = async (body: EdgeBody): Promise<EdgeView> => {
 };
 
 /**
+ * @deprecated Use upsertFlow() from flows.ts instead. Removal in P3.
  * Update existing edge
  * POST /edges/:id
  */
@@ -53,6 +57,7 @@ export const updateEdge = async (id: string, body: EdgeBody): Promise<EdgeView> 
 };
 
 /**
+ * @deprecated Use upsertFlow() with id prefixed '#' for deletion. Removal in P3.
  * Delete edge
  * DELETE /edges/:id
  */
