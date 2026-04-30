@@ -244,6 +244,11 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
         nodesRef.current = nodes;
         connectionsRef.current = connections;
 
+        // Tracks the most recently placed node position.
+        // Updated synchronously inside addNode so rapid-fire additions
+        // never read stale React state and land on the same spot.
+        const lastPlacedPosRef = useRef<{ x: number; y: number } | null>(null);
+
         const canvasRef = useRef<HTMLDivElement>(null);
 
         const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 });
@@ -487,24 +492,35 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     if (sourceNode) {
                         startX = sourceNode.position.x + 300;
                         startY = sourceNode.position.y;
-                    } else if (nodes.length > 0) {
-                        // No compatible source — stack below the bottommost existing node
-                        const bottomNode = nodes.reduce((prev, curr) =>
-                            curr.position.y > prev.position.y ? curr : prev
-                        );
-                        startX = bottomNode.position.x;
-                        startY = bottomNode.position.y + 230;
                     } else {
-                        // First node on empty canvas — use canvas center
-                        const rect = canvasRef.current?.getBoundingClientRect();
-                        const centerX = rect ? (rect.width / 2 - viewport.x) / viewport.zoom : 200;
-                        const centerY = rect ? (rect.height / 2 - viewport.y) / viewport.zoom : 200;
-                        startX = centerX - 100;
-                        startY = centerY - 50;
+                        // Use lastPlacedPosRef for the anchor so that rapid-fire additions
+                        // (before React re-renders and updates the closure) never land on
+                        // the same spot. Fall back to nodesRef then canvas center.
+                        const anchor =
+                            lastPlacedPosRef.current ??
+                            (nodesRef.current.length > 0
+                                ? nodesRef.current.reduce((p, c) => (c.position.y > p.position.y ? c : p)).position
+                                : null);
+
+                        if (anchor) {
+                            startX = anchor.x;
+                            startY = anchor.y + 230;
+                        } else {
+                            // First node on empty canvas — use canvas center
+                            const rect = canvasRef.current?.getBoundingClientRect();
+                            const centerX = rect ? (rect.width / 2 - viewport.x) / viewport.zoom : 200;
+                            const centerY = rect ? (rect.height / 2 - viewport.y) / viewport.zoom : 200;
+                            startX = centerX - 100;
+                            startY = centerY - 50;
+                        }
                     }
 
                     const snappedX = Math.round(startX / GRID_SIZE) * GRID_SIZE;
                     const snappedY = Math.round(startY / GRID_SIZE) * GRID_SIZE;
+
+                    // Synchronously record position so the next addNode call
+                    // (even before React re-renders) doesn't land in the same spot.
+                    lastPlacedPosRef.current = { x: snappedX, y: snappedY };
 
                     // Generate temp ID for optimistic UI
                     const tempNodeId = generateTempId('node');
@@ -651,6 +667,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     edges: connections.filter(c => !pendingEdgeIds.has(c.id)),
                 }),
                 loadWorkflow: async (state: WorkflowStateWithPorts) => {
+                    lastPlacedPosRef.current = null;
                     // Normalize nodes to ensure config is never undefined
                     const loadedNodes = (state.nodes ?? []).map(n => ({
                         ...n,
@@ -777,6 +794,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     saveCheckpoint();
                     setNodes([]);
                     setConnections([]);
+                    lastPlacedPosRef.current = null;
                     handleSelectionChange(null);
                 },
                 newWorkflow: () => {
@@ -785,6 +803,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     setConnections([]);
                     pastRef.current = [];
                     futureRef.current = [];
+                    lastPlacedPosRef.current = null;
                     setViewport({ x: 0, y: 0, zoom: 1 });
                     handleSelectionChange(null);
                 },
