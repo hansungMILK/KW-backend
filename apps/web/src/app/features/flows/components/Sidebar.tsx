@@ -43,7 +43,9 @@ const BlockItem: React.FC<{
         <Star className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
         <div className="min-w-0 w-full">
             <p className="text-sm font-medium text-foreground">{block.label}</p>
-            {block.description && <p className="text-xs text-muted-foreground leading-relaxed">{block.description}</p>}
+            {block.description && (
+                <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">{block.description}</p>
+            )}
         </div>
     </button>
 );
