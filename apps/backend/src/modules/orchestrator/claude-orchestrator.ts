@@ -1,5 +1,7 @@
 import { ORCHESTRATOR_SYSTEM_PROMPT, PROMPT_VERSION, buildUserPrompt } from './prompt-templates';
-import { parseClaudeResponse } from './response-parser';
+import { ALLOWED_BLOCK_TYPES, parseClaudeResponse } from './response-parser';
+
+import type { AllowedBlockType } from './response-parser';
 import { claudeAdapter } from '../../adapters/ai/claude-adapter';
 import { traceService } from '../../services/trace-service';
 import { generateNumericId } from '../../utils/id-generator';
@@ -9,7 +11,7 @@ import type { Orchestrator, ProposalResult } from './types';
 
 const MODEL = 'claude-sonnet-4-20250514';
 
-const COST_ESTIMATES: Record<string, number> = {
+const COST_ESTIMATES: Record<AllowedBlockType, number> = {
     search: 0.02,
     content: 0.15,
     data: 0.01,
