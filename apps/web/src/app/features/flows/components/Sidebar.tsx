@@ -67,7 +67,14 @@ export const Sidebar = forwardRef<SidebarRef, SidebarProps>(({ onAddNode, isLoad
 
     // Build categorized block list from server registry
     const blocksByCategory = useMemo(() => {
-        const all = Object.values(blockRegistry);
+        // blockRegistry indexes each block by both type and id for backward compat,
+        // so deduplicate by block.type before categorizing
+        const seen = new Set<string>();
+        const all = Object.values(blockRegistry).filter(block => {
+            if (seen.has(block.type)) return false;
+            seen.add(block.type);
+            return true;
+        });
         const map: Record<BlockStereo, BlockDefinitionWithFrontend[]> = {
             input: [],
             process: [],
