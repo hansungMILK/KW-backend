@@ -35,7 +35,9 @@ export interface MessageView {
 const asRecord = (value: unknown): Record<string, unknown> =>
     typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
 
-const formatEstimatedCost = (cost: MessageCreateResponse['proposal']['estimatedCost']): string | undefined => {
+const formatEstimatedCost = (
+    cost: NonNullable<MessageCreateResponse['proposal']>['estimatedCost']
+): string | undefined => {
     if (!cost) return undefined;
     const currency = cost.currency === 'USD' ? '$' : `${cost.currency} `;
     return `${currency}${cost.total.toFixed(2)}`;
@@ -62,15 +64,18 @@ const toProposalEdge = (edge: unknown): { source: string; target: string } | nul
     return { source: String(source), target: String(target) };
 };
 
-const toMessageProposal = (response: MessageCreateResponse): MessageProposal => ({
-    id: response.proposal.proposalId,
-    blocks: response.proposal.proposedNodes.map(toProposalBlock),
-    edges: response.proposal.proposedEdges.map(toProposalEdge).filter((edge): edge is { source: string; target: string } =>
-        Boolean(edge)
-    ),
-    estimatedCost: formatEstimatedCost(response.proposal.estimatedCost),
-    description: response.assistantMessage.content,
-});
+const toMessageProposal = (response: MessageCreateResponse): MessageProposal | undefined => {
+    if (!response.proposal || response.proposal.proposedNodes.length === 0) return undefined;
+    return {
+        id: response.proposal.proposalId,
+        blocks: response.proposal.proposedNodes.map(toProposalBlock),
+        edges: response.proposal.proposedEdges
+            .map(toProposalEdge)
+            .filter((edge): edge is { source: string; target: string } => Boolean(edge)),
+        estimatedCost: formatEstimatedCost(response.proposal.estimatedCost),
+        description: response.assistantMessage.content,
+    };
+};
 
 /**
  * Send a message to the flow agent

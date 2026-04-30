@@ -54,6 +54,7 @@ export const FlowAgentPanel = ({ open, onClose, flowId, onApproveProposal, exter
     // Handle externally pushed proposal.created WS event
     useEffect(() => {
         if (!externalProposal) return;
+        if (!externalProposal.blocks || externalProposal.blocks.length === 0) return;
         const proposal: MessageProposal = {
             id: externalProposal.proposalId,
             blocks: externalProposal.blocks ?? [],
@@ -153,6 +154,7 @@ export const FlowAgentPanel = ({ open, onClose, flowId, onApproveProposal, exter
 
                     if (msg.proposal) {
                         const { blocks, estimatedCost, description } = msg.proposal;
+                        if (blocks.length === 0) return null;
                         const proposal = msg.proposal;
                         return (
                             <div key={msg.id} className="flex items-start gap-2">

@@ -12,6 +12,9 @@ import { badRequest, created, notFound } from '../../../utils/response';
 import type { Message, Proposal } from '@flows/contracts';
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 
+const WORKFLOW_INTENT_PATTERN =
+    /(만들|제작|생성|설계|자동화|실행|쇼츠|영상|비디오|워크플로|플로우|블록|노드|workflow|flow|make|create|generate|build|run|shorts|video)/i;
+
 /**
  * POST /flows/{flowId}/messages
  *
@@ -50,9 +53,43 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
     };
     await messageRepo.put(userMessage);
 
+    if (!WORKFLOW_INTENT_PATTERN.test(bodyParsed.data.content)) {
+        const assistantMessage: Message = {
+            messageId: generateNumericId(),
+            flowId: fid,
+            role: 'ASSISTANT',
+            messageType: 'TEXT',
+            content: '안녕하세요. 어떤 워크플로우나 쇼츠를 만들고 싶은지 말해주시면 필요한 블록을 제안하겠습니다.',
+            createdAt: now,
+        };
+        await messageRepo.put(assistantMessage);
+
+        return created({
+            message: userMessage,
+            assistantMessage,
+        });
+    }
+
     // 2. Generate proposal (mock/openai/claude based on ORCHESTRATOR_MODE env)
     const orchestrator = await getOrchestrator();
     const result = await orchestrator.generateProposal(fid, bodyParsed.data.content, currentContext);
+
+    if (!result.approvalRequired || result.proposedNodes.length === 0) {
+        const assistantMessage: Message = {
+            messageId: generateNumericId(),
+            flowId: fid,
+            role: 'ASSISTANT',
+            messageType: 'TEXT',
+            content: result.assistantMessage,
+            createdAt: now,
+        };
+        await messageRepo.put(assistantMessage);
+
+        return created({
+            message: userMessage,
+            assistantMessage,
+        });
+    }
 
     // 3. Save proposal
     const proposalId = generateNumericId();

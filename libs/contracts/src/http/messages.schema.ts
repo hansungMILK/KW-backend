@@ -73,21 +73,23 @@ export const MessageCreateRequestSchema = z.object({
  */
 export const MessageCreateResponseSchema = z.object({
     message: MessageSchema,
-    proposal: z.object({
-        proposalId: z.string(),
-        flowId: z.string(),
-        status: z.string(),
-        estimatedCost: z
-            .object({
-                currency: z.string(),
-                total: z.number(),
-            })
-            .optional(),
-        proposedNodes: z.array(z.record(z.unknown())),
-        proposedEdges: z.array(z.record(z.unknown())),
-        approvalRequired: z.boolean(),
-        createdAt: z.string(),
-    }),
+    proposal: z
+        .object({
+            proposalId: z.string(),
+            flowId: z.string(),
+            status: z.string(),
+            estimatedCost: z
+                .object({
+                    currency: z.string(),
+                    total: z.number(),
+                })
+                .optional(),
+            proposedNodes: z.array(z.record(z.unknown())),
+            proposedEdges: z.array(z.record(z.unknown())),
+            approvalRequired: z.boolean(),
+            createdAt: z.string(),
+        })
+        .optional(),
     assistantMessage: MessageSchema,
 });
 
