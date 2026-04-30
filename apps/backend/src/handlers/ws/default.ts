@@ -16,7 +16,10 @@ export const main = async (event: {
     // Initialize the WS client.
     // Prefer WS_CALLBACK_ENDPOINT env var when set (local serverless-offline),
     // otherwise build from event.requestContext (prod API Gateway).
-    const envEndpoint = process.env.WS_CALLBACK_ENDPOINT;
+    const envEndpoint =
+        process.env.WS_CALLBACK_ENDPOINT && process.env.WS_CALLBACK_ENDPOINT !== '[object Object]'
+            ? process.env.WS_CALLBACK_ENDPOINT
+            : '';
     if (envEndpoint) {
         initWsClient(envEndpoint);
     } else if (event.requestContext.domainName && event.requestContext.stage) {

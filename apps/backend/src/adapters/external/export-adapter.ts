@@ -19,7 +19,7 @@ export interface ExportResult {
 }
 
 export const exportAdapter = {
-    async publishToYouTube(videoUrl: string, _metadata: Record<string, unknown>): Promise<ExportResult> {
+    async publishToYouTube(_videoUrl: string, _metadata: Record<string, unknown>): Promise<ExportResult> {
         const hasYouTubeCredentials = !!(process.env.YOUTUBE_CLIENT_ID && process.env.YOUTUBE_REFRESH_TOKEN);
 
         if (!hasYouTubeCredentials) {
@@ -39,7 +39,7 @@ export const exportAdapter = {
         };
     },
 
-    async publishToTikTok(videoUrl: string, _metadata: Record<string, unknown>): Promise<ExportResult> {
+    async publishToTikTok(_videoUrl: string, _metadata: Record<string, unknown>): Promise<ExportResult> {
         const hasTikTokCredentials = !!process.env.TIKTOK_ACCESS_TOKEN;
 
         if (!hasTikTokCredentials) {

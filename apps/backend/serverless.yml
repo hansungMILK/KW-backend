@@ -1,5 +1,7 @@
 service: eureka-flows-backend
 
+useDotenv: true
+
 provider:
     name: aws
     runtime: nodejs20.x
@@ -21,15 +23,24 @@ provider:
         EXECUTION_QUEUE_URL: !If [IsLocalStage, '', !Ref ExecutionQueue]
         S3_BUCKET: !If [IsLocalStage, 'eureka-flows-local', !Ref AssetsBucket]
         CLOUDFRONT_DOMAIN: !If [IsLocalStage, '', !GetAtt AssetsDistribution.DomainName]
+        WS_CALLBACK_ENDPOINT:
+            !If [
+                IsLocalStage,
+                'http://localhost:8801',
+                !Sub 'https://${WebsocketsApi}.execute-api.${AWS::Region}.amazonaws.com/${self:provider.stage}',
+            ]
+        FFMPEG_PATH: ${env:FFMPEG_PATH, '/opt/bin/ffmpeg'}
         ORCHESTRATOR_MODE: ${env:ORCHESTRATOR_MODE, 'openai'}
         AI_PROVIDER: ${env:AI_PROVIDER, 'openai'}
         OPENAI_MODEL: ${env:OPENAI_MODEL, 'gpt-5.4-nano'}
         OPENAI_ORCHESTRATOR_MODEL: ${env:OPENAI_ORCHESTRATOR_MODEL, 'gpt-5.4-nano'}
         OPENAI_VISION_MODEL: ${env:OPENAI_VISION_MODEL, 'gpt-5.4-nano'}
+        OPENAI_SEARCH_MODEL: ${env:OPENAI_SEARCH_MODEL, 'gpt-5.4-nano'}
         OPENAI_IMAGE_MODEL: ${env:OPENAI_IMAGE_MODEL, 'gpt-image-2'}
-        OPENAI_IMAGE_QUALITY: ${env:OPENAI_IMAGE_QUALITY, 'medium'}
+        OPENAI_IMAGE_QUALITY: ${env:OPENAI_IMAGE_QUALITY, 'low'}
         OPENAI_TTS_MODEL: ${env:OPENAI_TTS_MODEL, 'gpt-4o-mini-tts'}
         OPENAI_TTS_VOICE: ${env:OPENAI_TTS_VOICE, 'nova'}
+        LOCAL_ASSET_BASE_URL: ${env:LOCAL_ASSET_BASE_URL, 'http://localhost:8800/_local-assets'}
         OPENAI_API_KEY: ${env:OPENAI_API_KEY, ''}
         ANTHROPIC_API_KEY: ${env:ANTHROPIC_API_KEY, ''}
         ELEVENLABS_API_KEY: ${env:ELEVENLABS_API_KEY, ''}
@@ -133,6 +144,13 @@ functions:
                   method: get
             - httpApi:
                   path: /_api_
+                  method: get
+
+    localAsset:
+        handler: src/handlers/http/local-assets/get-local-asset.main
+        events:
+            - httpApi:
+                  path: '/_local-assets/{proxy+}'
                   method: get
 
     # ── Flows ──

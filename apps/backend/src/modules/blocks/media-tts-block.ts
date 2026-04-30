@@ -55,13 +55,19 @@ export const mediaTtsBlock: BlockExecutor = {
         //   content block: { scenes: [{ narration }], hook, cta }
         //   data block:    { normalizedScenes: [{ narration }] }
         const inp = input as Record<string, unknown> | null;
-        type RawScene = { narration?: string };
+        type RawScene = { sceneNumber?: number; caption?: string; narration?: string; durationSec?: number };
 
         const rawScenes: RawScene[] =
             (inp?.normalizedScenes as RawScene[] | undefined) ?? (inp?.scenes as RawScene[] | undefined) ?? [];
+        const metadata = inp?.metadata as Record<string, unknown> | undefined;
 
         const hook = typeof inp?.hook === 'string' ? inp.hook : '';
-        const cta = typeof inp?.cta === 'string' ? inp.cta : '';
+        const cta =
+            typeof inp?.cta === 'string'
+                ? inp.cta
+                : typeof metadata?.['cta'] === 'string'
+                  ? (metadata['cta'] as string)
+                  : '';
 
         const narrationParts: string[] = [];
         if (hook) narrationParts.push(hook);
@@ -110,6 +116,8 @@ export const mediaTtsBlock: BlockExecutor = {
                         format: 'mp3',
                         sampleRate: 44100,
                     },
+                    normalizedScenes: rawScenes,
+                    ...(metadata ? { metadata } : {}),
                 },
                 durationMs: Date.now() - start,
                 assets,

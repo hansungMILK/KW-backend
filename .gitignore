@@ -55,6 +55,8 @@ tmp
 .playwright-mcp
 
 # Backend local DB
+.local-assets/
+apps/backend/.local-assets/
 apps/backend/.local-db/
 apps/backend/.esbuild/
 .serverless/

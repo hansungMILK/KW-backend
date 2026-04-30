@@ -17,7 +17,7 @@ export const blockExecutor = {
      * @param blockType  The type identifier of the block (e.g. "search", "content")
      * @param input      The resolved input payload for this block
      */
-    async execute(blockType: string, input: unknown): Promise<BlockExecutorResult> {
+    async execute(blockType: string, input: unknown, config?: Record<string, unknown>): Promise<BlockExecutorResult> {
         const executor = blockRegistry.get(blockType);
 
         if (!executor) {
@@ -29,7 +29,7 @@ export const blockExecutor = {
         }
 
         const start = Date.now();
-        const result = await executor.execute(input);
+        const result = await executor.execute(input, config);
         return {
             output: result.output,
             durationMs: Date.now() - start,

@@ -45,36 +45,43 @@ export const isSafeWebhookUrl = (raw: string): { ok: true } | { ok: false; reaso
     let checkHost = host;
     const mappedDotted = host.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
     if (mappedDotted) {
-        checkHost = mappedDotted[1]!;
+        const [, mappedAddress] = mappedDotted;
+        if (mappedAddress) checkHost = mappedAddress;
     } else {
         const mappedHex = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
         if (mappedHex) {
-            const hi = parseInt(mappedHex[1]!, 16);
-            const lo = parseInt(mappedHex[2]!, 16);
-            const a = (hi >> 8) & 0xff;
-            const b = hi & 0xff;
-            const c = (lo >> 8) & 0xff;
-            const d = lo & 0xff;
-            checkHost = `${a}.${b}.${c}.${d}`;
+            const [, highWord, lowWord] = mappedHex;
+            if (highWord && lowWord) {
+                const hi = parseInt(highWord, 16);
+                const lo = parseInt(lowWord, 16);
+                const a = (hi >> 8) & 0xff;
+                const b = hi & 0xff;
+                const c = (lo >> 8) & 0xff;
+                const d = lo & 0xff;
+                checkHost = `${a}.${b}.${c}.${d}`;
+            }
         }
     }
 
     // Parse IPv4 and check private ranges
     const ipv4 = checkHost.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
     if (ipv4) {
-        const [a, b] = [parseInt(ipv4[1]!, 10), parseInt(ipv4[2]!, 10)];
-        // 127.0.0.0/8 loopback
-        if (a === 127) return { ok: false, reason: 'loopback 127/8 not allowed' };
-        // 10.0.0.0/8 private
-        if (a === 10) return { ok: false, reason: 'private 10/8 not allowed' };
-        // 172.16.0.0/12 private
-        if (a === 172 && b >= 16 && b <= 31) return { ok: false, reason: 'private 172.16/12 not allowed' };
-        // 192.168.0.0/16 private
-        if (a === 192 && b === 168) return { ok: false, reason: 'private 192.168/16 not allowed' };
-        // 169.254.0.0/16 link-local (AWS metadata)
-        if (a === 169 && b === 254) return { ok: false, reason: 'link-local 169.254/16 not allowed' };
-        // 0.0.0.0/8
-        if (a === 0) return { ok: false, reason: '0.0.0.0/8 not allowed' };
+        const [, firstOctet, secondOctet] = ipv4;
+        if (firstOctet && secondOctet) {
+            const [a, b] = [parseInt(firstOctet, 10), parseInt(secondOctet, 10)];
+            // 127.0.0.0/8 loopback
+            if (a === 127) return { ok: false, reason: 'loopback 127/8 not allowed' };
+            // 10.0.0.0/8 private
+            if (a === 10) return { ok: false, reason: 'private 10/8 not allowed' };
+            // 172.16.0.0/12 private
+            if (a === 172 && b >= 16 && b <= 31) return { ok: false, reason: 'private 172.16/12 not allowed' };
+            // 192.168.0.0/16 private
+            if (a === 192 && b === 168) return { ok: false, reason: 'private 192.168/16 not allowed' };
+            // 169.254.0.0/16 link-local (AWS metadata)
+            if (a === 169 && b === 254) return { ok: false, reason: 'link-local 169.254/16 not allowed' };
+            // 0.0.0.0/8
+            if (a === 0) return { ok: false, reason: '0.0.0.0/8 not allowed' };
+        }
     }
 
     // IPv6 private ranges: fc00::/7 (fc/fd prefix), fe80::/10 (link-local)
@@ -95,10 +102,7 @@ export const isSafeWebhookUrl = (raw: string): { ok: true } | { ok: false; reaso
  * Cycle detection on a node/edge graph.
  * Returns true if the graph is a DAG (no cycles), false otherwise.
  */
-export const isDag = (
-    nodes: Array<{ id: string }>,
-    edges: Array<{ source: string; target: string }>
-): boolean => {
+export const isDag = (nodes: Array<{ id: string }>, edges: Array<{ source: string; target: string }>): boolean => {
     if (nodes.length === 0) return true;
 
     const nodeIds = new Set(nodes.map(n => n.id));
@@ -111,7 +115,8 @@ export const isDag = (
     }
     for (const e of edges) {
         if (!nodeIds.has(e.source) || !nodeIds.has(e.target)) continue; // ignore dangling edges
-        adj.get(e.source)!.push(e.target);
+        const children = adj.get(e.source);
+        if (children) children.push(e.target);
         inDegree.set(e.target, (inDegree.get(e.target) ?? 0) + 1);
     }
 
@@ -123,7 +128,8 @@ export const isDag = (
 
     let visited = 0;
     while (queue.length > 0) {
-        const u = queue.shift()!;
+        const u = queue.shift();
+        if (u === undefined) break;
         visited++;
         for (const v of adj.get(u) ?? []) {
             const d = (inDegree.get(v) ?? 0) - 1;

@@ -10,8 +10,11 @@ import type { BlockExecutor, BlockExecutorResult } from './types';
 const SEARCH_SYSTEM_PROMPT = `You are a Korean education and university-admission trends researcher.
 Given a topic, identify:
 1. Top 5 relevant Korean keywords (단어/구문)
-2. 3 recent news article summaries (realistic Korean titles, plausible source names, informative summaries)
+2. 3 recent web/news source summaries with real URLs and source names
 3. A trend score from 0 to 100 reflecting how trending the topic is right now
+
+Use web search results. Do not invent articles, source names, statistics, or URLs.
+Prefer official education/admission sources first, then reputable Korean news sources.
 
 Respond with JSON only — no markdown fences, no extra text:
 {
@@ -51,6 +54,7 @@ export function extractTopic(input: unknown): string {
         if (typeof obj['content'] === 'string') return obj['content'].slice(0, 200);
         if (typeof obj['text'] === 'string') return obj['text'].slice(0, 200);
         if (typeof obj['topic'] === 'string') return obj['topic'].slice(0, 200);
+        if (typeof obj['query'] === 'string') return obj['query'].slice(0, 200);
     }
 
     return String(JSON.stringify(input)).slice(0, 200);
@@ -101,16 +105,16 @@ export const searchBlock: BlockExecutor = {
 
         log.info('[search-block] Starting AI search', { topicLength: topic.length });
 
-        const response = await openaiAdapter.chatJson({
-            model: env.openaiModel,
+        const response = await openaiAdapter.webSearchJson({
+            model: env.openaiSearchModel,
             systemPrompt: SEARCH_SYSTEM_PROMPT,
-            userMessage: `주제: ${topic}`,
-            maxTokens: 1024,
+            userMessage: `오늘 날짜 기준으로 한국 입시/교육 쇼츠 제작에 쓸 최신 근거를 찾아주세요. 주제: ${topic}`,
+            maxTokens: 2048,
         });
 
         let parsed: unknown;
         try {
-            parsed = JSON.parse(response.content);
+            parsed = JSON.parse(extractJson(response.content));
         } catch {
             throw new Error(`[search-block] OpenAI returned non-JSON response (length=${response.content.length})`);
         }
@@ -130,3 +134,14 @@ export const searchBlock: BlockExecutor = {
         return { output: validated.data as Record<string, unknown>, durationMs: Date.now() - start };
     },
 };
+
+function extractJson(content: string): string {
+    const trimmed = content.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) return trimmed;
+
+    const start = trimmed.indexOf('{');
+    const end = trimmed.lastIndexOf('}');
+    if (start >= 0 && end > start) return trimmed.slice(start, end + 1);
+
+    return trimmed;
+}

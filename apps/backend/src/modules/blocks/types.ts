@@ -61,10 +61,12 @@ export const SearchOutputSchema = z.object({
 
 /** content block */
 export const ContentOutputSchema = z.object({
+    title: z.string().optional(),
     hook: z.string(),
     scenes: z.array(
         z.object({
             sceneNumber: z.number(),
+            caption: z.string().optional(),
             narration: z.string(),
             imagePrompt: z.string(),
             durationSec: z.number().optional(),
@@ -79,8 +81,10 @@ export const DataOutputSchema = z.object({
     normalizedScenes: z.array(
         z.object({
             sceneNumber: z.number(),
+            caption: z.string().optional(),
             narration: z.string(),
             imagePrompt: z.string(),
+            durationSec: z.number().optional(),
             keywords: z.array(z.string()).optional(),
         })
     ),

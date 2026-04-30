@@ -5,11 +5,17 @@ import { log } from '../../utils/logger';
 let wsClient: ApiGatewayManagementApiClient | null = null;
 
 export const initWsClient = (endpoint: string) => {
+    const resolvedEndpoint = normalizeEndpoint(endpoint);
+    if (!resolvedEndpoint) return;
+
     // Local serverless-offline uses `https://localhost:<port>/local` or similar —
     // the SDK's credential provider chain throws without dummy creds, so we inject them.
-    const isLocal = endpoint.includes('localhost') || endpoint.includes('127.0.0.1') || endpoint.startsWith('http://');
+    const isLocal =
+        resolvedEndpoint.includes('localhost') ||
+        resolvedEndpoint.includes('127.0.0.1') ||
+        resolvedEndpoint.startsWith('http://');
     wsClient = new ApiGatewayManagementApiClient({
-        endpoint,
+        endpoint: resolvedEndpoint,
         region: process.env.AWS_REGION || 'ap-northeast-2',
         ...(isLocal
             ? {
@@ -32,9 +38,7 @@ export const initWsClient = (endpoint: string) => {
  */
 function ensureClient(): ApiGatewayManagementApiClient | null {
     if (wsClient) return wsClient;
-    const endpoint =
-        process.env.WS_CALLBACK_ENDPOINT ||
-        (process.env.STAGE === 'local' || !process.env.STAGE ? 'http://localhost:8801' : '');
+    const endpoint = normalizeEndpoint(process.env.WS_CALLBACK_ENDPOINT);
     if (!endpoint) return null;
     const isLocal = endpoint.startsWith('http://localhost') || endpoint.startsWith('http://127.0.0.1');
     wsClient = new ApiGatewayManagementApiClient({
@@ -78,3 +82,10 @@ export const postToConnection = async (connectionId: string, data: unknown): Pro
         return false;
     }
 };
+
+function normalizeEndpoint(endpoint?: string): string {
+    const raw = endpoint && endpoint !== '[object Object]' ? endpoint : '';
+    if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
+    if (process.env.STAGE === 'local' || !process.env.STAGE) return 'http://localhost:8801';
+    return '';
+}

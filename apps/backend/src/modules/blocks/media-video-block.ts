@@ -54,34 +54,35 @@ export const mediaVideoBlock: BlockExecutor = {
 
         // ── Real mode ──────────────────────────────────────────────────────────
 
-        // Extract image URLs from media-image block output and audio URL from media-tts block output.
-        // Input may contain merged output from multiple upstream blocks.
+        // Extract image URLs from media-image output and audio URL from media-tts output.
+        // The execution engine merges both upstream parent outputs into this input.
         const inp = input as Record<string, unknown> | null;
 
-        type RawImage = { url?: string; durationSec?: number };
+        type RawImage = { url?: string; sceneNumber?: number; durationSec?: number; caption?: string };
+        type RawScene = { sceneNumber?: number; durationSec?: number; caption?: string };
         const rawImages: RawImage[] = (inp?.images as RawImage[] | undefined) ?? [];
+        const rawScenes: RawScene[] = (inp?.normalizedScenes as RawScene[] | undefined) ?? [];
 
-        // Build image entries for ffmpegAdapter; default 5 sec per scene if not specified
         const images = rawImages
             .filter(img => typeof img.url === 'string')
             .map(img => ({
                 url: img.url as string,
-                durationSec: typeof img.durationSec === 'number' ? img.durationSec : 5,
+                durationSec: durationForImage(img, rawScenes),
             }));
 
-        // Extract audio URL from merged input (media-tts output shape: { audio: { url } })
         const audioObj = inp?.audio as { url?: string } | undefined;
         const audioUrl = typeof audioObj?.url === 'string' ? audioObj.url : undefined;
+        const metadata = inp?.metadata as Record<string, unknown> | undefined;
 
-        // If no images, fall back to a single placeholder entry so we still produce a file
         if (images.length === 0) {
-            images.push({ url: 'fake://placeholder/no-images', durationSec: 45 });
+            throw new Error('media-video requires image outputs from media-image');
         }
 
         try {
             const result = await ffmpegAdapter.compose({
                 images,
                 audioUrl,
+                backgroundMusic: true,
                 outputWidth: 1080,
                 outputHeight: 1920,
                 outputFormat: 'mp4',
@@ -126,6 +127,10 @@ export const mediaVideoBlock: BlockExecutor = {
                         format: 'mp4',
                         sizeBytes: result.sizeBytes,
                     },
+                    images: rawImages,
+                    ...(audioObj ? { audio: audioObj } : {}),
+                    normalizedScenes: rawScenes,
+                    ...(metadata ? { metadata } : {}),
                 },
                 durationMs: Date.now() - start,
                 assets,
@@ -142,3 +147,14 @@ export const mediaVideoBlock: BlockExecutor = {
         }
     },
 };
+
+function durationForImage(
+    image: { sceneNumber?: number; durationSec?: number },
+    scenes: Array<{ sceneNumber?: number; durationSec?: number }>
+): number {
+    if (typeof image.durationSec === 'number' && image.durationSec > 0) return image.durationSec;
+    const matchingScene = scenes.find(scene => scene.sceneNumber === image.sceneNumber);
+    if (typeof matchingScene?.durationSec === 'number' && matchingScene.durationSec > 0)
+        {return matchingScene.durationSec;}
+    return 5;
+}

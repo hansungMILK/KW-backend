@@ -31,6 +31,20 @@ interface ChatCompletionResponse {
     error?: { message?: string };
 }
 
+interface ResponsesApiResponse {
+    model?: string;
+    output_text?: string;
+    output?: Array<{
+        type?: string;
+        content?: Array<{ type?: string; text?: string }>;
+    }>;
+    usage?: {
+        input_tokens?: number;
+        output_tokens?: number;
+    };
+    error?: { message?: string };
+}
+
 export const openaiAdapter = {
     async chatJson(request: OpenAIJsonRequest): Promise<OpenAIJsonResponse> {
         const apiKey = await settingsService.getKeyForProviderAsync('openai');
@@ -89,6 +103,57 @@ export const openaiAdapter = {
         };
     },
 
+    async webSearchJson(request: OpenAIJsonRequest): Promise<OpenAIJsonResponse> {
+        const apiKey = await settingsService.getKeyForProviderAsync('openai');
+        if (!apiKey) throw new Error('OPENAI_API_KEY not configured');
+
+        const model = request.model ?? env.openaiSearchModel;
+        const start = Date.now();
+
+        log.info('OpenAI web search API call', {
+            model,
+            maxTokens: request.maxTokens,
+            systemPromptLength: request.systemPrompt.length,
+            userMessageLength: request.userMessage.length,
+        });
+
+        const response = await fetch(`${env.openaiBaseUrl}/responses`, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                model,
+                tools: [{ type: 'web_search' }],
+                tool_choice: 'required',
+                input: [
+                    { role: 'system', content: request.systemPrompt },
+                    { role: 'user', content: request.userMessage },
+                ],
+                max_output_tokens: request.maxTokens ?? 2048,
+            }),
+        });
+
+        const body = (await response.json().catch(() => ({}))) as ResponsesApiResponse;
+        if (!response.ok) {
+            throw new Error(
+                `OpenAI web search API error ${response.status}: ${body.error?.message ?? 'request failed'}`
+            );
+        }
+
+        const content = extractResponseText(body);
+        if (!content) throw new Error('OpenAI web search returned no text content');
+
+        return {
+            content,
+            model: body.model ?? model,
+            inputTokens: body.usage?.input_tokens ?? 0,
+            outputTokens: body.usage?.output_tokens ?? 0,
+            latencyMs: Date.now() - start,
+        };
+    },
+
     async visionJson(request: OpenAIVisionJsonRequest): Promise<OpenAIJsonResponse> {
         const apiKey = await settingsService.getKeyForProviderAsync('openai');
         if (!apiKey) throw new Error('OPENAI_API_KEY not configured');
@@ -143,3 +208,15 @@ export const openaiAdapter = {
         };
     },
 };
+
+function extractResponseText(body: ResponsesApiResponse): string {
+    if (body.output_text) return body.output_text;
+
+    const parts: string[] = [];
+    for (const item of body.output ?? []) {
+        for (const content of item.content ?? []) {
+            if (content.type === 'output_text' && content.text) parts.push(content.text);
+        }
+    }
+    return parts.join('\n').trim();
+}

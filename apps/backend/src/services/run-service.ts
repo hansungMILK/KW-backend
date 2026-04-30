@@ -23,11 +23,29 @@ function buildParentMap(nodeIds: string[], edges: Array<Record<string, unknown>>
         const source = (edge['source'] ?? edge['sourceNodeId']) as string | undefined;
         const target = (edge['target'] ?? edge['targetNodeId']) as string | undefined;
         if (source && target && parentMap.has(target)) {
-            parentMap.get(target)!.push(source);
+            const parents = parentMap.get(target);
+            if (parents) parents.push(source);
         }
     }
 
     return parentMap;
+}
+
+function buildInitialInputPayload(node: Record<string, unknown>): Record<string, unknown> | null {
+    const config = node['config'] as Record<string, unknown> | undefined;
+    const data = node['data'] as Record<string, unknown> | undefined;
+    const label =
+        (node['name'] as string | undefined) ??
+        (node['label'] as string | undefined) ??
+        (data?.['label'] as string | undefined);
+
+    const payload: Record<string, unknown> = {};
+    if (config && Object.keys(config).length > 0) {
+        Object.assign(payload, config);
+    }
+    if (label) payload.label = label;
+
+    return Object.keys(payload).length > 0 ? payload : null;
 }
 
 // ============================================================================
@@ -165,6 +183,7 @@ export const runService = {
                 progress: 0,
                 retryCount: 0,
                 parentNodeIds: parentMap.get(nodeId) ?? [],
+                inputPayload: buildInitialInputPayload(node),
                 updatedAt: now,
             };
             await runRepo.putRunNode(runNode);
@@ -234,6 +253,7 @@ export const runService = {
             progress: 0,
             retryCount: 0,
             parentNodeIds: [],
+            inputPayload: buildInitialInputPayload(targetNode),
             updatedAt: now,
         };
         await runRepo.putRunNode(runNode);

@@ -61,6 +61,27 @@ function dummyImageOutput() {
                 height: 1920,
                 prompt: '[dummy] Triumphant student raising fists in celebration, graduation cap flying, sunny campus background',
             },
+            {
+                sceneNumber: 8,
+                url: 'fake://cdn.example.com/images/scene-008-score-report.jpg',
+                width: 1080,
+                height: 1920,
+                prompt: '[dummy] Korean student reviewing a score report and admission strategy chart, vertical shorts frame',
+            },
+            {
+                sceneNumber: 9,
+                url: 'fake://cdn.example.com/images/scene-009-counseling.jpg',
+                width: 1080,
+                height: 1920,
+                prompt: '[dummy] Admission counselor explaining university choices to a student, clean educational illustration',
+            },
+            {
+                sceneNumber: 10,
+                url: 'fake://cdn.example.com/images/scene-010-final-checklist.jpg',
+                width: 1080,
+                height: 1920,
+                prompt: '[dummy] Final admission checklist on a smartphone with bold Korean shorts typography',
+            },
         ],
     };
 }
@@ -99,20 +120,47 @@ export const mediaImageBlock: BlockExecutor = {
         //   data block:    { normalizedScenes: [{ sceneNumber, imagePrompt, ... }] }
         //   content block: { scenes: [{ sceneNumber, imagePrompt, ... }] }
         const inp = input as Record<string, unknown> | null;
-        type RawScene = { sceneNumber?: number; imagePrompt?: string };
+        type RawScene = {
+            sceneNumber?: number;
+            caption?: string;
+            narration?: string;
+            imagePrompt?: string;
+            durationSec?: number;
+        };
         const rawScenes: RawScene[] =
             (inp?.normalizedScenes as RawScene[] | undefined) ?? (inp?.scenes as RawScene[] | undefined) ?? [];
+        const metadata = inp?.metadata as Record<string, unknown> | undefined;
+        const frameTitle =
+            (typeof metadata?.title === 'string' ? metadata.title : undefined) ??
+            (typeof inp?.title === 'string' ? inp.title : undefined) ??
+            '입시 정보 핵심 정리';
 
         // Fall back to dummy prompts if upstream gave us nothing
         const dummy = dummyImageOutput();
-        const scenePrompts: Array<{ sceneNumber: number; prompt: string }> =
+        const scenePrompts: Array<{
+            sceneNumber: number;
+            caption: string;
+            narration: string;
+            durationSec: number;
+            prompt: string;
+        }> =
             rawScenes.length > 0
                 ? rawScenes.map((s, i) => ({
                       sceneNumber: s.sceneNumber ?? i + 1,
-                      prompt: s.imagePrompt ?? `Scene ${i + 1} visual`,
+                      caption: s.caption ?? s.narration?.slice(0, 22) ?? `장면 ${i + 1}`,
+                      narration: s.narration ?? '',
+                      durationSec: s.durationSec ?? 5,
+                      prompt: buildShortsFramePrompt(
+                          frameTitle,
+                          s.caption ?? s.narration ?? `장면 ${i + 1}`,
+                          s.imagePrompt
+                      ),
                   }))
                 : dummy.images.map(img => ({
                       sceneNumber: img.sceneNumber,
+                      caption: img.prompt.slice(0, 20),
+                      narration: '',
+                      durationSec: 5,
                       prompt: img.prompt,
                   }));
 
@@ -125,6 +173,9 @@ export const mediaImageBlock: BlockExecutor = {
             width: number;
             height: number;
             prompt: string;
+            caption?: string;
+            narration?: string;
+            durationSec?: number;
         };
 
         const images: ImageResult[] = [];
@@ -164,6 +215,9 @@ export const mediaImageBlock: BlockExecutor = {
                     width: generated.width,
                     height: generated.height,
                     prompt: scene.prompt,
+                    caption: scene.caption,
+                    narration: scene.narration,
+                    durationSec: scene.durationSec,
                 });
 
                 assets.push({
@@ -176,6 +230,9 @@ export const mediaImageBlock: BlockExecutor = {
                         width: generated.width,
                         height: generated.height,
                         prompt: scene.prompt,
+                        caption: scene.caption,
+                        narration: scene.narration,
+                        durationSec: scene.durationSec,
                         durationMs,
                     },
                 });
@@ -207,6 +264,9 @@ export const mediaImageBlock: BlockExecutor = {
                     width: 1080,
                     height: 1920,
                     prompt: scene.prompt,
+                    caption: scene.caption,
+                    narration: scene.narration,
+                    durationSec: scene.durationSec,
                 });
                 try {
                     await traceService.record(
@@ -221,10 +281,25 @@ export const mediaImageBlock: BlockExecutor = {
             }
         }
 
+        if (assets.length === 0) {
+            throw new Error('media-image generated no usable image assets');
+        }
+
         return {
-            output: { images },
+            output: { title: frameTitle, images, normalizedScenes: scenePrompts },
             durationMs: Date.now() - start,
             assets,
         };
     },
 };
+
+function buildShortsFramePrompt(title: string, caption: string, visualPrompt?: string): string {
+    return [
+        'Create one complete 9:16 Korean YouTube Shorts frame, not a poster mockup.',
+        `Persistent top title band: black background, huge bold Korean title text "${title}" in neon yellow and white, similar to Korean Shorts thumbnails.`,
+        `Scene caption: large bold Korean text "${caption}" with black stroke, placed over the image without covering key characters.`,
+        'Style: clean viral educational shorts, high contrast, readable Korean typography, dynamic but not cluttered.',
+        'Leave safe margins for mobile viewing.',
+        visualPrompt || 'Korean university admission and student study scene, cinematic educational illustration.',
+    ].join(' ');
+}

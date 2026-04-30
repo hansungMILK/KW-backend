@@ -8,14 +8,14 @@ import type { Orchestrator, ProposalResult } from './types';
  */
 
 const SHORTS_BLOCKS = [
-    { type: 'search', label: '트렌드 수집' },
-    { type: 'content', label: '스크립트 생성' },
-    { type: 'data', label: '데이터 정규화' },
-    { type: 'analysis', label: '품질 검수' },
-    { type: 'media-image', label: '이미지 생성' },
-    { type: 'media-tts', label: '음성 생성' },
-    { type: 'media-video', label: '영상 합성' },
-    { type: 'integration', label: '메타데이터 생성' },
+    { type: 'search', label: '트렌드 수집', config: { query: '입시 정보 쇼츠' } },
+    { type: 'content', label: '스크립트 생성', config: { scenes: 12, durationSec: 60 } },
+    { type: 'data', label: '데이터 정규화', config: {} },
+    { type: 'analysis', label: '품질 검수', config: { mode: 'safety' } },
+    { type: 'media-image', label: '이미지 생성', config: { count: 12, style: 'korean-shorts-frame' } },
+    { type: 'media-tts', label: '음성 생성', config: { lang: 'ko' } },
+    { type: 'media-video', label: '영상 합성', config: { format: '9:16', backgroundMusic: true } },
+    { type: 'integration', label: '메타데이터 생성', config: {} },
 ] as const;
 
 const COST_PER_BLOCK: Record<string, number> = {
@@ -43,6 +43,7 @@ export const mockOrchestrator: Orchestrator = {
             blockType: block.type,
             position: { x: 300, y: 100 + i * 120 },
             state: 'IDLE',
+            config: block.config,
         }));
 
         // Linear edges: each node connects to the next
@@ -114,7 +115,7 @@ export const mockOrchestrator: Orchestrator = {
                 breakdown,
             },
             approvalRequired: true,
-            assistantMessage: `8개 블록이 필요합니다. 예상 비용: $${total.toFixed(2)}. 승인하시겠습니까?`,
+            assistantMessage: `10~15장 이미지 기반 1분 쇼츠 파이프라인 8개 블록이 필요합니다. 예상 비용: $${total.toFixed(2)}. 승인하시겠습니까?`,
         };
     },
 };

@@ -11,7 +11,8 @@ const BANNED_KEYWORDS = ['정치', '성인', '도박', '폭력', '마약', '음�
 
 const MIN_NARRATION_CHARS = 10;
 const MAX_NARRATION_CHARS = 300;
-const EXPECTED_SCENE_COUNT = 7;
+const MIN_SCENE_COUNT = 10;
+const MAX_SCENE_COUNT = 15;
 
 const SAFETY_THRESHOLD = 70;
 const QUALITY_THRESHOLD = 60;
@@ -71,11 +72,11 @@ function runRuleChecks(scenes: NormalizedScene[]): {
     let qualityDeductions = 0;
 
     // 1. Scene count check
-    if (scenes.length !== EXPECTED_SCENE_COUNT) {
+    if (scenes.length < MIN_SCENE_COUNT || scenes.length > MAX_SCENE_COUNT) {
         const severity = scenes.length === 0 ? 'critical' : 'medium';
         issues.push({
             severity,
-            message: `씬 수가 ${EXPECTED_SCENE_COUNT}개여야 하나 ${scenes.length}개입니다.`,
+            message: `씬 수가 ${MIN_SCENE_COUNT}~${MAX_SCENE_COUNT}개여야 하나 ${scenes.length}개입니다.`,
         });
         qualityDeductions += scenes.length === 0 ? 40 : 10;
     }
@@ -210,10 +211,14 @@ export const analysisBlock: BlockExecutor = {
 
         // Extract normalizedScenes from data-block output
         let scenes: NormalizedScene[] = [];
+        let metadata: Record<string, unknown> | undefined;
         if (input != null && typeof input === 'object' && !Array.isArray(input)) {
             const obj = input as Record<string, unknown>;
             if (Array.isArray(obj['normalizedScenes'])) {
                 scenes = obj['normalizedScenes'] as NormalizedScene[];
+            }
+            if (obj['metadata'] && typeof obj['metadata'] === 'object' && !Array.isArray(obj['metadata'])) {
+                metadata = obj['metadata'] as Record<string, unknown>;
             }
         }
 
@@ -248,6 +253,13 @@ export const analysisBlock: BlockExecutor = {
             approved,
         });
 
-        return { output: validated.data as Record<string, unknown>, durationMs: Date.now() - start };
+        return {
+            output: {
+                ...(validated.data as Record<string, unknown>),
+                normalizedScenes: scenes,
+                ...(metadata ? { metadata } : {}),
+            },
+            durationMs: Date.now() - start,
+        };
     },
 };

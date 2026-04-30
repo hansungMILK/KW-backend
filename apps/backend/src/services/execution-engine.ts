@@ -32,7 +32,8 @@ export function computeWaves(nodes: { nodeId: string; parentNodeIds: string[] }[
             if (!nodeIds.has(parentId)) continue; // ignore missing parents
             inDegree.set(node.nodeId, (inDegree.get(node.nodeId) ?? 0) + 1);
             if (!children.has(parentId)) children.set(parentId, []);
-            children.get(parentId)!.push(node.nodeId);
+            const parentChildren = children.get(parentId);
+            if (parentChildren) parentChildren.push(node.nodeId);
         }
     }
 
@@ -72,6 +73,26 @@ async function resolveAssetPublicUrl(
     await putObject(key, asset.data, asset.mimeType);
     if (asset.metadata) asset.metadata['s3Key'] = key;
     return getPublicUrl(key);
+}
+
+async function resolveNodeInput(
+    runId: string,
+    node: { inputPayload?: Record<string, unknown> | null; parentNodeIds: string[] }
+): Promise<Record<string, unknown> | null> {
+    const merged: Record<string, unknown> = {};
+
+    if (node.inputPayload && typeof node.inputPayload === 'object') {
+        Object.assign(merged, node.inputPayload);
+    }
+
+    for (const parentId of node.parentNodeIds) {
+        const parent = await runRepo.getRunNode(runId, parentId);
+        if (parent?.outputPayload && typeof parent.outputPayload === 'object') {
+            Object.assign(merged, parent.outputPayload);
+        }
+    }
+
+    return Object.keys(merged).length > 0 ? merged : null;
 }
 
 // ============================================================================
@@ -335,7 +356,8 @@ export const executionEngine = {
                 }
             }
 
-            const result = await blockExecutor.execute(node.blockType, node.inputPayload ?? null);
+            const resolvedInput = await resolveNodeInput(runId, node);
+            const result = await blockExecutor.execute(node.blockType, resolvedInput, node.inputPayload ?? undefined);
             const { output, durationMs, assets } = result;
 
             // Broadcast node.progress at 75% after execution, before save

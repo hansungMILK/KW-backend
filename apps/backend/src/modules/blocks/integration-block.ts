@@ -21,10 +21,11 @@ interface UpstreamData {
     search?: { keywords?: string[]; articles?: Array<{ title: string }> };
     content?: {
         hook?: string;
-        scenes?: Array<{ narration: string; imagePrompt: string }>;
+        scenes?: Array<{ narration?: string; imagePrompt?: string }>;
         cta?: string;
         totalDurationSec?: number;
     };
+    metadata?: { title?: string; hook?: string; cta?: string; totalDurationSec?: number; sceneCount?: number };
     analysis?: { safetyScore?: number; qualityScore?: number; approved?: boolean; issues?: unknown[] };
     mediaImage?: { images?: Array<{ url: string; sceneNumber: number; width: number; height: number }> };
     mediaTts?: { audio?: { url: string; durationSec: number; format: string } };
@@ -39,7 +40,28 @@ function extractUpstream(input: unknown): UpstreamData {
 
     return {
         search: data['keywords'] ? (data as UpstreamData['search']) : undefined,
-        content: data['scenes'] ? (data as UpstreamData['content']) : undefined,
+        content: data['scenes']
+            ? (data as UpstreamData['content'])
+            : data['normalizedScenes']
+              ? ({
+                    scenes: data['normalizedScenes'],
+                    ...(typeof (data['metadata'] as Record<string, unknown> | undefined)?.['hook'] === 'string'
+                        ? { hook: (data['metadata'] as Record<string, unknown>)['hook'] as string }
+                        : {}),
+                    ...(typeof (data['metadata'] as Record<string, unknown> | undefined)?.['cta'] === 'string'
+                        ? { cta: (data['metadata'] as Record<string, unknown>)['cta'] as string }
+                        : {}),
+                    ...(typeof (data['metadata'] as Record<string, unknown> | undefined)?.['totalDurationSec'] ===
+                    'number'
+                        ? {
+                              totalDurationSec: (data['metadata'] as Record<string, unknown>)[
+                                  'totalDurationSec'
+                              ] as number,
+                          }
+                        : {}),
+                } as UpstreamData['content'])
+              : undefined,
+        metadata: data['metadata'] ? (data['metadata'] as UpstreamData['metadata']) : undefined,
         analysis: data['safetyScore'] !== undefined ? (data as UpstreamData['analysis']) : undefined,
         mediaImage: data['images'] ? (data as UpstreamData['mediaImage']) : undefined,
         mediaTts: data['audio'] ? (data as UpstreamData['mediaTts']) : undefined,
@@ -59,6 +81,7 @@ function buildPublicUrl(videoUrl: string | undefined): string {
 }
 
 function generateTitle(upstream: UpstreamData): string {
+    if (upstream.metadata?.title) return upstream.metadata.title;
     const keywords = upstream.search?.keywords?.slice(0, 3).join(' ') || '입시 트렌드';
     const hook = upstream.content?.hook;
     if (hook && !hook.startsWith('[dummy]')) return hook;
@@ -66,8 +89,8 @@ function generateTitle(upstream: UpstreamData): string {
 }
 
 function generateDescription(upstream: UpstreamData): string {
-    const hook = upstream.content?.hook || '';
-    const cta = upstream.content?.cta || '구독하고 매일 입시 정보를 받아보세요!';
+    const hook = upstream.content?.hook || upstream.metadata?.hook || '';
+    const cta = upstream.content?.cta || upstream.metadata?.cta || '구독하고 매일 입시 정보를 받아보세요!';
     const keywords = upstream.search?.keywords?.join(', ') || '입시';
     return `${hook}\n\n${cta}\n\n키워드: ${keywords}`;
 }
@@ -84,11 +107,11 @@ function dummyIntegrationOutput(): Record<string, unknown> {
         description: '[dummy] 2026학년도 수능 트렌드와 정시 전략을 60초 안에 정리했습니다.',
         hashtags: ['#수능2026', '#입시', '#정시', '#수험생', '#공부법', '#shorts', '#교육'],
         publicUrl: 'fake://cdn.example.com/published/shorts-2026-suneung-abc123',
-        video: { url: 'fake://cdn.example.com/video.mp4', durationSec: 45, width: 1080, height: 1920, format: 'mp4' },
-        audio: { url: 'fake://cdn.example.com/audio.mp3', durationSec: 45, format: 'mp3' },
+        video: { url: 'fake://cdn.example.com/video.mp4', durationSec: 60, width: 1080, height: 1920, format: 'mp4' },
+        audio: { url: 'fake://cdn.example.com/audio.mp3', durationSec: 60, format: 'mp3' },
         thumbnailUrl: 'fake://cdn.example.com/thumbnails/thumb.jpg',
-        sceneCount: 7,
-        durationSec: 45,
+        sceneCount: 10,
+        durationSec: 60,
         qualitySummary: { safetyScore: 95, qualityScore: 88, approved: true },
         artifacts: [
             { type: 'video', url: 'fake://cdn.example.com/video.mp4', label: '최종 영상' },
@@ -127,8 +150,16 @@ export const integrationBlock: BlockExecutor = {
 
         const videoUrl = upstream.mediaVideo?.video?.url;
         const publicUrl = buildPublicUrl(videoUrl);
-        const durationSec = upstream.mediaVideo?.video?.durationSec || upstream.content?.totalDurationSec || 45;
-        const sceneCount = upstream.content?.scenes?.length || upstream.mediaImage?.images?.length || 7;
+        const durationSec =
+            upstream.mediaVideo?.video?.durationSec ||
+            upstream.content?.totalDurationSec ||
+            upstream.metadata?.totalDurationSec ||
+            60;
+        const sceneCount =
+            upstream.content?.scenes?.length ||
+            upstream.mediaImage?.images?.length ||
+            upstream.metadata?.sceneCount ||
+            10;
 
         // Generate metadata — deterministic from upstream data
         let title = generateTitle(upstream);

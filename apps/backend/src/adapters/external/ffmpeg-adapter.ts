@@ -1,6 +1,12 @@
+import { spawn } from 'child_process';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
+
 export interface VideoCompositionRequest {
     images: Array<{ url: string; durationSec: number }>;
     audioUrl?: string;
+    backgroundMusic?: boolean;
     outputWidth: number;
     outputHeight: number;
     outputFormat: 'mp4';
@@ -12,65 +18,177 @@ export interface VideoCompositionResult {
     sizeBytes: number;
 }
 
+const FFMPEG_PATH = process.env.FFMPEG_PATH || '/opt/bin/ffmpeg';
+
 export const ffmpegAdapter = {
     async compose(request: VideoCompositionRequest): Promise<VideoCompositionResult> {
-        // Phase 4C: Generate a minimal valid MP4 placeholder.
-        // Real FFmpeg integration requires a Lambda Layer with an ffmpeg binary.
-        // This placeholder is structurally valid (recognized as MP4) but contains no playable content.
+        const workDir = await mkdtemp(join(tmpdir(), 'eureka-video-'));
+        const outputPath = join(workDir, 'output.mp4');
 
-        const durationSec = request.images.reduce((sum, img) => sum + img.durationSec, 0);
-        const placeholder = createMinimalMp4Placeholder();
+        try {
+            const images =
+                request.images.length > 0 ? request.images : [{ url: 'placeholder://blank', durationSec: 45 }];
+            const imageFiles: Array<{ path: string | null; durationSec: number }> = [];
 
-        return {
-            videoBuffer: placeholder,
-            durationSec,
-            sizeBytes: placeholder.length,
-        };
+            for (let i = 0; i < images.length; i++) {
+                const image = images[i];
+                const path = join(workDir, `image-${String(i).padStart(2, '0')}.png`);
+                const imageBuffer = await loadImageBinary(image.url);
+                if (imageBuffer) await writeFile(path, imageBuffer);
+                imageFiles.push({
+                    path: imageBuffer ? path : null,
+                    durationSec: Math.max(1, Math.ceil(image.durationSec || 5)),
+                });
+            }
+
+            let audioPath: string | null = null;
+            if (request.audioUrl && !request.audioUrl.startsWith('fake://')) {
+                audioPath = join(workDir, 'audio.mp3');
+                await writeFile(audioPath, await loadAudioBinary(request.audioUrl));
+            }
+
+            await runFfmpeg(buildArgs(imageFiles, audioPath, request, outputPath));
+
+            const videoBuffer = await readFile(outputPath);
+            const { size } = await stat(outputPath);
+            const durationSec = imageFiles.reduce((sum, image) => sum + image.durationSec, 0);
+
+            return {
+                videoBuffer,
+                durationSec,
+                sizeBytes: size,
+            };
+        } finally {
+            await rm(workDir, { recursive: true, force: true });
+        }
     },
 };
 
-function createMinimalMp4Placeholder(): Buffer {
-    // Minimal valid MP4: ftyp box + empty moov box.
-    // Recognized by file-type libraries as MP4 but won't render meaningful content.
-    const ftyp = Buffer.from([
-        0x00,
-        0x00,
-        0x00,
-        0x1c, // box size (28 bytes)
-        0x66,
-        0x74,
-        0x79,
-        0x70, // 'ftyp'
-        0x69,
-        0x73,
-        0x6f,
-        0x6d, // 'isom' — major brand
-        0x00,
-        0x00,
-        0x02,
-        0x00, // minor version
-        0x69,
-        0x73,
-        0x6f,
-        0x6d, // 'isom' — compatible brand
-        0x69,
-        0x73,
-        0x6f,
-        0x32, // 'iso2'
-        0x6d,
-        0x70,
-        0x34,
-        0x31, // 'mp41'
-    ]);
-    const moov = Buffer.from([
-        0x00,
-        0x00,
-        0x00,
-        0x08, // box size (8 bytes, empty moov)
-        0x6d,
-        0x6f,
-        0x6f,
-        0x76, // 'moov'
-    ]);
-    return Buffer.concat([ftyp, moov]);
+function buildArgs(
+    imageFiles: Array<{ path: string | null; durationSec: number }>,
+    audioPath: string | null,
+    request: VideoCompositionRequest,
+    outputPath: string
+): string[] {
+    const args = ['-y', '-hide_banner', '-loglevel', 'error'];
+    const durationSec = imageFiles.reduce((sum, image) => sum + image.durationSec, 0);
+
+    for (const image of imageFiles) {
+        if (image.path) {
+            args.push('-framerate', '30', '-loop', '1', '-t', String(image.durationSec), '-i', image.path);
+        } else {
+            args.push(
+                '-f',
+                'lavfi',
+                '-t',
+                String(image.durationSec),
+                '-i',
+                `color=c=0x111827:s=${request.outputWidth}x${request.outputHeight}:r=30`
+            );
+        }
+    }
+
+    let nextInputIndex = imageFiles.length;
+    let narrationInputIndex: number | null = null;
+    if (audioPath) {
+        narrationInputIndex = nextInputIndex;
+        nextInputIndex += 1;
+        args.push('-i', audioPath);
+    }
+
+    let bgmInputIndex: number | null = null;
+    if (request.backgroundMusic !== false) {
+        bgmInputIndex = nextInputIndex;
+        args.push(
+            '-f',
+            'lavfi',
+            '-t',
+            String(durationSec),
+            '-i',
+            'aevalsrc=exprs=0.020*(sin(2*PI*196*t)+sin(2*PI*246.94*t)+sin(2*PI*293.66*t)):sample_rate=44100'
+        );
+    }
+
+    const width = String(request.outputWidth);
+    const height = String(request.outputHeight);
+    const filterParts = imageFiles.map((_, i) => {
+        return `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1[v${i}]`;
+    });
+    const concatInputs = imageFiles.map((_, i) => `[v${i}]`).join('');
+    filterParts.push(`${concatInputs}concat=n=${imageFiles.length}:v=1:a=0,format=yuv420p[v]`);
+
+    let audioMap: string | null = null;
+    if (narrationInputIndex !== null && bgmInputIndex !== null) {
+        filterParts.push(`[${narrationInputIndex}:a]volume=1.0[a0]`);
+        filterParts.push(`[${bgmInputIndex}:a]volume=0.08[a1]`);
+        filterParts.push('[a0][a1]amix=inputs=2:duration=longest:dropout_transition=0[a]');
+        audioMap = '[a]';
+    } else if (bgmInputIndex !== null) {
+        filterParts.push(`[${bgmInputIndex}:a]volume=0.08[a]`);
+        audioMap = '[a]';
+    }
+
+    args.push('-filter_complex', filterParts.join(';'), '-map', '[v]');
+    if (audioMap) {
+        args.push('-map', audioMap, '-shortest', '-c:a', 'aac', '-b:a', '128k');
+    } else if (narrationInputIndex !== null) {
+        args.push('-map', `${narrationInputIndex}:a:0`, '-shortest', '-c:a', 'aac', '-b:a', '128k');
+    }
+    args.push('-c:v', 'libx264', '-preset', 'veryfast', '-r', '30', '-movflags', '+faststart', outputPath);
+
+    return args;
+}
+
+async function loadImageBinary(url: string): Promise<Buffer | null> {
+    if (url.startsWith('fake://') || url.startsWith('placeholder://')) {
+        return null;
+    }
+
+    if (url.startsWith('s3://')) {
+        throw new Error(`FFmpeg input must be a public URL, got ${url}`);
+    }
+
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Failed to fetch image input ${url}: HTTP ${response.status}`);
+    return Buffer.from(await response.arrayBuffer());
+}
+
+async function loadAudioBinary(url: string): Promise<Buffer> {
+    if (url.startsWith('s3://')) {
+        throw new Error(`FFmpeg input must be a public URL, got ${url}`);
+    }
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Failed to fetch audio input ${url}: HTTP ${response.status}`);
+    return Buffer.from(await response.arrayBuffer());
+}
+
+function runFfmpeg(args: string[]): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const child = spawn(FFMPEG_PATH, args);
+        let stderr = '';
+        const timeout = setTimeout(() => {
+            child.kill('SIGKILL');
+            reject(new Error('FFmpeg timed out after 180 seconds'));
+        }, 180000);
+
+        child.stderr.on('data', chunk => {
+            if (stderr.length < 4000) stderr += chunk.toString().slice(0, 4000 - stderr.length);
+        });
+        child.on('error', err => {
+            clearTimeout(timeout);
+            reject(
+                new Error(
+                    `FFmpeg not available at ${FFMPEG_PATH}. Set FFMPEG_PATH to a working binary or attach a Lambda layer with /opt/bin/ffmpeg. ${err.message}`
+                )
+            );
+        });
+        child.on('close', code => {
+            clearTimeout(timeout);
+            if (code === 0) {
+                resolve();
+                return;
+            }
+            reject(new Error(`FFmpeg failed with exit code ${code}: ${stderr.slice(0, 2000)}`));
+        });
+    });
 }
