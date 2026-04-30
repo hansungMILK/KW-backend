@@ -923,7 +923,34 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     });
 
                     setNodes(positionedNodes);
-                    setViewport({ x: 20, y: 20, zoom: 1 });
+
+                    // Fit all positioned nodes into the viewport
+                    const canvas = canvasRef.current;
+                    if (canvas && positionedNodes.length > 0) {
+                        const canvasW = canvas.clientWidth;
+                        const canvasH = canvas.clientHeight;
+                        const pad = 60;
+                        const minX = Math.min(...positionedNodes.map(n => n.position.x));
+                        const minY = Math.min(...positionedNodes.map(n => n.position.y));
+                        const maxX = Math.max(...positionedNodes.map(n => n.position.x + PORT_LAYOUT.NODE_WIDTH + 10));
+                        const maxY = Math.max(
+                            ...positionedNodes.map(n => n.position.y + estimateNodeHeight(n, blockRegistry[n.type]))
+                        );
+                        const contentW = maxX - minX || 1;
+                        const contentH = maxY - minY || 1;
+                        const zoom = Math.min(
+                            (canvasW - pad * 2) / contentW,
+                            (canvasH - pad * 2) / contentH,
+                            1,
+                            MAX_ZOOM
+                        );
+                        const safeZoom = Math.max(zoom, MIN_ZOOM);
+                        const viewX = (canvasW - contentW * safeZoom) / 2 - minX * safeZoom;
+                        const viewY = (canvasH - contentH * safeZoom) / 2 - minY * safeZoom;
+                        setViewport({ x: Math.round(viewX), y: Math.round(viewY), zoom: safeZoom });
+                    } else {
+                        setViewport({ x: 20, y: 20, zoom: 1 });
+                    }
                 },
                 executeNode: async (nodeId: string) => {
                     if (executeNodeRef.current) {
@@ -2271,10 +2298,12 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     >
                         <svg className="absolute overflow-visible top-0 left-0 w-full h-full">
                             {connections.map(conn => {
-                                const start = getPortPosition(conn.sourceNodeId, conn.sourcePortId, 'output');
-                                const end = getPortPosition(conn.targetNodeId, conn.targetPortId, 'input');
                                 const sourceNode = nodes.find(n => n.id === conn.sourceNodeId);
                                 const targetNode = nodes.find(n => n.id === conn.targetNodeId);
+                                // Skip ghost connections where either node no longer exists
+                                if (!sourceNode || !targetNode) return null;
+                                const start = getPortPosition(conn.sourceNodeId, conn.sourcePortId, 'output');
+                                const end = getPortPosition(conn.targetNodeId, conn.targetPortId, 'input');
                                 const packet = sourceNode?.outputData?.[conn.sourcePortId];
                                 const isActive = !!packet;
                                 // Use getEffectiveState for backward compatibility (state preferred, status fallback)
