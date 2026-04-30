@@ -1,10 +1,13 @@
-// TODO: import api from '@flows/web-core' when backend is ready
+import { api } from '@flows/web-core';
+
+import type { RunCreateResponse } from '@flows/contracts';
+
 const _log = console.log.bind(console, '[runs-api]');
 
 export interface RunView {
     id: string;
     flowId: string;
-    status: 'pending' | 'running' | 'completed' | 'failed';
+    status: RunCreateResponse['status'];
     createdAt: number;
 }
 
@@ -12,16 +15,14 @@ export interface RunView {
  * Start a flow run
  * POST /flows/{flowId}/runs
  *
- * TODO: backend not ready — replace mock with real call:
- * const response = await api.post<RunView>(`/flows/${flowId}/runs`);
- * return response.data;
  */
 export const createFlowRun = async (flowId: string): Promise<RunView> => {
     _log(`> createFlowRun(${flowId})`);
-    return Promise.resolve({
-        id: crypto.randomUUID(),
-        flowId,
-        status: 'pending',
-        createdAt: Date.now(),
-    });
+    const response = await api.post<RunCreateResponse>(`/flows/${flowId}/runs`);
+    return {
+        id: response.data.runId,
+        flowId: response.data.flowId,
+        status: response.data.status,
+        createdAt: Date.parse(response.data.createdAt),
+    };
 };

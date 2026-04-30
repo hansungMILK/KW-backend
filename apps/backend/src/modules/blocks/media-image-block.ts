@@ -74,7 +74,22 @@ export const mediaImageBlock: BlockExecutor = {
 
         // Mock mode (default): return dummy output immediately
         if ((process.env.ORCHESTRATOR_MODE || 'mock') !== 'claude') {
-            return { output: dummyImageOutput(), durationMs: Date.now() - start };
+            const output = dummyImageOutput();
+            return {
+                output,
+                durationMs: Date.now() - start,
+                assets: output.images.map(image => ({
+                    assetType: 'IMAGE',
+                    mimeType: 'image/png',
+                    data: image.url,
+                    metadata: {
+                        sceneNumber: image.sceneNumber,
+                        width: image.width,
+                        height: image.height,
+                        prompt: image.prompt,
+                    },
+                })),
+            };
         }
 
         // ── Real mode ──────────────────────────────────────────────────────────

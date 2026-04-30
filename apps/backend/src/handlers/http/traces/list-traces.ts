@@ -16,9 +16,9 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
     const paramsParsed = TraceListParamsSchema.safeParse({ runId });
     if (!paramsParsed.success) return badRequest('runId is required');
 
-    const items = await traceRepo.listByRun(paramsParsed.data.runId);
+    const result = await traceRepo.listByRun(paramsParsed.data.runId);
 
-    return ok({ items });
+    return ok({ items: result.items });
 };
 
 export const main = withMiddleware(handler);

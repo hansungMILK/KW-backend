@@ -24,12 +24,14 @@ import type { ApiKeyProvider } from '@flows/contracts';
  */
 
 const TABLE = USE_REAL_DYNAMO ? TableNames.settings : 'settings';
-const KMS_KEY_ID = process.env.KMS_KEY_ID || '';
+const RAW_KMS_KEY_ID = process.env.KMS_KEY_ID || '';
+const KMS_KEY_ID = RAW_KMS_KEY_ID && RAW_KMS_KEY_ID !== '[object Object]' ? RAW_KMS_KEY_ID : '';
 const ALLOW_INSECURE_SETTINGS = process.env.ALLOW_INSECURE_SETTINGS === 'true';
 
-// Real KMS is used whenever a key id is provided. This is the single source of
-// truth for "is this ciphertext a KMS blob?" — do NOT gate on stage name.
-const USE_KMS = !!KMS_KEY_ID;
+// Real KMS is used only when writing to real DynamoDB. serverless-offline can
+// stringify CloudFormation objects into env values, so local dev must not treat
+// those placeholders as usable KMS keys.
+const USE_KMS = USE_REAL_DYNAMO && !!KMS_KEY_ID;
 
 // Fail-fast: if we're writing to real DynamoDB we must either have KMS or the
 // operator must have explicitly accepted insecure base64 storage. Refuse to

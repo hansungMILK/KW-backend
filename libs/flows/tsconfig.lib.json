@@ -10,6 +10,9 @@
     "exclude": ["**/*.spec.ts", "**/*.test.ts"],
     "references": [
         {
+            "path": "../contracts"
+        },
+        {
             "path": "../web-core/tsconfig.lib.json"
         }
     ]

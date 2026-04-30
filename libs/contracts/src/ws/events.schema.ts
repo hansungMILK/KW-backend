@@ -75,6 +75,7 @@ export type WsPortUpdated = z.infer<typeof WsPortUpdatedSchema>;
 
 export const WsRunStartedSchema = z.object({
     type: z.literal('run.started'),
+    id: z.string().optional(),
     runId: z.string(),
     flowId: z.string(),
     status: z.literal('RUNNING'),
@@ -83,6 +84,7 @@ export const WsRunStartedSchema = z.object({
 
 export const WsRunCompletedSchema = z.object({
     type: z.literal('run.completed'),
+    id: z.string().optional(),
     runId: z.string(),
     flowId: z.string(),
     status: z.literal('COMPLETED'),
@@ -91,6 +93,7 @@ export const WsRunCompletedSchema = z.object({
 
 export const WsRunFailedSchema = z.object({
     type: z.literal('run.failed'),
+    id: z.string().optional(),
     runId: z.string(),
     flowId: z.string(),
     status: z.literal('FAILED'),
@@ -101,7 +104,9 @@ export const WsRunFailedSchema = z.object({
 
 export const WsNodeStartedSchema = z.object({
     type: z.literal('node.started'),
+    id: z.string().optional(),
     runId: z.string(),
+    flowId: z.string().optional(),
     nodeId: z.string(),
     status: z.literal('RUNNING'),
     timestamp: z.number(),
@@ -109,7 +114,9 @@ export const WsNodeStartedSchema = z.object({
 
 export const WsNodeProgressSchema = z.object({
     type: z.literal('node.progress'),
+    id: z.string().optional(),
     runId: z.string(),
+    flowId: z.string().optional(),
     nodeId: z.string(),
     progress: z.number().min(0).max(100),
     message: z.string().optional(),
@@ -118,7 +125,9 @@ export const WsNodeProgressSchema = z.object({
 
 export const WsNodeCompletedSchema = z.object({
     type: z.literal('node.completed'),
+    id: z.string().optional(),
     runId: z.string(),
+    flowId: z.string().optional(),
     nodeId: z.string(),
     status: z.literal('COMPLETED'),
     timestamp: z.number(),
@@ -126,7 +135,9 @@ export const WsNodeCompletedSchema = z.object({
 
 export const WsNodeFailedSchema = z.object({
     type: z.literal('node.failed'),
+    id: z.string().optional(),
     runId: z.string(),
+    flowId: z.string().optional(),
     nodeId: z.string(),
     status: z.literal('FAILED'),
     errorCode: z.string().optional(),
@@ -136,20 +147,26 @@ export const WsNodeFailedSchema = z.object({
 
 export const WsAssetCreatedSchema = z.object({
     type: z.literal('asset.created'),
+    id: z.string().optional(),
     runId: z.string(),
+    flowId: z.string().optional(),
     nodeId: z.string(),
     assetId: z.string(),
     assetType: z.string(),
+    url: z.string().optional(),
     publicUrl: z.string().optional(),
     timestamp: z.number(),
 });
 
 export const WsProposalCreatedSchema = z.object({
     type: z.literal('proposal.created'),
+    id: z.string().optional(),
     proposalId: z.string(),
     flowId: z.string(),
     status: z.literal('PENDING'),
+    blocks: z.array(z.object({ type: z.string(), label: z.string() })).optional(),
     estimatedCost: z.number().optional(),
+    description: z.string().optional(),
     approvalRequired: z.boolean(),
     timestamp: z.number(),
 });

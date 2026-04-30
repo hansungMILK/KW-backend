@@ -36,8 +36,14 @@ const parseWebSocketMessage = (data: unknown): WebSocketMessage | null => {
             ? (msg['data'] as Record<string, unknown>)
             : msg;
 
-    // Check for id field (node ID) or nodeId field
-    const messageId = (payload['id'] as string) || (payload['nodeId'] as string);
+    const messageId =
+        (payload['id'] as string) ||
+        (payload['nodeId'] as string) ||
+        (payload['runId'] as string) ||
+        (payload['assetId'] as string) ||
+        (payload['proposalId'] as string) ||
+        (payload['flowId'] as string) ||
+        (payload['type'] as string);
 
     if (messageId) {
         return {
@@ -72,6 +78,35 @@ export const isRunFailedMessage = (data: unknown): data is RunFailedMessage => {
 export const isAssetCreatedMessage = (data: unknown): data is AssetCreatedMessage => {
     if (typeof data !== 'object' || data === null) return false;
     return (data as Record<string, unknown>)['type'] === 'asset.created';
+};
+
+type NodeExecutionMessage = {
+    type: 'node.started' | 'node.progress' | 'node.completed' | 'node.failed';
+    nodeId: string;
+    flowId?: string;
+    runId?: string;
+    status?: string;
+    progress?: number;
+    timestamp?: number;
+    no?: number;
+};
+
+const isNodeExecutionMessage = (data: unknown): data is NodeExecutionMessage => {
+    if (typeof data !== 'object' || data === null) return false;
+    const msg = data as Record<string, unknown>;
+    return (
+        typeof msg['nodeId'] === 'string' &&
+        (msg['type'] === 'node.started' ||
+            msg['type'] === 'node.progress' ||
+            msg['type'] === 'node.completed' ||
+            msg['type'] === 'node.failed')
+    );
+};
+
+const getNodeExecutionState = (msg: NodeExecutionMessage): NodeState => {
+    if (msg.type === 'node.failed' || msg.status === 'FAILED') return 'ERROR';
+    if (msg.type === 'node.completed' || msg.status === 'COMPLETED') return 'COMPLETED';
+    return 'RUNNING';
 };
 
 /**
@@ -372,6 +407,27 @@ export const useInitFlowSocket = (options: UseInitFlowSocketOptions = {}) => {
                         prevState: effectivePrevState,
                         progress: data.progress,
                         stereo: data.stereo,
+                    });
+                }
+                return;
+            }
+
+            // Handle spec execution events: node.started/progress/completed/failed
+            if (isNodeExecutionMessage(data)) {
+                const isForCurrentFlow = data.flowId && data.flowId === currentFlowId;
+                if (!isForCurrentFlow) return;
+
+                if (onNodeReload) {
+                    onNodeReload({
+                        nodeId: data.nodeId,
+                        flowId: data.flowId,
+                        timestamp: data.timestamp,
+                        no: data.no,
+                        status: data.status,
+                        isPort: false,
+                        state: getNodeExecutionState(data),
+                        progress: data.progress,
+                        stereo: 0,
                     });
                 }
                 return;

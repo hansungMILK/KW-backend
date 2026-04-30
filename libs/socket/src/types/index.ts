@@ -126,7 +126,7 @@ export interface ProposalCreatedMessage {
     timestamp?: number;
     proposalId: string;
     blocks?: Array<{ type: string; label: string }>;
-    estimatedCost?: string;
+    estimatedCost?: string | number | { currency?: string; total?: number };
     description?: string;
 }
 
@@ -170,6 +170,7 @@ export interface AssetCreatedMessage {
     assetId: string;
     assetType?: 'image' | 'audio' | 'video' | 'file';
     url?: string;
+    publicUrl?: string;
     timestamp?: number;
 }
 

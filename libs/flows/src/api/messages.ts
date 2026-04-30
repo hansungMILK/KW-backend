@@ -1,8 +1,12 @@
-// TODO: import api from '@flows/web-core' when backend is ready
+import { api } from '@flows/web-core';
+
+import type { MessageCreateResponse, MessageListResponse } from '@flows/contracts';
+
 const _log = console.log.bind(console, '[messages-api]');
 
 export interface SendMessageBody {
     content: string;
+    currentContext?: Record<string, unknown>;
 }
 
 export interface ProposalBlock {
@@ -28,34 +32,77 @@ export interface MessageView {
     createdAt: number;
 }
 
+const asRecord = (value: unknown): Record<string, unknown> =>
+    typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+
+const formatEstimatedCost = (cost: MessageCreateResponse['proposal']['estimatedCost']): string | undefined => {
+    if (!cost) return undefined;
+    const currency = cost.currency === 'USD' ? '$' : `${cost.currency} `;
+    return `${currency}${cost.total.toFixed(2)}`;
+};
+
+const toProposalBlock = (node: unknown, index: number): ProposalBlock => {
+    const item = asRecord(node);
+    const type = String(item.blockType ?? item.type ?? item.blockId ?? 'unknown');
+    return {
+        type,
+        label: String(item.name ?? item.label ?? type ?? `Block ${index + 1}`),
+        position:
+            typeof item.position === 'object' && item.position !== null
+                ? (item.position as { x: number; y: number })
+                : undefined,
+    };
+};
+
+const toProposalEdge = (edge: unknown): { source: string; target: string } | null => {
+    const item = asRecord(edge);
+    const source = item.sourceNodeId ?? item.source ?? item.from;
+    const target = item.targetNodeId ?? item.target ?? item.to;
+    if (source === undefined || target === undefined) return null;
+    return { source: String(source), target: String(target) };
+};
+
+const toMessageProposal = (response: MessageCreateResponse): MessageProposal => ({
+    id: response.proposal.proposalId,
+    blocks: response.proposal.proposedNodes.map(toProposalBlock),
+    edges: response.proposal.proposedEdges.map(toProposalEdge).filter((edge): edge is { source: string; target: string } =>
+        Boolean(edge)
+    ),
+    estimatedCost: formatEstimatedCost(response.proposal.estimatedCost),
+    description: response.assistantMessage.content,
+});
+
 /**
  * Send a message to the flow agent
  * POST /flows/{flowId}/messages
  *
- * TODO: backend not ready — replace mock with real call:
- * const response = await api.post<MessageView>(`/flows/${flowId}/messages`, body);
- * return response.data;
  */
 export const sendFlowMessage = async (flowId: string, body: SendMessageBody): Promise<MessageView> => {
     _log(`> sendFlowMessage(${flowId})`, body);
-    return Promise.resolve({
-        id: crypto.randomUUID(),
-        flowId,
+    const response = await api.post<MessageCreateResponse>(`/flows/${flowId}/messages`, body);
+    return {
+        id: response.data.assistantMessage.messageId,
+        flowId: response.data.assistantMessage.flowId,
         role: 'agent',
-        content: '워크플로우를 구성하는 데 도움을 드릴게요. 어떤 결과물을 만들고 싶으신가요?',
-        createdAt: Date.now(),
-    });
+        content: response.data.assistantMessage.content,
+        proposal: toMessageProposal(response.data),
+        createdAt: Date.parse(response.data.assistantMessage.createdAt),
+    };
 };
 
 /**
  * Get message history for a flow
  * GET /flows/{flowId}/messages
  *
- * TODO: backend not ready — replace mock with real call:
- * const response = await api.get<{ list: MessageView[] }>(`/flows/${flowId}/messages`);
- * return response.data.list ?? [];
  */
 export const getFlowMessages = async (flowId: string): Promise<MessageView[]> => {
     _log(`> getFlowMessages(${flowId})`);
-    return Promise.resolve([]);
+    const response = await api.get<MessageListResponse>(`/flows/${flowId}/messages`);
+    return response.data.items.map(message => ({
+        id: message.messageId,
+        flowId: message.flowId,
+        role: message.role === 'USER' ? 'user' : 'agent',
+        content: message.content,
+        createdAt: Date.parse(message.createdAt),
+    }));
 };

@@ -5,7 +5,7 @@ import { z } from 'zod';
  * Provider API key management — store, retrieve (masked), delete, verify.
  */
 
-export const ApiKeyProviderSchema = z.enum(['anthropic', 'nanobanana', 'openai', 'elevenlabs', 'naver']);
+export const ApiKeyProviderSchema = z.enum(['anthropic', 'nanobanana', 'openai', 'elevenlabs']);
 
 export type ApiKeyProvider = z.infer<typeof ApiKeyProviderSchema>;
 

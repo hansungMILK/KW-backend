@@ -1,6 +1,7 @@
 import { api } from '@flows/web-core';
 
-// TODO: remove mock when backend is fully ready for getAsset
+import type { Asset } from '@flows/contracts';
+
 const _log = console.log.bind(console, '[assets-api]');
 
 export type AssetType = 'image' | 'audio' | 'video' | 'file';
@@ -15,22 +16,24 @@ export interface AssetView {
     createdAt: number;
 }
 
+const toAssetView = (asset: Asset): AssetView => ({
+    id: asset.assetId,
+    type: asset.assetType.toLowerCase() as AssetType,
+    url: asset.publicUrl ?? '',
+    name: String(asset.metadata?.name ?? asset.assetId),
+    mimeType: asset.mimeType,
+    createdAt: Date.parse(asset.createdAt),
+});
+
 /**
  * Get asset by ID
  * GET /assets/{assetId}
  *
- * TODO: backend not ready — replace mock with real call:
- * return (await api.get<AssetView>(`/assets/${assetId}`)).data;
  */
 export const getAsset = async (assetId: string): Promise<AssetView> => {
     _log(`> getAsset(${assetId})`);
-    return Promise.resolve({
-        id: assetId,
-        type: 'file',
-        url: '',
-        name: assetId,
-        createdAt: Date.now(),
-    });
+    const response = await api.get<Asset>(`/assets/${assetId}`);
+    return toAssetView(response.data);
 };
 
 /**
@@ -39,6 +42,6 @@ export const getAsset = async (assetId: string): Promise<AssetView> => {
  */
 export const getRunAssets = async (runId: string): Promise<AssetView[]> => {
     _log(`> getRunAssets(${runId})`);
-    const response = await api.get<AssetView[]>(`/runs/${runId}/assets`);
-    return response.data;
+    const response = await api.get<{ items: Asset[] }>(`/runs/${runId}/assets`);
+    return response.data.items.map(toAssetView);
 };

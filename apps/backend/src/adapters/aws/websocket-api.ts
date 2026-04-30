@@ -32,7 +32,9 @@ export const initWsClient = (endpoint: string) => {
  */
 function ensureClient(): ApiGatewayManagementApiClient | null {
     if (wsClient) return wsClient;
-    const endpoint = process.env.WS_CALLBACK_ENDPOINT;
+    const endpoint =
+        process.env.WS_CALLBACK_ENDPOINT ||
+        (process.env.STAGE === 'local' || !process.env.STAGE ? 'http://localhost:8801' : '');
     if (!endpoint) return null;
     const isLocal = endpoint.startsWith('http://localhost') || endpoint.startsWith('http://127.0.0.1');
     wsClient = new ApiGatewayManagementApiClient({

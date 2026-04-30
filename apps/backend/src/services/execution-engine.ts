@@ -96,6 +96,7 @@ export const executionEngine = {
         try {
             await wsService.broadcastToFlow(run.flowId, {
                 type: 'run.started',
+                id: runId,
                 runId,
                 flowId: run.flowId,
                 status: 'RUNNING',
@@ -171,6 +172,7 @@ export const executionEngine = {
             try {
                 await wsService.broadcastToFlow(run.flowId, {
                     type: 'run.failed',
+                    id: runId,
                     runId,
                     flowId: run.flowId,
                     status: 'FAILED',
@@ -196,6 +198,7 @@ export const executionEngine = {
         try {
             await wsService.broadcastToFlow(run.flowId, {
                 type: 'run.completed',
+                id: runId,
                 runId,
                 flowId: run.flowId,
                 status: 'COMPLETED',
@@ -273,7 +276,9 @@ export const executionEngine = {
             try {
                 await wsService.broadcastToFlow(runForNode.flowId, {
                     type: 'node.started',
+                    id: nodeId,
                     runId,
+                    flowId: runForNode.flowId,
                     nodeId,
                     status: 'RUNNING',
                     timestamp: Date.now(),
@@ -294,7 +299,9 @@ export const executionEngine = {
                 try {
                     await wsService.broadcastToFlow(runForNode.flowId, {
                         type: 'node.progress',
+                        id: nodeId,
                         runId,
+                        flowId: runForNode.flowId,
                         nodeId,
                         progress: 25,
                         message: `${node.blockType} 실행 준비 중...`,
@@ -314,7 +321,9 @@ export const executionEngine = {
                 try {
                     await wsService.broadcastToFlow(runForNode.flowId, {
                         type: 'node.progress',
+                        id: nodeId,
                         runId,
+                        flowId: runForNode.flowId,
                         nodeId,
                         progress: 75,
                         message: `${node.blockType} 결과 저장 중...`,
@@ -356,10 +365,13 @@ export const executionEngine = {
                         // Broadcast asset.created WS event
                         await wsService.broadcastToFlow(runForNode.flowId, {
                             type: 'asset.created',
+                            id: assetId,
                             runId,
+                            flowId: runForNode.flowId,
                             nodeId,
                             assetId,
-                            assetType: asset.assetType,
+                            assetType: asset.assetType.toLowerCase(),
+                            url: publicUrl,
                             publicUrl,
                             timestamp: Date.now(),
                         });
@@ -374,7 +386,9 @@ export const executionEngine = {
                 try {
                     await wsService.broadcastToFlow(runForNode.flowId, {
                         type: 'node.completed',
+                        id: nodeId,
                         runId,
+                        flowId: runForNode.flowId,
                         nodeId,
                         status: 'COMPLETED',
                         timestamp: Date.now(),
@@ -402,7 +416,9 @@ export const executionEngine = {
                 try {
                     await wsService.broadcastToFlow(runForNode.flowId, {
                         type: 'node.failed',
+                        id: nodeId,
                         runId,
+                        flowId: runForNode.flowId,
                         nodeId,
                         status: 'FAILED',
                         errorCode: 'EXECUTION_ERROR',

@@ -14,7 +14,6 @@ const ENV_MAP: Record<ApiKeyProvider, string> = {
     nanobanana: 'NANOBANANA_API_KEY',
     openai: 'OPENAI_API_KEY',
     elevenlabs: 'ELEVENLABS_API_KEY',
-    naver: 'NAVER_CLIENT_ID',
 };
 
 // ============================================================================
@@ -138,17 +137,11 @@ const verifyElevenLabs = async (key: string): Promise<{ valid: boolean; message?
     }
 };
 
-const verifyNaver = async (_key: string): Promise<{ valid: boolean; message?: string }> => {
-    // Naver: noop — if key is present, consider valid
-    return { valid: true, message: 'Naver key accepted (presence check only)' };
-};
-
 const VERIFY_FN: Record<ApiKeyProvider, (key: string) => Promise<{ valid: boolean; message?: string }>> = {
     anthropic: verifyAnthropic,
     nanobanana: verifyNanobanana,
     openai: verifyOpenAI,
     elevenlabs: verifyElevenLabs,
-    naver: verifyNaver,
 };
 
 // ============================================================================

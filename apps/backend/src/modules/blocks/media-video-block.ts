@@ -31,7 +31,25 @@ export const mediaVideoBlock: BlockExecutor = {
 
         // Mock mode (default): return dummy output immediately
         if ((process.env.ORCHESTRATOR_MODE || 'mock') !== 'claude') {
-            return { output: dummyVideoOutput(), durationMs: Date.now() - start };
+            const output = dummyVideoOutput();
+            return {
+                output,
+                durationMs: Date.now() - start,
+                assets: [
+                    {
+                        assetType: 'VIDEO',
+                        mimeType: 'video/mp4',
+                        data: output.video.url,
+                        metadata: {
+                            durationSec: output.video.durationSec,
+                            width: output.video.width,
+                            height: output.video.height,
+                            format: output.video.format,
+                            sizeBytes: output.video.sizeBytes,
+                        },
+                    },
+                ],
+            };
         }
 
         // ── Real mode ──────────────────────────────────────────────────────────

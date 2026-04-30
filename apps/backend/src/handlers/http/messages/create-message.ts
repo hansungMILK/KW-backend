@@ -73,10 +73,16 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
     // 3-1. Broadcast proposal.created via WebSocket (non-blocking)
     void wsService.broadcastToFlow(fid, {
         type: 'proposal.created',
+        id: proposalId,
         proposalId,
         flowId: fid,
         status: 'PENDING',
-        estimatedCost: proposal.estimatedCost,
+        blocks: result.proposedNodes.map(node => ({
+            type: node.blockType,
+            label: node.name,
+        })),
+        estimatedCost: proposal.estimatedCost?.total,
+        description: result.assistantMessage,
         approvalRequired: proposal.approvalRequired,
         timestamp: Date.now(),
     });

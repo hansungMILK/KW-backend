@@ -25,6 +25,17 @@ interface FlowAgentPanelProps {
     externalProposal?: ProposalCreatedMessage | null;
 }
 
+const formatEstimatedCost = (cost: ProposalCreatedMessage['estimatedCost']): string | undefined => {
+    if (cost === undefined) return undefined;
+    if (typeof cost === 'string') return cost;
+    if (typeof cost === 'number') return `$${cost.toFixed(2)}`;
+    if (typeof cost.total === 'number') {
+        const currency = cost.currency === 'USD' || !cost.currency ? '$' : `${cost.currency} `;
+        return `${currency}${cost.total.toFixed(2)}`;
+    }
+    return undefined;
+};
+
 export const FlowAgentPanel = ({ open, onClose, flowId, onApproveProposal, externalProposal }: FlowAgentPanelProps) => {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
@@ -46,10 +57,14 @@ export const FlowAgentPanel = ({ open, onClose, flowId, onApproveProposal, exter
         const proposal: MessageProposal = {
             id: externalProposal.proposalId,
             blocks: externalProposal.blocks ?? [],
-            estimatedCost: externalProposal.estimatedCost,
+            estimatedCost: formatEstimatedCost(externalProposal.estimatedCost),
             description: externalProposal.description,
         };
-        setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'agent', proposal }]);
+        setMessages(prev =>
+            prev.some(message => message.proposal?.id === proposal.id)
+                ? prev
+                : [...prev, { id: crypto.randomUUID(), role: 'agent', proposal }]
+        );
     }, [externalProposal]);
 
     const sendMessage = async () => {
@@ -138,6 +153,7 @@ export const FlowAgentPanel = ({ open, onClose, flowId, onApproveProposal, exter
 
                     if (msg.proposal) {
                         const { blocks, estimatedCost, description } = msg.proposal;
+                        const proposal = msg.proposal;
                         return (
                             <div key={msg.id} className="flex items-start gap-2">
                                 <div className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center shrink-0 mt-0.5">
@@ -163,7 +179,7 @@ export const FlowAgentPanel = ({ open, onClose, flowId, onApproveProposal, exter
                                     <div className="flex gap-2 mt-1">
                                         <button
                                             className="flex-1 text-[11px] py-1.5 rounded-md bg-foreground text-background hover:bg-foreground/80 transition-colors"
-                                            onClick={() => void handleApprove(msg.proposal!)}
+                                            onClick={() => void handleApprove(proposal)}
                                         >
                                             승인
                                         </button>

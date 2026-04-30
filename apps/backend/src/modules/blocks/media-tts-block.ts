@@ -29,7 +29,23 @@ export const mediaTtsBlock: BlockExecutor = {
 
         // Mock mode (default): return dummy output immediately
         if ((process.env.ORCHESTRATOR_MODE || 'mock') !== 'claude') {
-            return { output: dummyTtsOutput(), durationMs: Date.now() - start };
+            const output = dummyTtsOutput();
+            return {
+                output,
+                durationMs: Date.now() - start,
+                assets: [
+                    {
+                        assetType: 'AUDIO',
+                        mimeType: 'audio/mpeg',
+                        data: output.audio.url,
+                        metadata: {
+                            durationSec: output.audio.durationSec,
+                            format: output.audio.format,
+                            sampleRate: output.audio.sampleRate,
+                        },
+                    },
+                ],
+            };
         }
 
         // ── Real mode ──────────────────────────────────────────────────────────

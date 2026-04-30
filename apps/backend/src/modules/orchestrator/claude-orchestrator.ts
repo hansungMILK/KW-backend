@@ -1,12 +1,11 @@
 import { ORCHESTRATOR_SYSTEM_PROMPT, PROMPT_VERSION, buildUserPrompt } from './prompt-templates';
-import { ALLOWED_BLOCK_TYPES, parseClaudeResponse } from './response-parser';
-
-import type { AllowedBlockType } from './response-parser';
+import { parseClaudeResponse } from './response-parser';
 import { claudeAdapter } from '../../adapters/ai/claude-adapter';
 import { traceService } from '../../services/trace-service';
 import { generateNumericId } from '../../utils/id-generator';
 import { log } from '../../utils/logger';
 
+import type { AllowedBlockType } from './response-parser';
 import type { Orchestrator, ProposalResult } from './types';
 
 const MODEL = 'claude-sonnet-4-20250514';
