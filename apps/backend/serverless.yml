@@ -5,8 +5,11 @@ useDotenv: true
 provider:
     name: aws
     runtime: nodejs20.x
+    architecture: x86_64
     region: ap-northeast-2
     stage: ${opt:stage, 'local'}
+    timeout: 30
+    memorySize: 512
     environment:
         STAGE: ${self:provider.stage}
         DYNAMODB_ENDPOINT: ${env:DYNAMODB_ENDPOINT, ''}
@@ -29,7 +32,8 @@ provider:
                 'http://localhost:8801',
                 !Sub 'https://${WebsocketsApi}.execute-api.${AWS::Region}.amazonaws.com/${self:provider.stage}',
             ]
-        FFMPEG_PATH: ${env:FFMPEG_PATH, '/opt/bin/ffmpeg'}
+        FFMPEG_PATH: ${self:custom.ffmpegPath.${self:provider.stage}, '/opt/bin/ffmpeg'}
+        FFMPEG_TIMEOUT_MS: ${env:FFMPEG_TIMEOUT_MS, '840000'}
         ORCHESTRATOR_MODE: ${env:ORCHESTRATOR_MODE, 'openai'}
         AI_PROVIDER: ${env:AI_PROVIDER, 'openai'}
         OPENAI_MODEL: ${env:OPENAI_MODEL, 'gpt-5.4-nano'}
@@ -116,11 +120,15 @@ plugins:
     - serverless-offline
 
 custom:
+    ffmpegPath:
+        local: ${env:FFMPEG_PATH, '/opt/bin/ffmpeg'}
+        dev: /opt/bin/ffmpeg
+        prod: /opt/bin/ffmpeg
     esbuild:
         bundle: true
         minify: false
         sourcemap: true
-        target: node22
+        target: node20
         platform: node
         external:
             - '@aws-sdk/*'
@@ -130,6 +138,16 @@ custom:
         httpPort: 8800
         websocketPort: 8801
         noPrependStageInUrl: true
+
+layers:
+    ffmpeg:
+        path: layers/ffmpeg
+        name: ${self:service}-ffmpeg-${self:provider.stage}
+        description: Static ffmpeg binary for Shorts video composition
+        compatibleRuntimes:
+            - nodejs20.x
+        compatibleArchitectures:
+            - x86_64
 
 functions:
     # ── Health ──
@@ -844,7 +862,10 @@ functions:
     # ── Workers ──
     runWorker:
         handler: src/workers/run-worker.main
-        timeout: 120
+        memorySize: 4096
+        timeout: 900
+        layers:
+            - !Ref FfmpegLambdaLayer
         events:
             - sqs:
                   arn: !GetAtt ExecutionQueue.Arn
@@ -854,63 +875,51 @@ functions:
     workflowGenerate:
         handler: src/handlers/http/workflows/generate.main
         events:
-            - http:
+            - httpApi:
                   path: '/workflows/{workflowId}/generate'
                   method: post
-                  cors: true
-            - http:
+            - httpApi:
                   path: '/_apis/workflows/{workflowId}/generate'
                   method: post
-                  cors: true
-            - http:
+            - httpApi:
                   path: '/_api_/workflows/{workflowId}/generate'
                   method: post
-                  cors: true
 
     workflowExecute:
         handler: src/handlers/http/workflows/execute.main
         timeout: 60
         events:
-            - http:
+            - httpApi:
                   path: '/workflows/{workflowId}/execute'
                   method: post
-                  cors: true
-            - http:
+            - httpApi:
                   path: '/_apis/workflows/{workflowId}/execute'
                   method: post
-                  cors: true
-            - http:
+            - httpApi:
                   path: '/_api_/workflows/{workflowId}/execute'
                   method: post
-                  cors: true
-            - http:
+            - httpApi:
                   path: '/workflows/{workflowId}/execute'
                   method: get
-                  cors: true
-            - http:
+            - httpApi:
                   path: '/_apis/workflows/{workflowId}/execute'
                   method: get
-                  cors: true
-            - http:
+            - httpApi:
                   path: '/_api_/workflows/{workflowId}/execute'
                   method: get
-                  cors: true
 
     workflowResults:
         handler: src/handlers/http/workflows/results.main
         events:
-            - http:
+            - httpApi:
                   path: '/workflows/{workflowId}/executions/{executionId}/results'
                   method: get
-                  cors: true
-            - http:
+            - httpApi:
                   path: '/_apis/workflows/{workflowId}/executions/{executionId}/results'
                   method: get
-                  cors: true
-            - http:
+            - httpApi:
                   path: '/_api_/workflows/{workflowId}/executions/{executionId}/results'
                   method: get
-                  cors: true
 
     # ── WebSocket ──
     wsConnect:
@@ -946,7 +955,7 @@ resources:
             Type: AWS::SQS::Queue
             Properties:
                 QueueName: ${self:service}-execution-${self:provider.stage}
-                VisibilityTimeout: 180
+                VisibilityTimeout: 5400
                 RedrivePolicy:
                     deadLetterTargetArn: !GetAtt ExecutionDeadLetterQueue.Arn
                     maxReceiveCount: 3
@@ -1239,3 +1248,20 @@ resources:
             Properties:
                 AliasName: 'alias/${self:service}-settings-${self:provider.stage}'
                 TargetKeyId: !Ref SettingsKmsKey
+
+    Outputs:
+        HttpApiUrl:
+            Description: HTTP API endpoint for this stage
+            Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com'
+        WebSocketApiUrl:
+            Description: WebSocket endpoint for this stage
+            Value: !Sub 'wss://${WebsocketsApi}.execute-api.${AWS::Region}.amazonaws.com/${self:provider.stage}'
+        AssetsBucketName:
+            Description: S3 bucket storing generated assets
+            Value: !Ref AssetsBucket
+        AssetsCloudFrontDomain:
+            Description: CloudFront domain serving generated assets
+            Value: !GetAtt AssetsDistribution.DomainName
+        ExecutionQueueUrl:
+            Description: SQS queue used by runWorker
+            Value: !Ref ExecutionQueue

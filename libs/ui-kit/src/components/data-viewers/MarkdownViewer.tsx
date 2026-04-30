@@ -2,7 +2,7 @@ import ReactMarkdown from 'react-markdown';
 
 import remarkGfm from 'remark-gfm';
 
-import { cn } from '../../utils';
+import { cn } from '../../utils/index.js';
 
 export interface MarkdownViewerProps {
     content: string;

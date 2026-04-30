@@ -9,8 +9,9 @@
         "module": "nodenext",
         "moduleResolution": "nodenext",
         "forceConsistentCasingInFileNames": true,
-        "types": ["node"]
+        "jsx": "react-jsx",
+        "types": ["node", "react"]
     },
-    "include": ["src/**/*.ts"],
+    "include": ["src/**/*.ts", "src/**/*.tsx"],
     "references": []
 }

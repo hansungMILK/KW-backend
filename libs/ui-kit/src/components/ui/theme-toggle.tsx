@@ -4,9 +4,9 @@ import { Moon, Sun } from 'lucide-react';
 
 import { useTheme } from '@flows/theme';
 
-import { Button } from './button';
+import { Button } from './button.js';
 
-export const ThemeToggle = (): JSX.Element => {
+export const ThemeToggle = () => {
     const { t } = useTranslation(['common']);
     const { theme, setTheme } = useTheme();
 

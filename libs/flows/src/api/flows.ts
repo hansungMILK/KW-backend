@@ -1,7 +1,14 @@
 import { api, withRetry } from '@flows/web-core';
 
-import type { FlowView, LoadFlowResult, SaveFlowBody, SaveFlowView, UpdateFlowBody } from '../types';
-import type { BlockDefinition, DataPacket, LogEntry } from '@lemoncloud/eureka-flows-api';
+import type {
+    DataPacket,
+    FlowView,
+    LoadFlowResult,
+    LogEntry,
+    SaveFlowBody,
+    SaveFlowView,
+    UpdateFlowBody,
+} from '../types';
 
 const _log = console.log.bind(console, '[flows-api]');
 
@@ -116,13 +123,14 @@ export const createPacket = (value: unknown, type: 'text' | 'image' | 'number'):
     timestamp: Date.now(),
 });
 
-// Re-export types for convenience
-export type { BlockDefinition, DataPacket, LogEntry };
 export type {
+    BlockDefinition,
+    DataPacket,
     FlowBody,
     FlowView,
     LoadFlowPortData,
     LoadFlowResult,
+    LogEntry,
     SaveFlowBody,
     SaveFlowView,
     UpdateFlowBody,

@@ -42,8 +42,7 @@ import {
     wouldCreateCycle,
 } from '../utils';
 
-import type { LoadFlowPortData, NodeState } from '@flows/flows';
-import type { Connection, DataPacket, NodeData, WorkflowState } from '@lemoncloud/eureka-flows-api';
+import type { Connection, DataPacket, LoadFlowPortData, NodeData, NodeState, WorkflowState } from '@flows/flows';
 
 /** Extended WorkflowState with optional ports array from LoadFlowResult */
 interface WorkflowStateWithPorts extends WorkflowState {
@@ -236,7 +235,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
         const pastRef = useRef<WorkflowState[]>([]);
         const futureRef = useRef<WorkflowState[]>([]);
         const dragStartSnapshotRef = useRef<WorkflowState | null>(null);
-        const executeNodeRef = useRef<(nodeId: string) => Promise<void>>();
+        const executeNodeRef = useRef<((nodeId: string) => Promise<void>) | null>(null);
 
         const nodesRef = useRef(nodes);
         const connectionsRef = useRef(connections);
@@ -318,6 +317,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
             if (readOnly) return;
             pastRef.current.push({
                 nodes: JSON.parse(JSON.stringify(nodes)),
+                edges: [...connections],
                 connections: [...connections],
             });
             futureRef.current = [];
@@ -328,13 +328,14 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
 
             futureRef.current.push({
                 nodes: JSON.parse(JSON.stringify(nodes)),
+                edges: [...connections],
                 connections: [...connections],
             });
 
             const previous = pastRef.current.pop();
             if (previous) {
                 setNodes(previous.nodes);
-                setConnections(previous.connections);
+                setConnections(previous.connections ?? previous.edges ?? []);
             }
         }, [nodes, connections, readOnly]);
 
@@ -343,13 +344,14 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
 
             pastRef.current.push({
                 nodes: JSON.parse(JSON.stringify(nodes)),
+                edges: [...connections],
                 connections: [...connections],
             });
 
             const next = futureRef.current.pop();
             if (next) {
                 setNodes(next.nodes);
-                setConnections(next.connections);
+                setConnections(next.connections ?? next.edges ?? []);
             }
         }, [nodes, connections, readOnly]);
 
@@ -521,7 +523,10 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                         };
 
                         if (sourceNode.outputData?.[sourcePortId]) {
-                            newNode.inputData[targetPortId] = sourceNode.outputData[sourcePortId];
+                            newNode.inputData = {
+                                ...(newNode.inputData ?? {}),
+                                [targetPortId]: sourceNode.outputData[sourcePortId],
+                            };
                         }
                     }
 
@@ -634,7 +639,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                 },
                 getWorkflow: () => ({
                     nodes,
-                    edges: connections.filter(c => !pendingEdgeIds.has(c.id)),
+                    edges: connections.filter(c => !c.id || !pendingEdgeIds.has(c.id)),
                 }),
                 loadWorkflow: async (state: WorkflowStateWithPorts) => {
                     // Normalize nodes to ensure config is never undefined
@@ -677,10 +682,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     };
 
                     // Helper: Propagate outputData to downstream nodes' inputData via edges
-                    const propagateData = (
-                        baseNodes: typeof loadedNodes,
-                        conns: typeof loadedConnections
-                    ): typeof loadedNodes => {
+                    const propagateData = (baseNodes: NodeData[], conns: Connection[]): NodeData[] => {
                         return baseNodes.map(node => {
                             const incomingConnections = conns.filter(c => c.targetNodeId === node.id);
                             if (incomingConnections.length === 0) return node;
@@ -1036,7 +1038,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                 const currentNode = nodesRef.current.find(n => n.id === nodeId);
                 if (!currentNode) return;
 
-                const inputs = manualOverrideInputs || currentNode.inputData;
+                const inputs = manualOverrideInputs || currentNode.inputData || {};
                 const nodeDef = blockRegistry[currentNode.type];
 
                 if (!nodeDef) {
@@ -2254,7 +2256,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                                 const isFlowing = sourceState === 'RUNNING' || targetState === 'RUNNING';
 
                                 const handleHover = (e: React.MouseEvent) => {
-                                    setHoveredConnectionId(conn.id);
+                                    if (conn.id) setHoveredConnectionId(conn.id);
                                     if (isActive) {
                                         setTooltip({
                                             x: e.clientX,
@@ -2273,13 +2275,16 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                                 };
 
                                 const handleClick = () => {
-                                    setSelectedConnectionId(conn.id);
+                                    if (conn.id) setSelectedConnectionId(conn.id);
                                     handleSelectionChange(null);
                                 };
 
                                 return (
                                     <ConnectionLine
-                                        key={conn.id}
+                                        key={
+                                            conn.id ??
+                                            `${conn.sourceNodeId}:${conn.sourcePortId}->${conn.targetNodeId}:${conn.targetPortId}`
+                                        }
                                         x1={start.x}
                                         y1={start.y}
                                         x2={end.x}

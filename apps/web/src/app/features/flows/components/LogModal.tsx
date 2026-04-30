@@ -6,7 +6,7 @@ import { ScrollText, X } from 'lucide-react';
 
 import { fetchBlockLogs } from '@flows/flows';
 
-import type { LogEntry } from '@lemoncloud/eureka-flows-api';
+import type { LogEntry } from '@flows/flows';
 
 interface LogModalProps {
     nodeId: string;

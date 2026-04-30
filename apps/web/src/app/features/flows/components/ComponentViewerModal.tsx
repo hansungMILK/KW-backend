@@ -3,9 +3,7 @@ import { useTranslation } from 'react-i18next';
 
 import { X } from 'lucide-react';
 
-import { loadFlow } from '@flows/flows';
-
-import type { WorkflowState } from '@lemoncloud/eureka-flows-api';
+import { type WorkflowState, loadFlow } from '@flows/flows';
 
 // Note: WorkflowCanvas is imported as a lazy dependency to avoid circular imports
 interface ComponentViewerModalProps {

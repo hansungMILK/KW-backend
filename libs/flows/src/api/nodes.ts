@@ -3,6 +3,7 @@ import { api, withRetry } from '@flows/web-core';
 import type {
     ApiListResult,
     DataPacket,
+    EdgeData,
     NodeBody,
     NodeView,
     PortData,
@@ -10,7 +11,6 @@ import type {
     S3ImageInfo,
     UpsertNodeResult,
 } from '../types';
-import type { EdgeData } from '@lemoncloud/eureka-flows-api';
 
 const _log = console.log.bind(console, '[nodes-api]');
 
@@ -20,7 +20,7 @@ const _log = console.log.bind(console, '[nodes-api]');
  */
 export interface RunNodeBody {
     /** Config to override during execution (not saved to node) */
-    config?: Record<string, string>;
+    config?: Record<string, unknown>;
     /** Output data from frontend execution (for isFrontend nodes) */
     output?: Record<string, DataPacket>;
 }

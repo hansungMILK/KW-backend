@@ -9,9 +9,10 @@
         "module": "nodenext",
         "moduleResolution": "nodenext",
         "forceConsistentCasingInFileNames": true,
-        "types": ["node"]
+        "jsx": "react-jsx",
+        "types": ["vite/client", "node", "react"]
     },
-    "include": ["src/**/*.ts"],
+    "include": ["src/**/*.ts", "src/**/*.tsx"],
     "references": [
         {
             "path": "../ui-kit/tsconfig.lib.json"

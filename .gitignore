@@ -59,4 +59,5 @@ tmp
 apps/backend/.local-assets/
 apps/backend/.local-db/
 apps/backend/.esbuild/
+apps/backend/layers/ffmpeg/bin/ffmpeg
 .serverless/

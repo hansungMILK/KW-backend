@@ -4,7 +4,7 @@ import { Eye, EyeOff } from 'lucide-react';
 
 import { Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Input } from '@flows/ui-kit';
 
-import { useApiKeyPopup } from '../hooks/useApiKeyPopup';
+import { useApiKeyPopup } from '../hooks/useApiKeyPopup.js';
 
 interface ApiKeyDialogProps {
     open: boolean;

@@ -53,7 +53,7 @@ export const useCanvasHistory = ({ readOnly }: UseCanvasHistoryOptions = {}) => 
         const previous = pastRef.current.pop();
         if (previous) {
             setNodes(previous.nodes);
-            setConnections(previous.connections ?? previous.edges);
+            setConnections(previous.connections ?? previous.edges ?? []);
         }
     }, [nodes, connections, readOnly, setNodes, setConnections]);
 
@@ -74,7 +74,7 @@ export const useCanvasHistory = ({ readOnly }: UseCanvasHistoryOptions = {}) => 
         const next = futureRef.current.pop();
         if (next) {
             setNodes(next.nodes);
-            setConnections(next.connections ?? next.edges);
+            setConnections(next.connections ?? next.edges ?? []);
         }
     }, [nodes, connections, readOnly, setNodes, setConnections]);
 

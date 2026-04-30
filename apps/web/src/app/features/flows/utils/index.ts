@@ -1,4 +1,4 @@
-import type { Connection, NodeData, PortDefinition } from '@lemoncloud/eureka-flows-api';
+import type { Connection, NodeData, PortDefinition } from '@flows/flows';
 import type { Dispatch, SetStateAction } from 'react';
 
 // ============================================================

@@ -4,7 +4,8 @@
         "composite": true,
         "outDir": "./dist",
         "rootDir": "./src",
-        "tsBuildInfoFile": "./dist/.tsbuildinfo"
+        "tsBuildInfoFile": "./dist/.tsbuildinfo",
+        "types": ["vite/client", "node"]
     },
     "include": ["src/**/*.ts", "src/**/*.tsx"],
     "exclude": ["node_modules", "dist"],

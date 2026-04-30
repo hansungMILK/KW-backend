@@ -76,8 +76,11 @@ export const mediaTtsBlock: BlockExecutor = {
         }
         if (cta) narrationParts.push(cta);
 
-        // Fall back to a generic placeholder if no narration was found
-        const fullText = narrationParts.length > 0 ? narrationParts.join(' ') : '안녕하세요. 오늘의 숏츠를 시작합니다.';
+        if (narrationParts.length === 0) {
+            throw new Error('media-tts requires narration text from content or data block');
+        }
+
+        const fullText = narrationParts.join(' ');
 
         try {
             const result = await ttsAdapter.synthesize({ text: fullText });

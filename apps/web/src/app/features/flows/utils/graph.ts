@@ -1,4 +1,4 @@
-import type { Connection } from '@lemoncloud/eureka-flows-api';
+import type { Connection } from '@flows/flows';
 
 /**
  * Check if adding a new connection would create a cycle in the workflow graph.

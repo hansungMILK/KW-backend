@@ -887,11 +887,11 @@ export const NodeBlock: React.FC<NodeBlockProps> = ({
 
     // Memoize visible ports to avoid recalculating on every render
     const visibleInputPorts = useMemo(
-        () => getVisiblePorts(definition?.inputs ?? [], connectedPortIds, connectionDraft, node.id, 'input'),
+        () => getVisiblePorts(definition?.inputs ?? [], connectedPortIds, connectionDraft ?? null, node.id, 'input'),
         [definition?.inputs, connectedPortIds, connectionDraft, node.id]
     );
     const visibleOutputPorts = useMemo(
-        () => getVisiblePorts(definition?.outputs ?? [], connectedPortIds, connectionDraft, node.id, 'output'),
+        () => getVisiblePorts(definition?.outputs ?? [], connectedPortIds, connectionDraft ?? null, node.id, 'output'),
         [definition?.outputs, connectedPortIds, connectionDraft, node.id]
     );
 

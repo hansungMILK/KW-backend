@@ -18,7 +18,7 @@ export const VersionUpdateBanner = ({
     latestVersion,
     onDismiss,
     className,
-}: VersionUpdateBannerProps): JSX.Element | null => {
+}: VersionUpdateBannerProps) => {
     const { t } = useTranslation(['common']);
 
     if (!isVisible) {

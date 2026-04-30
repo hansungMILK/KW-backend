@@ -254,20 +254,8 @@ export const mediaImageBlock: BlockExecutor = {
                     /* non-fatal */
                 }
             } catch (err: unknown) {
-                // Partial success: log and skip failing scenes
                 const msg = err instanceof Error ? err.message : String(err);
-                console.warn(`[media-image-block] scene ${scene.sceneNumber} failed (skipping): ${msg}`);
-                // Use placeholder URL for failed scenes so downstream blocks aren't broken
-                images.push({
-                    sceneNumber: scene.sceneNumber,
-                    url: `fake://placeholder/scene-${scene.sceneNumber}-failed`,
-                    width: 1080,
-                    height: 1920,
-                    prompt: scene.prompt,
-                    caption: scene.caption,
-                    narration: scene.narration,
-                    durationSec: scene.durationSec,
-                });
+                console.error(`[media-image-block] scene ${scene.sceneNumber} failed: ${msg}`);
                 try {
                     await traceService.record(
                         'pending',
@@ -278,6 +266,7 @@ export const mediaImageBlock: BlockExecutor = {
                 } catch {
                     /* non-fatal */
                 }
+                throw new Error(`media-image scene ${scene.sceneNumber} failed: ${msg}`);
             }
         }
 

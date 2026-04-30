@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next';
 
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
 
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './select.js';
 
 interface CustomPaginationProps {
     currentPage: number;

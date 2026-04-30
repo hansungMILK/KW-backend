@@ -5,7 +5,7 @@ import { AlertTriangle, Home, RefreshCw, ServerCrash, ShieldOff, WifiOff } from 
 
 import { Button } from '@flows/ui-kit';
 
-import { ERROR_MESSAGE_KEYS } from '../consts';
+import { ERROR_MESSAGE_KEYS } from '../consts/index.js';
 
 import type { ComponentType, ReactNode } from 'react';
 import type { FallbackProps } from 'react-error-boundary';

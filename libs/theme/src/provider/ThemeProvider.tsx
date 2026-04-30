@@ -1,9 +1,9 @@
-import { createContext, useEffect, useState } from 'react';
+import { type ReactNode, createContext, useEffect, useState } from 'react';
 
 export type Theme = 'dark' | 'light';
 
 type ThemeProviderProps = {
-    children: React.ReactNode;
+    children: ReactNode;
     defaultTheme?: Theme;
     storageKey?: string;
 };
@@ -20,12 +20,7 @@ const initialState: ThemeProviderState = {
 
 export const ThemeProviderContext = createContext<ThemeProviderState>(initialState);
 
-export function ThemeProvider({
-    children,
-    defaultTheme = 'light',
-    storageKey = 'vite-ui-theme',
-    ...props
-}: ThemeProviderProps) {
+export function ThemeProvider({ children, defaultTheme = 'light', storageKey = 'vite-ui-theme' }: ThemeProviderProps) {
     const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem(storageKey) as Theme) || defaultTheme);
 
     useEffect(() => {
@@ -43,11 +38,5 @@ export function ThemeProvider({
         },
     };
 
-    return (
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-expect-error
-        <ThemeProviderContext.Provider {...props} value={value}>
-            {children}
-        </ThemeProviderContext.Provider>
-    );
+    return <ThemeProviderContext.Provider value={value}>{children}</ThemeProviderContext.Provider>;
 }

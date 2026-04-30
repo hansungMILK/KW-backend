@@ -1,4 +1,4 @@
-import type { BlockDefinition } from '@lemoncloud/eureka-flows-api';
+import type { BlockDefinition } from '../types';
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 

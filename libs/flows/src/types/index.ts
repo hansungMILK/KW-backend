@@ -1,44 +1,70 @@
 import type {
-    BlockDefinition,
+    BlockDefinition as ApiBlockDefinition,
+    ConfigField as ApiConfigField,
+    DataPacket as ApiDataPacket,
+    DataType as ApiDataType,
+    EdgeData as ApiEdgeData,
+    NodeData as ApiNodeData,
+    PortDefinition as ApiPortDefinition,
     BlockView,
-    ConfigField,
     ConfigFieldModel,
     ConfigFieldWithDefault,
     ConfigOption,
-    DataPacket,
-    DataType,
-    EdgeData as ApiEdgeData,
     ExecutionStats,
     ListResult,
     LogEntry,
     NodeConfigItem,
-    NodeData as ApiNodeData,
     NodeDataPacketItem,
     NodeStatus,
-    PortDefinition,
     ProcessBody,
     ProcessResult,
 } from '@lemoncloud/eureka-flows-api';
 
 export type {
-    BlockDefinition,
     BlockView,
-    ConfigField,
     ConfigFieldModel,
     ConfigFieldWithDefault,
     ConfigOption,
-    DataPacket,
-    DataType,
     ExecutionStats,
     ListResult,
     LogEntry,
     NodeConfigItem,
     NodeDataPacketItem,
     NodeStatus,
-    PortDefinition,
     ProcessBody,
     ProcessResult,
 };
+
+export type DataType = ApiDataType | 'markdown' | 'audio' | 'video' | 'file' | (string & {});
+
+export interface DataPacket extends Omit<ApiDataPacket, 'type'> {
+    type: DataType;
+}
+
+export interface PortDefinition extends Omit<ApiPortDefinition, 'type'> {
+    type: DataType;
+}
+
+export interface ConfigField extends ApiConfigField {
+    description?: string;
+    defaultValue?: string | number | boolean | null;
+}
+
+export interface BlockDefinition
+    extends Omit<ApiBlockDefinition, 'inputs' | 'outputs' | 'configSchema' | 'defaultConfig' | 'execute'> {
+    inputs: PortDefinition[];
+    outputs: PortDefinition[];
+    defaultConfig: Record<string, unknown>;
+    configSchema?: ConfigField[];
+    configFields?: ConfigField[];
+    input$?: PortDefinition[];
+    output$?: PortDefinition[];
+    execute?: (
+        inputs: Record<string, DataPacket>,
+        config: Record<string, unknown>,
+        onProgress?: (progress: number) => void
+    ) => Promise<Record<string, DataPacket>>;
+}
 
 // ============================================================================
 // Node Execution State (state field - replacing status)
@@ -73,6 +99,10 @@ export interface NodeData
     > {
     id: string;
     config?: Record<string, unknown>;
+    name?: string;
+    required?: boolean;
+    enterNo?: number;
+    exitNo?: number;
     state?: NodeState;
     status?: NodeState | string;
     inputData?: Record<string, DataPacket>;
@@ -84,11 +114,20 @@ export interface NodeData
 export interface EdgeData extends ApiEdgeData {}
 
 /** UI name for graph edges. Kept for legacy canvas code while payload remains EdgeData-compatible. */
-export interface Connection extends EdgeData {}
+export interface Connection extends EdgeData {
+    id?: string;
+    sourceNodeId: string;
+    sourcePortId: string;
+    targetNodeId: string;
+    targetPortId: string;
+    disabled?: boolean;
+    position?: Position;
+    label?: string;
+}
 
 export interface WorkflowState {
     nodes: NodeData[];
-    edges: EdgeData[];
+    edges?: EdgeData[];
     /** @deprecated The canonical graph field is `edges`; kept for legacy canvas history. */
     connections?: Connection[];
 }
@@ -331,6 +370,8 @@ export interface NodeModel {
     input$$?: Array<{ id: string; label: string; type: string; required?: boolean }>;
     output$$?: Array<{ id: string; label: string; type: string; required?: boolean }>;
     position?: Position;
+    width?: number;
+    height?: number;
     config?: Record<string, unknown>;
     config$$?: ConfigItem[];
     customLabel?: string;

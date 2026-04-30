@@ -2,25 +2,9 @@ import { randomUUID } from 'crypto';
 
 import { getPublicUrl, putObject } from '../../adapters/aws/s3';
 import { ffmpegAdapter } from '../../adapters/external/ffmpeg-adapter';
-import { env } from '../../config/env';
 import { traceService } from '../../services/trace-service';
 
 import type { BlockExecutor, BlockExecutorResult } from './types';
-
-// ─── dummy output ─────────────────────────────────────────────────────────────
-
-function dummyVideoOutput() {
-    return {
-        video: {
-            url: 'fake://cdn.example.com/video/shorts-2026-suneung-final.mp4',
-            durationSec: 45,
-            width: 1080,
-            height: 1920,
-            format: 'mp4',
-            sizeBytes: 15000000,
-        },
-    };
-}
 
 // ─── block ───────────────────────────────────────────────────────────────────
 
@@ -29,30 +13,6 @@ export const mediaVideoBlock: BlockExecutor = {
 
     async execute(input: unknown, _config?: Record<string, unknown>): Promise<BlockExecutorResult> {
         const start = Date.now();
-
-        if (env.orchestratorMode === 'mock') {
-            const output = dummyVideoOutput();
-            return {
-                output,
-                durationMs: Date.now() - start,
-                assets: [
-                    {
-                        assetType: 'VIDEO',
-                        mimeType: 'video/mp4',
-                        data: output.video.url,
-                        metadata: {
-                            durationSec: output.video.durationSec,
-                            width: output.video.width,
-                            height: output.video.height,
-                            format: output.video.format,
-                            sizeBytes: output.video.sizeBytes,
-                        },
-                    },
-                ],
-            };
-        }
-
-        // ── Real mode ──────────────────────────────────────────────────────────
 
         // Extract image URLs from media-image output and audio URL from media-tts output.
         // The execution engine merges both upstream parent outputs into this input.
@@ -76,6 +36,9 @@ export const mediaVideoBlock: BlockExecutor = {
 
         if (images.length === 0) {
             throw new Error('media-video requires image outputs from media-image');
+        }
+        if (!audioUrl) {
+            throw new Error('media-video requires audio output from media-tts');
         }
 
         try {

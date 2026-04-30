@@ -1,13 +1,13 @@
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
-import { useLoaderStore } from '../hooks/useGlobalLoader';
+import { useLoaderStore } from '../hooks/useGlobalLoader.js';
 
 /**
  * Full-screen loading overlay rendered via portal
  * Uses the global loader store for visibility control
  */
-export const GlobalLoader = (): JSX.Element | null => {
+export const GlobalLoader = () => {
     const { t } = useTranslation(['common']);
     const isLoading = useLoaderStore(state => state.isLoading);
 

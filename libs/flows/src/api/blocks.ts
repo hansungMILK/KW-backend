@@ -2,7 +2,7 @@ import { api, withRetry } from '@flows/web-core';
 
 import { EXECUTE_FUNCTIONS } from './execute-functions';
 
-import type { BlockDefinitionWithFrontend, BlockStereo } from '../types';
+import type { BlockDefinition, BlockDefinitionWithFrontend, BlockStereo, PortDefinition } from '../types';
 import type { BlockView, ListResult } from '@lemoncloud/eureka-flows-api';
 
 const _log = console.log.bind(console, '[blocks-api]');
@@ -15,6 +15,26 @@ const LEGACY_BACKEND_PROCESSOR_TYPES = [
     'single-image-generator',
     'title-generator',
 ] as const;
+
+type RawBlockDefinition = NonNullable<BlockView['$definition']>;
+type RawPortDefinition = NonNullable<RawBlockDefinition['inputs']>[number];
+
+const normalizePorts = (ports: RawPortDefinition[] | undefined): PortDefinition[] =>
+    (ports ?? []).map(port => ({
+        ...port,
+        type: port.type ?? 'any',
+    }));
+
+const normalizeDefinition = (definition: RawBlockDefinition): BlockDefinition => ({
+    ...definition,
+    inputs: normalizePorts(definition.inputs),
+    outputs: normalizePorts(definition.outputs),
+    defaultConfig: definition.defaultConfig ?? {},
+    configSchema: definition.configSchema,
+    input$: normalizePorts(definition.inputs),
+    output$: normalizePorts(definition.outputs),
+    execute: undefined,
+});
 
 /**
  * Extended BlockView with isFrontend flag from server
@@ -89,7 +109,7 @@ export const listBlocks = async (): Promise<BlockDefinitionWithFrontend[]> => {
                 !!item?.$definition?.label
         )
         .map((item): BlockDefinitionWithFrontend => {
-            const definition = item.$definition;
+            const definition = normalizeDefinition(item.$definition);
             // Get isFrontend from the BlockView level (server response)
             // Convert BoolFlag (0 | 1) to boolean for type safety
             const isFrontend = item.isFrontend !== undefined ? Boolean(item.isFrontend) : undefined;

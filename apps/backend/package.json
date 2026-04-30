@@ -4,8 +4,10 @@
     "private": true,
     "scripts": {
         "start": "npx serverless offline --httpPort 8800 --websocketPort 8801 --noPrependStageInUrl",
-        "deploy:dev": "npx serverless deploy --stage dev",
-        "deploy:prod": "npx serverless deploy --stage prod"
+        "prepare:ffmpeg-layer": "bash scripts/prepare-ffmpeg-layer.sh",
+        "package:dev": "yarn prepare:ffmpeg-layer && npx serverless package --stage dev",
+        "deploy:dev": "yarn prepare:ffmpeg-layer && npx serverless deploy --stage dev",
+        "deploy:prod": "yarn prepare:ffmpeg-layer && npx serverless deploy --stage prod"
     },
     "dependencies": {
         "@anthropic-ai/sdk": "^0.39.0",

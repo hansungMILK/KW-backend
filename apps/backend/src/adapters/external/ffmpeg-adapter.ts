@@ -19,6 +19,7 @@ export interface VideoCompositionResult {
 }
 
 const FFMPEG_PATH = process.env.FFMPEG_PATH || '/opt/bin/ffmpeg';
+const FFMPEG_TIMEOUT_MS = Number(process.env.FFMPEG_TIMEOUT_MS || 840000);
 
 export const ffmpegAdapter = {
     async compose(request: VideoCompositionRequest): Promise<VideoCompositionResult> {
@@ -26,23 +27,25 @@ export const ffmpegAdapter = {
         const outputPath = join(workDir, 'output.mp4');
 
         try {
-            const images =
-                request.images.length > 0 ? request.images : [{ url: 'placeholder://blank', durationSec: 45 }];
-            const imageFiles: Array<{ path: string | null; durationSec: number }> = [];
+            if (request.images.length === 0) {
+                throw new Error('FFmpeg composition requires at least one real image input');
+            }
 
-            for (let i = 0; i < images.length; i++) {
-                const image = images[i];
+            const imageFiles: Array<{ path: string; durationSec: number }> = [];
+
+            for (let i = 0; i < request.images.length; i++) {
+                const image = request.images[i];
                 const path = join(workDir, `image-${String(i).padStart(2, '0')}.png`);
                 const imageBuffer = await loadImageBinary(image.url);
-                if (imageBuffer) await writeFile(path, imageBuffer);
+                await writeFile(path, imageBuffer);
                 imageFiles.push({
-                    path: imageBuffer ? path : null,
+                    path,
                     durationSec: Math.max(1, Math.ceil(image.durationSec || 5)),
                 });
             }
 
             let audioPath: string | null = null;
-            if (request.audioUrl && !request.audioUrl.startsWith('fake://')) {
+            if (request.audioUrl) {
                 audioPath = join(workDir, 'audio.mp3');
                 await writeFile(audioPath, await loadAudioBinary(request.audioUrl));
             }
@@ -65,7 +68,7 @@ export const ffmpegAdapter = {
 };
 
 function buildArgs(
-    imageFiles: Array<{ path: string | null; durationSec: number }>,
+    imageFiles: Array<{ path: string; durationSec: number }>,
     audioPath: string | null,
     request: VideoCompositionRequest,
     outputPath: string
@@ -74,18 +77,7 @@ function buildArgs(
     const durationSec = imageFiles.reduce((sum, image) => sum + image.durationSec, 0);
 
     for (const image of imageFiles) {
-        if (image.path) {
-            args.push('-framerate', '30', '-loop', '1', '-t', String(image.durationSec), '-i', image.path);
-        } else {
-            args.push(
-                '-f',
-                'lavfi',
-                '-t',
-                String(image.durationSec),
-                '-i',
-                `color=c=0x111827:s=${request.outputWidth}x${request.outputHeight}:r=30`
-            );
-        }
+        args.push('-framerate', '30', '-loop', '1', '-t', String(image.durationSec), '-i', image.path);
     }
 
     let nextInputIndex = imageFiles.length;
@@ -139,9 +131,9 @@ function buildArgs(
     return args;
 }
 
-async function loadImageBinary(url: string): Promise<Buffer | null> {
+async function loadImageBinary(url: string): Promise<Buffer> {
     if (url.startsWith('fake://') || url.startsWith('placeholder://')) {
-        return null;
+        throw new Error(`FFmpeg image input must be a real public URL, got ${url}`);
     }
 
     if (url.startsWith('s3://')) {
@@ -154,6 +146,10 @@ async function loadImageBinary(url: string): Promise<Buffer | null> {
 }
 
 async function loadAudioBinary(url: string): Promise<Buffer> {
+    if (url.startsWith('fake://') || url.startsWith('placeholder://')) {
+        throw new Error(`FFmpeg audio input must be a real public URL, got ${url}`);
+    }
+
     if (url.startsWith('s3://')) {
         throw new Error(`FFmpeg input must be a public URL, got ${url}`);
     }
@@ -168,8 +164,8 @@ function runFfmpeg(args: string[]): Promise<void> {
         let stderr = '';
         const timeout = setTimeout(() => {
             child.kill('SIGKILL');
-            reject(new Error('FFmpeg timed out after 180 seconds'));
-        }, 180000);
+            reject(new Error(`FFmpeg timed out after ${Math.round(FFMPEG_TIMEOUT_MS / 1000)} seconds`));
+        }, FFMPEG_TIMEOUT_MS);
 
         child.stderr.on('data', chunk => {
             if (stderr.length < 4000) stderr += chunk.toString().slice(0, 4000 - stderr.length);

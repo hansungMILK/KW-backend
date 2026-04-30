@@ -7,6 +7,7 @@ interface S3ImageProps {
     src: string;
     alt: string;
     className?: string;
+    style?: React.CSSProperties;
     onLoad?: (e: React.SyntheticEvent<HTMLImageElement>) => void;
 }
 
@@ -21,7 +22,7 @@ interface S3ImageProps {
  * // Regular URL or data URL - used directly
  * <S3Image src="data:image/png;base64,..." alt="Image" />
  */
-export const S3Image: React.FC<S3ImageProps> = ({ src, alt, className, onLoad }) => {
+export const S3Image: React.FC<S3ImageProps> = ({ src, alt, className, style, onLoad }) => {
     const { src: resolvedSrc, isLoading, error } = useS3Image(src);
 
     if (isLoading) {
@@ -42,5 +43,5 @@ export const S3Image: React.FC<S3ImageProps> = ({ src, alt, className, onLoad })
         );
     }
 
-    return <img src={resolvedSrc} alt={alt} className={className} onLoad={onLoad} />;
+    return <img src={resolvedSrc} alt={alt} className={className} style={style} onLoad={onLoad} />;
 };

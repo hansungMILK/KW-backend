@@ -1,3 +1,3 @@
-export * from './useApiKeyPopup';
-export * from './useGlobalLoader';
-export * from './useVersionCheck';
+export * from './useApiKeyPopup.js';
+export * from './useGlobalLoader.js';
+export * from './useVersionCheck.js';

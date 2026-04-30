@@ -1,10 +1,14 @@
-import JsonView from '@uiw/react-json-view';
+import JsonViewComponent, { type JsonViewProps as UiwJsonViewProps } from '@uiw/react-json-view';
 import { githubDarkTheme } from '@uiw/react-json-view/githubDark';
 import { githubLightTheme } from '@uiw/react-json-view/githubLight';
 
 import { useTheme } from '@flows/theme';
 
-import { cn } from '../../utils';
+import { cn } from '../../utils/index.js';
+
+import type { ComponentType } from 'react';
+
+const JsonView = JsonViewComponent as unknown as ComponentType<UiwJsonViewProps<object>>;
 
 export interface JsonViewerProps {
     data: unknown;
@@ -31,7 +35,6 @@ export const JsonViewer = ({ data, maxHeight = 180, collapsed = 2, className }: 
                 displayDataTypes={false}
                 displayObjectSize={false}
                 enableClipboard={false}
-                editable={false}
             />
         </div>
     );

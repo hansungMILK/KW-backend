@@ -2,8 +2,8 @@ import { useTranslation } from 'react-i18next';
 
 import { Globe } from 'lucide-react';
 
-import { Button } from './button';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './dropdown-menu';
+import { Button } from './button.js';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './dropdown-menu.js';
 
 const languages = ['en', 'ko'] as const;
 
@@ -12,7 +12,7 @@ const languageFlags: Record<string, string> = {
     ko: '🇰🇷',
 };
 
-export const LanguageSwitcher = (): JSX.Element => {
+export const LanguageSwitcher = () => {
     const { t, i18n } = useTranslation(['common']);
 
     const handleLanguageChange = (language: string) => {
