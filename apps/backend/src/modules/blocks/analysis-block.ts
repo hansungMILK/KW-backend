@@ -1,5 +1,6 @@
 import { AnalysisOutputSchema } from './types';
-import { claudeAdapter } from '../../adapters/ai/claude-adapter';
+import { openaiAdapter } from '../../adapters/ai/openai-adapter';
+import { env } from '../../config/env';
 import { log } from '../../utils/logger';
 
 import type { BlockExecutor, BlockExecutorResult } from './types';
@@ -146,12 +147,10 @@ async function runAIReview(scenes: NormalizedScene[], ruleIssues: Issue[]): Prom
 
     let response;
     try {
-        response = await claudeAdapter.chat({
-            model: 'claude-haiku-4-5',
+        response = await openaiAdapter.chatJson({
             systemPrompt: ANALYSIS_SYSTEM_PROMPT,
             userMessage: `다음 씬 나레이션을 검토해주세요:\n\n${narrationSummary}`,
             maxTokens: 512,
-            temperature: 0.2,
         });
     } catch (err) {
         log.warn('[analysis-block] AI review failed (non-fatal), using rule-based only', {
@@ -204,8 +203,8 @@ export const analysisBlock: BlockExecutor = {
     blockType: 'analysis',
 
     async execute(input: unknown, _config?: Record<string, unknown>): Promise<BlockExecutorResult> {
-        const mode = process.env.ORCHESTRATOR_MODE ?? 'mock';
-        if (mode !== 'claude') return dummyAnalysis();
+        const mode = env.orchestratorMode;
+        if (mode === 'mock') return dummyAnalysis();
 
         const start = Date.now();
 
@@ -225,7 +224,7 @@ export const analysisBlock: BlockExecutor = {
         // Rule-based checks (always run)
         const { safetyScore, qualityScore, issues: ruleIssues } = runRuleChecks(scenes);
 
-        // AI enhancement (claude mode only, non-fatal if fails)
+        // AI enhancement in real provider mode; non-fatal if it fails.
         const allIssues = await runAIReview(scenes, ruleIssues);
 
         const approved = safetyScore >= SAFETY_THRESHOLD && qualityScore >= QUALITY_THRESHOLD;

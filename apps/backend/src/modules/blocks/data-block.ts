@@ -1,4 +1,5 @@
 import { DataOutputSchema } from './types';
+import { env } from '../../config/env';
 import { log } from '../../utils/logger';
 
 import type { BlockExecutor, BlockExecutorResult } from './types';
@@ -177,11 +178,10 @@ export const dataBlock: BlockExecutor = {
     blockType: 'data',
 
     async execute(input: unknown, _config?: Record<string, unknown>): Promise<BlockExecutorResult> {
-        const mode = process.env.ORCHESTRATOR_MODE ?? 'mock';
-        if (mode !== 'claude') return dummyData();
+        const mode = env.orchestratorMode;
+        if (mode === 'mock') return dummyData();
 
-        // Pure deterministic transform — same logic regardless of mock/claude mode
-        // but only runs in claude mode to keep mock tests independent.
+        // Pure deterministic transform — same logic in every real provider mode.
         return normalizeContent(input);
     },
 };

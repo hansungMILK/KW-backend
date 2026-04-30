@@ -8,6 +8,19 @@ const s3 = new S3Client({
 
 const BUCKET = env.s3Bucket;
 
+export const getS3Uri = (key: string): string => `s3://${BUCKET}/${key}`;
+
+export const getPublicUrl = (key: string): string => {
+    const domain = env.cdnDomain.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    if (!domain) return getS3Uri(key);
+    return `https://${domain}/${key.split('/').map(encodeURIComponent).join('/')}`;
+};
+
+export const publicUrlFromS3Uri = (uri: string): string => {
+    const key = uri.replace(/^s3:\/\/[^/]+\//, '');
+    return getPublicUrl(key);
+};
+
 export const getObject = async (key: string) => {
     const cmd = new GetObjectCommand({ Bucket: BUCKET, Key: key });
     return s3.send(cmd);

@@ -1,5 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 
+import { env } from '../../config/env';
+import { settingsService } from '../../services/settings-service';
 import { log } from '../../utils/logger';
 
 /**
@@ -11,15 +13,10 @@ import { log } from '../../utils/logger';
  * - Error classification
  */
 
-let _client: Anthropic | null = null;
-
-const getClient = (): Anthropic => {
-    if (!_client) {
-        const apiKey = process.env.ANTHROPIC_API_KEY;
-        if (!apiKey) throw new Error('ANTHROPIC_API_KEY not configured');
-        _client = new Anthropic({ apiKey });
-    }
-    return _client;
+const getClient = async (): Promise<Anthropic> => {
+    const apiKey = await settingsService.getKeyForProviderAsync('anthropic');
+    if (!apiKey) throw new Error('ANTHROPIC_API_KEY not configured');
+    return new Anthropic({ apiKey });
 };
 
 export interface ClaudeRequest {
@@ -41,11 +38,12 @@ export interface ClaudeResponse {
 
 export const claudeAdapter = {
     async chat(request: ClaudeRequest): Promise<ClaudeResponse> {
-        const client = getClient();
+        const client = await getClient();
         const start = Date.now();
+        const model = request.model || env.anthropicDefaultModel;
 
         log.info('Claude API call', {
-            model: request.model,
+            model,
             maxTokens: request.maxTokens,
             // Never log API key or full prompt content
             systemPromptLength: request.systemPrompt.length,
@@ -54,7 +52,7 @@ export const claudeAdapter = {
 
         try {
             const response = await client.messages.create({
-                model: request.model,
+                model,
                 max_tokens: request.maxTokens ?? 4096,
                 temperature: request.temperature ?? 0.7,
                 system: request.systemPrompt,

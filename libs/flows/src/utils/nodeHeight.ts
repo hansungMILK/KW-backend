@@ -1,4 +1,4 @@
-import type { NodeData } from '@lemoncloud/eureka-flows-api';
+import type { NodeData } from '../types';
 
 /** Default textarea height for input-text nodes */
 export const DEFAULT_TEXTAREA_HEIGHT = 80;

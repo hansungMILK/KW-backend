@@ -4,7 +4,7 @@ import { useMutation } from '@tanstack/react-query';
 
 import { upsertFlow } from '../api';
 
-import type { EdgeData, NodeData } from '@lemoncloud/eureka-flows-api';
+import type { EdgeData, NodeData } from '../types';
 
 /** Callback invoked when server assigns a real ID to replace temp ID */
 export type OnEdgeIdAssigned = (tempId: string, serverId: string) => void;

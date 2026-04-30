@@ -1,4 +1,6 @@
-import { claudeAdapter } from '../../adapters/ai/claude-adapter';
+import { openaiAdapter } from '../../adapters/ai/openai-adapter';
+import { publicUrlFromS3Uri } from '../../adapters/aws/s3';
+import { env } from '../../config/env';
 import { log } from '../../utils/logger';
 
 import type { BlockExecutor, BlockExecutorResult } from './types';
@@ -51,9 +53,7 @@ function buildPublicUrl(videoUrl: string | undefined): string {
     if (videoUrl.startsWith('fake://')) return videoUrl;
     // S3: construct CloudFront URL
     if (videoUrl.startsWith('s3://')) {
-        const cdnDomain = process.env.CDN_DOMAIN || 'cdn.example.com';
-        const key = videoUrl.replace(/^s3:\/\/[^/]+\//, '');
-        return `https://${cdnDomain}/${key}`;
+        return publicUrlFromS3Uri(videoUrl);
     }
     return videoUrl;
 }
@@ -105,8 +105,8 @@ export const integrationBlock: BlockExecutor = {
     blockType: 'integration',
 
     async execute(input: unknown, _config?: Record<string, unknown>): Promise<BlockExecutorResult> {
-        const mode = process.env.ORCHESTRATOR_MODE || 'mock';
-        if (mode !== 'claude') {
+        const mode = env.orchestratorMode;
+        if (mode === 'mock') {
             return { output: dummyIntegrationOutput(), durationMs: 0 };
         }
 
@@ -137,27 +137,24 @@ export const integrationBlock: BlockExecutor = {
 
         // Optional AI enhancement for title/description (non-fatal)
         try {
-            if (process.env.ANTHROPIC_API_KEY) {
-                const resp = await claudeAdapter.chat({
-                    model: 'claude-haiku-4-5-20251001',
-                    systemPrompt:
-                        'Generate a catchy Korean YouTube Shorts title and description for an education video. Return JSON: { "title": "...", "description": "...", "hashtags": ["..."] }',
-                    userMessage: `키워드: ${upstream.search?.keywords?.join(', ') || '입시'}\n훅: ${upstream.content?.hook || ''}\nCTA: ${upstream.content?.cta || ''}`,
-                    maxTokens: 512,
-                    temperature: 0.7,
-                });
-                try {
-                    const enhanced = JSON.parse(resp.content) as {
-                        title?: string;
-                        description?: string;
-                        hashtags?: string[];
-                    };
-                    if (enhanced.title) title = enhanced.title;
-                    if (enhanced.description) description = enhanced.description;
-                    if (enhanced.hashtags?.length) hashtags = [...new Set([...hashtags, ...enhanced.hashtags])];
-                } catch {
-                    log.warn('AI metadata enhancement parse failed, using deterministic');
-                }
+            const resp = await openaiAdapter.chatJson({
+                model: env.openaiModel,
+                systemPrompt:
+                    'Generate a catchy Korean YouTube Shorts title and description for an education video. Return JSON: { "title": "...", "description": "...", "hashtags": ["..."] }',
+                userMessage: `키워드: ${upstream.search?.keywords?.join(', ') || '입시'}\n훅: ${upstream.content?.hook || ''}\nCTA: ${upstream.content?.cta || ''}`,
+                maxTokens: 512,
+            });
+            try {
+                const enhanced = JSON.parse(resp.content) as {
+                    title?: string;
+                    description?: string;
+                    hashtags?: string[];
+                };
+                if (enhanced.title) title = enhanced.title;
+                if (enhanced.description) description = enhanced.description;
+                if (enhanced.hashtags?.length) hashtags = [...new Set([...hashtags, ...enhanced.hashtags])];
+            } catch {
+                log.warn('AI metadata enhancement parse failed, using deterministic');
             }
         } catch (err) {
             log.warn('AI metadata enhancement failed, using deterministic', {

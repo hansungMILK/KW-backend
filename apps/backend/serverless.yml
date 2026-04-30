@@ -18,8 +18,22 @@ provider:
         ASSETS_TABLE: ${self:service}-assets-${self:provider.stage}
         SETTINGS_TABLE: ${self:service}-settings-${self:provider.stage}
         KMS_KEY_ID: !If [IsLocalStage, '', !Ref SettingsKmsKey]
-        ORCHESTRATOR_MODE: ${env:ORCHESTRATOR_MODE, 'mock'}
+        EXECUTION_QUEUE_URL: !If [IsLocalStage, '', !Ref ExecutionQueue]
+        S3_BUCKET: !If [IsLocalStage, 'eureka-flows-local', !Ref AssetsBucket]
+        CLOUDFRONT_DOMAIN: !If [IsLocalStage, '', !GetAtt AssetsDistribution.DomainName]
+        ORCHESTRATOR_MODE: ${env:ORCHESTRATOR_MODE, 'openai'}
+        AI_PROVIDER: ${env:AI_PROVIDER, 'openai'}
+        OPENAI_MODEL: ${env:OPENAI_MODEL, 'gpt-5-nano'}
+        OPENAI_ORCHESTRATOR_MODEL: ${env:OPENAI_ORCHESTRATOR_MODEL, 'gpt-5-nano'}
+        OPENAI_VISION_MODEL: ${env:OPENAI_VISION_MODEL, 'gpt-5-nano'}
+        OPENAI_IMAGE_MODEL: ${env:OPENAI_IMAGE_MODEL, 'gpt-image-1-mini'}
+        OPENAI_IMAGE_QUALITY: ${env:OPENAI_IMAGE_QUALITY, 'medium'}
+        OPENAI_TTS_MODEL: ${env:OPENAI_TTS_MODEL, 'tts-1'}
+        OPENAI_TTS_VOICE: ${env:OPENAI_TTS_VOICE, 'nova'}
+        OPENAI_API_KEY: ${env:OPENAI_API_KEY, ''}
         ANTHROPIC_API_KEY: ${env:ANTHROPIC_API_KEY, ''}
+        ELEVENLABS_API_KEY: ${env:ELEVENLABS_API_KEY, ''}
+        NANOBANANA_API_KEY: ${env:NANOBANANA_API_KEY, ''}
     httpApi:
         cors: true
     iam:
@@ -67,6 +81,24 @@ provider:
                 - Effect: Allow
                   Action: execute-api:ManageConnections
                   Resource: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:*/*/POST/@connections/*'
+                # SQS execution queue
+                - Effect: Allow
+                  Action:
+                      - sqs:SendMessage
+                      - sqs:ReceiveMessage
+                      - sqs:DeleteMessage
+                      - sqs:GetQueueAttributes
+                      - sqs:ChangeMessageVisibility
+                  Resource:
+                      - !GetAtt ExecutionQueue.Arn
+                      - !GetAtt ExecutionDeadLetterQueue.Arn
+                # S3 assets written by media blocks and read through CloudFront
+                - Effect: Allow
+                  Action:
+                      - s3:PutObject
+                      - s3:GetObject
+                      - s3:DeleteObject
+                  Resource: !Sub '${AssetsBucket.Arn}/*'
 
 plugins:
     - serverless-esbuild
@@ -791,14 +823,14 @@ functions:
                   path: '/_api_/settings/api-keys/{provider}/verify'
                   method: post
 
-    # ── Workers (future: SQS triggers) ──
-    # runWorker:
-    #     handler: src/workers/run-worker.main
-    #     events:
-    #         - sqs:
-    #               arn: !GetAtt ExecutionQueue.Arn
-    #               batchSize: 1
-    #               functionResponseType: ReportBatchItemFailures
+    # ── Workers ──
+    runWorker:
+        handler: src/workers/run-worker.main
+        timeout: 120
+        events:
+            - sqs:
+                  arn: !GetAtt ExecutionQueue.Arn
+                  batchSize: 1
 
     # ── Workflows (#5 #6 #7) ──
     workflowGenerate:
@@ -886,6 +918,88 @@ resources:
                 - Fn::Equals: ['${self:provider.stage}', 'local']
 
     Resources:
+        ExecutionDeadLetterQueue:
+            Type: AWS::SQS::Queue
+            Properties:
+                QueueName: ${self:service}-execution-dlq-${self:provider.stage}
+                MessageRetentionPeriod: 1209600
+
+        ExecutionQueue:
+            Type: AWS::SQS::Queue
+            Properties:
+                QueueName: ${self:service}-execution-${self:provider.stage}
+                VisibilityTimeout: 180
+                RedrivePolicy:
+                    deadLetterTargetArn: !GetAtt ExecutionDeadLetterQueue.Arn
+                    maxReceiveCount: 3
+
+        AssetsBucket:
+            Type: AWS::S3::Bucket
+            Properties:
+                BucketName: !Sub '${self:service}-assets-${self:provider.stage}-${AWS::AccountId}'
+                PublicAccessBlockConfiguration:
+                    BlockPublicAcls: true
+                    BlockPublicPolicy: true
+                    IgnorePublicAcls: true
+                    RestrictPublicBuckets: true
+                CorsConfiguration:
+                    CorsRules:
+                        - AllowedMethods: [GET, HEAD]
+                          AllowedOrigins: ['*']
+                          AllowedHeaders: ['*']
+                          MaxAge: 3000
+
+        AssetsOriginAccessControl:
+            Type: AWS::CloudFront::OriginAccessControl
+            Properties:
+                OriginAccessControlConfig:
+                    Name: !Sub '${self:service}-assets-oac-${self:provider.stage}'
+                    OriginAccessControlOriginType: s3
+                    SigningBehavior: always
+                    SigningProtocol: sigv4
+
+        AssetsDistribution:
+            Type: AWS::CloudFront::Distribution
+            Properties:
+                DistributionConfig:
+                    Enabled: true
+                    HttpVersion: http2
+                    PriceClass: PriceClass_100
+                    DefaultRootObject: ''
+                    Origins:
+                        - Id: AssetsS3Origin
+                          DomainName: !GetAtt AssetsBucket.RegionalDomainName
+                          OriginAccessControlId: !Ref AssetsOriginAccessControl
+                          S3OriginConfig:
+                              OriginAccessIdentity: ''
+                    DefaultCacheBehavior:
+                        TargetOriginId: AssetsS3Origin
+                        ViewerProtocolPolicy: redirect-to-https
+                        AllowedMethods: [GET, HEAD, OPTIONS]
+                        CachedMethods: [GET, HEAD, OPTIONS]
+                        Compress: true
+                        ForwardedValues:
+                            QueryString: false
+                            Cookies:
+                                Forward: none
+
+        AssetsBucketPolicy:
+            Type: AWS::S3::BucketPolicy
+            Properties:
+                Bucket: !Ref AssetsBucket
+                PolicyDocument:
+                    Version: '2012-10-17'
+                    Statement:
+                        - Sid: AllowCloudFrontRead
+                          Effect: Allow
+                          Principal:
+                              Service: cloudfront.amazonaws.com
+                          Action: s3:GetObject
+                          Resource: !Sub '${AssetsBucket.Arn}/*'
+                          Condition:
+                              StringEquals:
+                                  AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${AssetsDistribution}'
+
         FlowsTable:
             Type: AWS::DynamoDB::Table
             Properties:

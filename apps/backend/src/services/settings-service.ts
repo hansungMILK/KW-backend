@@ -1,5 +1,6 @@
 import { API_KEY_PROVIDERS } from '@flows/contracts';
 
+import { env } from '../config/env';
 import { settingsRepo } from '../repositories/settings-repository';
 import { log } from '../utils/logger';
 
@@ -86,12 +87,19 @@ const verifyAnthropic = async (key: string): Promise<{ valid: boolean; message?:
 const verifyNanobanana = async (key: string): Promise<{ valid: boolean; message?: string }> => {
     try {
         const signal = withTimeout(5000);
-        const res = await fetch('https://api.nanobanana.io/health', {
+        const res = await fetch(`${env.nanobananaBaseUrl}/credits`, {
             headers: { Authorization: `Bearer ${key}` },
             signal,
         });
         if (res.ok) return { valid: true };
-        return { valid: false, message: `HTTP ${res.status}` };
+        const body = await res.json().catch(() => ({}));
+        return {
+            valid: false,
+            message:
+                (body as { message?: string; error?: string }).message ??
+                (body as { error?: string }).error ??
+                `HTTP ${res.status}`,
+        };
     } catch (err) {
         return { valid: false, message: err instanceof Error ? err.message : 'Request failed' };
     }

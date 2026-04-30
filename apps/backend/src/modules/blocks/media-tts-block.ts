@@ -1,7 +1,8 @@
 import { randomUUID } from 'crypto';
 
 import { ttsAdapter } from '../../adapters/ai/tts-adapter';
-import { BUCKET, putObject } from '../../adapters/aws/s3';
+import { getPublicUrl, putObject } from '../../adapters/aws/s3';
+import { env } from '../../config/env';
 import { traceService } from '../../services/trace-service';
 
 import type { BlockExecutor, BlockExecutorResult } from './types';
@@ -27,8 +28,7 @@ export const mediaTtsBlock: BlockExecutor = {
     async execute(input: unknown, _config?: Record<string, unknown>): Promise<BlockExecutorResult> {
         const start = Date.now();
 
-        // Mock mode (default): return dummy output immediately
-        if ((process.env.ORCHESTRATOR_MODE || 'mock') !== 'claude') {
+        if (env.orchestratorMode === 'mock') {
             const output = dummyTtsOutput();
             return {
                 output,
@@ -78,7 +78,7 @@ export const mediaTtsBlock: BlockExecutor = {
 
             const s3Key = `media/audio/${randomUUID()}/narration.mp3`;
             await putObject(s3Key, result.audioBuffer, result.contentType);
-            const s3Url = `s3://${BUCKET}/${s3Key}`;
+            const publicUrl = getPublicUrl(s3Key);
 
             const assets: BlockExecutorResult['assets'] = [
                 {
@@ -105,7 +105,7 @@ export const mediaTtsBlock: BlockExecutor = {
             return {
                 output: {
                     audio: {
-                        url: s3Url,
+                        url: publicUrl,
                         durationSec: result.estimatedDurationSec,
                         format: 'mp3',
                         sampleRate: 44100,

@@ -8,14 +8,21 @@ export type { Orchestrator, ProposalResult } from './types';
 /**
  * Orchestrator selection via ORCHESTRATOR_MODE env variable.
  *
- * - 'mock' (default): Fixed 8-block proposal, no API calls
- * - 'claude': Real Claude API call with zod validation
+ * - 'mock': Fixed 8-block proposal, no API calls
+ * - 'openai': Real OpenAI API call with zod validation
+ * - 'claude': Legacy Claude API call with zod validation
  *
  * Both implement the same Orchestrator interface.
  * Switch at runtime via env without code changes.
  */
 export const getOrchestrator = async (): Promise<Orchestrator> => {
     const mode = env.orchestratorMode;
+
+    if (mode === 'openai') {
+        log.info('Using OpenAI orchestrator');
+        const { openaiOrchestrator } = await import('./openai-orchestrator');
+        return openaiOrchestrator;
+    }
 
     if (mode === 'claude') {
         log.info('Using Claude orchestrator');

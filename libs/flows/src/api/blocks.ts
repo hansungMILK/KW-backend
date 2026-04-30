@@ -3,19 +3,10 @@ import { api, withRetry } from '@flows/web-core';
 import { EXECUTE_FUNCTIONS } from './execute-functions';
 
 import type { BlockDefinitionWithFrontend, BlockStereo } from '../types';
-import type { BlockView, DataPacket, ListResult } from '@lemoncloud/eureka-flows-api';
+import type { BlockView, ListResult } from '@lemoncloud/eureka-flows-api';
 
 const _log = console.log.bind(console, '[blocks-api]');
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-/**
- * Create a DataPacket
- */
-export const createPacket = (value: unknown, type: 'text' | 'image' | 'number'): DataPacket => ({
-    value,
-    type,
-    timestamp: Date.now(),
-});
 
 /** @deprecated Fallback for servers without isFrontend flag. Remove when server is updated. */
 const LEGACY_BACKEND_PROCESSOR_TYPES = [
@@ -35,9 +26,9 @@ const LEGACY_BACKEND_PROCESSOR_TYPES = [
  * Note: Server returns `isFrontend` as BoolFlag (0 | 1), not boolean.
  * Conversion to boolean happens in listBlocks().
  */
-interface BlockViewWithFrontend extends BlockView {
+interface BlockViewWithFrontend extends Omit<BlockView, 'isFrontend'> {
     /** Server-provided flag indicating frontend execution capability (0 or 1) */
-    isFrontend?: 0 | 1;
+    isFrontend?: boolean | 0 | 1;
     /** Block stereotype for categorization (input, process, output) */
     stereo?: BlockStereo;
     /** Flag indicating if block can be executed (shows run button). Default true. */
@@ -62,7 +53,7 @@ export const requiresBackendProcessing = (blockDef: BlockDefinitionWithFrontend)
     }
 
     // Fallback: use legacy hardcoded list for backward compatibility
-    return LEGACY_BACKEND_PROCESSOR_TYPES.includes(blockDef.type);
+    return (LEGACY_BACKEND_PROCESSOR_TYPES as readonly string[]).includes(blockDef.type);
 };
 
 /**

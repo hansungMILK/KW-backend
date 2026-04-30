@@ -1,5 +1,4 @@
-import type { BlockDefinitionWithFrontend } from '../types';
-import type { NodeData } from '@lemoncloud/eureka-flows-api';
+import type { BlockDefinitionWithFrontend, NodeData } from '../types';
 
 /**
  * Find block definition by config keys when node.type doesn't match registry

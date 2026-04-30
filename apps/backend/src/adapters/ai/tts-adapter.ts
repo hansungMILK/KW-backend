@@ -1,6 +1,9 @@
+import { env } from '../../config/env';
+import { settingsService } from '../../services/settings-service';
+
 export interface TtsRequest {
     text: string;
-    voiceId?: string; // default: a stable multilingual voice
+    voiceId?: string; // OpenAI voice name
     modelId?: string;
 }
 
@@ -12,23 +15,23 @@ export interface TtsResult {
 
 export const ttsAdapter = {
     async synthesize(request: TtsRequest): Promise<TtsResult> {
-        const apiKey = process.env.ELEVENLABS_API_KEY;
-        if (!apiKey) throw new Error('ELEVENLABS_API_KEY not configured');
+        const apiKey = await settingsService.getKeyForProviderAsync('openai');
+        if (!apiKey) throw new Error('OPENAI_API_KEY not configured');
 
-        const voiceId = request.voiceId || '21m00Tcm4TlvDq8ikWAM'; // default voice (Rachel)
-        const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+        const response = await fetch(`${env.openaiBaseUrl}/audio/speech`, {
             method: 'POST',
-            headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json' },
+            headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                text: request.text,
-                model_id: request.modelId || 'eleven_multilingual_v2',
-                voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+                model: request.modelId || env.openaiTtsModel,
+                voice: request.voiceId || env.openaiTtsVoice,
+                input: request.text.slice(0, 4096),
+                response_format: 'mp3',
             }),
         });
 
         if (!response.ok) {
             const err = await response.text().catch(() => 'unknown');
-            throw new Error(`ElevenLabs TTS error ${response.status}: ${err.slice(0, 200)}`);
+            throw new Error(`OpenAI TTS error ${response.status}: ${err.slice(0, 200)}`);
         }
 
         const buffer = Buffer.from(await response.arrayBuffer());

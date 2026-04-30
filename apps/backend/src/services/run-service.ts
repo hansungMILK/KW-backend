@@ -1,5 +1,6 @@
 import { settingsService } from './settings-service';
 import { queue } from '../adapters/aws/queue';
+import { env } from '../config/env';
 import { flowRepo } from '../repositories/flow-repository';
 import { runRepo } from '../repositories/run-repository';
 import { generateNumericId } from '../utils/id-generator';
@@ -32,13 +33,27 @@ function buildParentMap(nodeIds: string[], edges: Array<Record<string, unknown>>
 // Block → Provider mapping (F-34)
 // ============================================================================
 
-const BLOCK_PROVIDER_MAP: Record<string, ApiKeyProvider> = {
+const LEGACY_BLOCK_PROVIDER_MAP: Record<string, ApiKeyProvider> = {
     'media-image': 'nanobanana',
     analysis: 'openai',
     'media-tts': 'elevenlabs',
     search: 'anthropic',
     content: 'anthropic',
     integration: 'anthropic',
+};
+
+const OPENAI_BLOCK_PROVIDER_MAP: Record<string, ApiKeyProvider> = {
+    search: 'openai',
+    content: 'openai',
+    analysis: 'openai',
+    'media-image': 'openai',
+    'media-tts': 'openai',
+    'media-video': 'openai',
+    integration: 'openai',
+};
+
+const getProviderForBlock = (blockType: string): ApiKeyProvider | undefined => {
+    return env.aiProvider === 'legacy' ? LEGACY_BLOCK_PROVIDER_MAP[blockType] : OPENAI_BLOCK_PROVIDER_MAP[blockType];
 };
 
 /**
@@ -53,7 +68,7 @@ async function checkMissingApiKeys(nodes: Array<Record<string, unknown>>): Promi
 
     for (const node of nodes) {
         const blockType = (node['type'] ?? node['blockType'] ?? '') as string;
-        const provider = BLOCK_PROVIDER_MAP[blockType];
+        const provider = getProviderForBlock(blockType);
         if (!provider) continue;
         if (checked.has(provider)) continue;
         checked.add(provider);

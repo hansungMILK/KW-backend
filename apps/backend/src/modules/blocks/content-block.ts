@@ -1,6 +1,7 @@
 import { extractTopic } from './search-block';
 import { ContentOutputSchema } from './types';
-import { claudeAdapter } from '../../adapters/ai/claude-adapter';
+import { openaiAdapter } from '../../adapters/ai/openai-adapter';
+import { env } from '../../config/env';
 import { log } from '../../utils/logger';
 
 import type { BlockExecutor, BlockExecutorResult } from './types';
@@ -130,27 +131,26 @@ export const contentBlock: BlockExecutor = {
     blockType: 'content',
 
     async execute(input: unknown, _config?: Record<string, unknown>): Promise<BlockExecutorResult> {
-        const mode = process.env.ORCHESTRATOR_MODE ?? 'mock';
-        if (mode !== 'claude') return dummyContent();
+        const mode = env.orchestratorMode;
+        if (mode === 'mock') return dummyContent();
 
         const start = Date.now();
         const userMessage = buildUserMessage(input);
 
         log.info('[content-block] Starting AI script generation', { messageLength: userMessage.length });
 
-        const response = await claudeAdapter.chat({
-            model: 'claude-sonnet-4-5',
+        const response = await openaiAdapter.chatJson({
+            model: env.openaiModel,
             systemPrompt: CONTENT_SYSTEM_PROMPT,
             userMessage,
             maxTokens: 2048,
-            temperature: 0.7,
         });
 
         let parsed: unknown;
         try {
             parsed = JSON.parse(response.content);
         } catch {
-            throw new Error(`[content-block] Claude returned non-JSON response (length=${response.content.length})`);
+            throw new Error(`[content-block] OpenAI returned non-JSON response (length=${response.content.length})`);
         }
 
         const validated = ContentOutputSchema.safeParse(parsed);

@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 /**
  * Block type identifiers — single source of truth.
- * Used by: block catalog, mock orchestrator, claude orchestrator,
+ * Used by: block catalog, mock/openai/claude orchestrators,
  * proposal generation, block registry, execution engine.
  */
 export const BLOCK_TYPES = [

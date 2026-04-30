@@ -1,6 +1,6 @@
 import { ORCHESTRATOR_SYSTEM_PROMPT, PROMPT_VERSION, buildUserPrompt } from './prompt-templates';
 import { parseClaudeResponse } from './response-parser';
-import { claudeAdapter } from '../../adapters/ai/claude-adapter';
+import { openaiAdapter } from '../../adapters/ai/openai-adapter';
 import { env } from '../../config/env';
 import { traceService } from '../../services/trace-service';
 import { generateNumericId } from '../../utils/id-generator';
@@ -9,25 +9,18 @@ import { log } from '../../utils/logger';
 import type { AllowedBlockType } from './response-parser';
 import type { Orchestrator, ProposalResult } from './types';
 
-const MODEL = env.anthropicDefaultModel;
-
 const COST_ESTIMATES: Record<AllowedBlockType, number> = {
-    search: 0.02,
-    content: 0.15,
+    search: 0.01,
+    content: 0.03,
     data: 0.01,
-    analysis: 0.05,
-    'media-image': 0.7,
-    'media-tts': 0.1,
+    analysis: 0.01,
+    'media-image': 0.11,
+    'media-tts': 0.01,
     'media-video': 0.2,
-    integration: 0.02,
+    integration: 0.01,
 };
 
-/**
- * Claude-based orchestrator.
- * Calls Claude API → parses JSON → validates with zod → builds proposal.
- * On failure: returns fallback error proposal with assistant error message.
- */
-export const claudeOrchestrator: Orchestrator = {
+export const openaiOrchestrator: Orchestrator = {
     async generateProposal(
         flowId: string,
         userMessage: string,
@@ -36,50 +29,42 @@ export const claudeOrchestrator: Orchestrator = {
         const startMs = Date.now();
 
         try {
-            // 1. Call Claude
-            const response = await claudeAdapter.chat({
-                model: MODEL,
+            const response = await openaiAdapter.chatJson({
+                model: env.openaiOrchestratorModel,
                 systemPrompt: ORCHESTRATOR_SYSTEM_PROMPT,
                 userMessage: buildUserPrompt(
                     userMessage,
                     currentContext ? JSON.stringify(currentContext, null, 2) : undefined
                 ),
                 maxTokens: 2048,
-                temperature: 0.3,
             });
 
-            // 2. Record trace: TOOL_CALL
-            await traceService.record(flowId, null, 'TOOL_CALL', 'Claude orchestrator call', {
+            await traceService.record(flowId, null, 'TOOL_CALL', 'OpenAI orchestrator call', {
                 promptVersion: PROMPT_VERSION,
                 model: response.model,
                 inputTokens: response.inputTokens,
                 outputTokens: response.outputTokens,
                 latencyMs: response.latencyMs,
-                stopReason: response.stopReason,
             });
 
-            // 3. Parse and validate
             const parseResult = parseClaudeResponse(response.content);
 
             if (!parseResult.ok) {
-                // Record validation failure trace
-                await traceService.record(flowId, null, 'ERROR', 'Claude output validation failed', {
+                await traceService.record(flowId, null, 'ERROR', 'OpenAI output validation failed', {
                     error: parseResult.error,
                     zodErrors: parseResult.zodErrors,
                     rawContentLength: parseResult.rawContent.length,
                 });
-
-                // Return fallback error proposal
                 return buildFallbackProposal(`AI 응답을 처리할 수 없습니다. 다시 시도해주세요. (${parseResult.error})`);
             }
 
-            // 4. Convert to ProposalResult
             const { data } = parseResult;
             const nodes = data.blocks.map((block, i) => ({
                 id: generateNumericId(),
                 blockId: `blk-${block.type}`,
                 name: block.label,
                 blockType: block.type,
+                type: block.type,
                 position: { x: 300, y: 100 + i * 120 },
                 state: 'IDLE',
                 config: block.config,
@@ -101,8 +86,7 @@ export const claudeOrchestrator: Orchestrator = {
             }));
             const total = data.estimatedCostUsd || breakdown.reduce((sum, b) => sum + b.amount, 0);
 
-            // Record success trace
-            await traceService.record(flowId, null, 'TOOL_RESULT', 'Claude proposal generated', {
+            await traceService.record(flowId, null, 'TOOL_RESULT', 'OpenAI proposal generated', {
                 promptVersion: PROMPT_VERSION,
                 blockCount: nodes.length,
                 edgeCount: edges.length,
@@ -125,13 +109,11 @@ export const claudeOrchestrator: Orchestrator = {
             };
         } catch (err) {
             const latencyMs = Date.now() - startMs;
-            log.error('Claude orchestrator failed', err);
+            log.error('OpenAI orchestrator failed', err);
 
-            // Record provider failure trace
-            await traceService.record(flowId, null, 'ERROR', 'Claude provider error', {
+            await traceService.record(flowId, null, 'ERROR', 'OpenAI provider error', {
                 error: err instanceof Error ? err.message : String(err),
                 latencyMs,
-                // Never log the full error stack in production traces
             });
 
             return buildFallbackProposal('AI 서비스에 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해주세요.');
@@ -139,10 +121,6 @@ export const claudeOrchestrator: Orchestrator = {
     },
 };
 
-/**
- * Fallback proposal: empty blocks, error message as assistant response.
- * System doesn't crash; user gets a meaningful error message in chat.
- */
 function buildFallbackProposal(errorMessage: string): ProposalResult {
     return {
         proposedNodes: [],

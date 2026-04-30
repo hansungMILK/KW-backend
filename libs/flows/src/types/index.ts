@@ -1,3 +1,25 @@
+import type {
+    BlockDefinition,
+    BlockView,
+    ConfigField,
+    ConfigFieldModel,
+    ConfigFieldWithDefault,
+    ConfigOption,
+    DataPacket,
+    DataType,
+    EdgeData as ApiEdgeData,
+    ExecutionStats,
+    ListResult,
+    LogEntry,
+    NodeConfigItem,
+    NodeData as ApiNodeData,
+    NodeDataPacketItem,
+    NodeStatus,
+    PortDefinition,
+    ProcessBody,
+    ProcessResult,
+} from '@lemoncloud/eureka-flows-api';
+
 export type {
     BlockDefinition,
     BlockView,
@@ -5,24 +27,18 @@ export type {
     ConfigFieldModel,
     ConfigFieldWithDefault,
     ConfigOption,
-    Connection,
     DataPacket,
     DataType,
-    doPostRunBody,
-    EdgeData,
     ExecutionStats,
     ListResult,
     LogEntry,
     NodeConfigItem,
-    NodeData,
     NodeDataPacketItem,
     NodeStatus,
-    PortData,
     PortDefinition,
     ProcessBody,
     ProcessResult,
-    WorkflowState,
-} from '@lemoncloud/eureka-flows-api';
+};
 
 // ============================================================================
 // Node Execution State (state field - replacing status)
@@ -43,7 +59,39 @@ export type {
  */
 export type NodeState = 'IDLE' | 'READY' | 'RUNNING' | 'COMPLETED' | 'ERROR';
 
-import type { BlockDefinition, DataPacket, EdgeData, NodeData, PortData } from '@lemoncloud/eureka-flows-api';
+/**
+ * Canvas node shape used by this app.
+ *
+ * The upstream API package exposes the persisted node shape, but our canvas also
+ * carries runtime state (`state`, mutable packet maps, local config edits). Keep
+ * this type explicit instead of leaking those app-only fields through casts.
+ */
+export interface NodeData
+    extends Omit<
+        ApiNodeData,
+        'id' | 'config' | 'status' | 'inputData' | 'outputData' | 'autoExecutionEnabled' | 'executionStats'
+    > {
+    id: string;
+    config?: Record<string, unknown>;
+    state?: NodeState;
+    status?: NodeState | string;
+    inputData?: Record<string, DataPacket>;
+    outputData?: Record<string, DataPacket>;
+    autoExecutionEnabled?: boolean;
+    executionStats?: ExecutionStats;
+}
+
+export interface EdgeData extends ApiEdgeData {}
+
+/** UI name for graph edges. Kept for legacy canvas code while payload remains EdgeData-compatible. */
+export interface Connection extends EdgeData {}
+
+export interface WorkflowState {
+    nodes: NodeData[];
+    edges: EdgeData[];
+    /** @deprecated The canonical graph field is `edges`; kept for legacy canvas history. */
+    connections?: Connection[];
+}
 
 // ============================================================================
 // Block Definition Extension (isFrontend support)
@@ -283,6 +331,7 @@ export interface NodeModel {
     input$$?: Array<{ id: string; label: string; type: string; required?: boolean }>;
     output$$?: Array<{ id: string; label: string; type: string; required?: boolean }>;
     position?: Position;
+    config?: Record<string, unknown>;
     config$$?: ConfigItem[];
     customLabel?: string;
     description?: string;

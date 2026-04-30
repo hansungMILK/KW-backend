@@ -1,7 +1,8 @@
 import { randomUUID } from 'crypto';
 
 import { imageAdapter } from '../../adapters/ai/image-adapter';
-import { BUCKET, putObject } from '../../adapters/aws/s3';
+import { getPublicUrl, putObject } from '../../adapters/aws/s3';
+import { env } from '../../config/env';
 import { traceService } from '../../services/trace-service';
 
 import type { BlockExecutor, BlockExecutorResult } from './types';
@@ -72,8 +73,7 @@ export const mediaImageBlock: BlockExecutor = {
     async execute(input: unknown, _config?: Record<string, unknown>): Promise<BlockExecutorResult> {
         const start = Date.now();
 
-        // Mock mode (default): return dummy output immediately
-        if ((process.env.ORCHESTRATOR_MODE || 'mock') !== 'claude') {
+        if (env.orchestratorMode === 'mock') {
             const output = dummyImageOutput();
             return {
                 output,
@@ -128,12 +128,12 @@ export const mediaImageBlock: BlockExecutor = {
         };
 
         const images: ImageResult[] = [];
-        const assets: BlockExecutorResult['assets'] = [];
+        const assets: NonNullable<BlockExecutorResult['assets']> = [];
 
         for (const scene of scenePrompts) {
             const sceneStart = Date.now();
             try {
-                // 1. Generate image via NanoBanana
+                // 1. Generate image via the configured OpenAI image model.
                 const generated = await imageAdapter.generate({
                     prompt: scene.prompt,
                     width: 1080,
@@ -142,29 +142,33 @@ export const mediaImageBlock: BlockExecutor = {
                 });
 
                 // 2. Fetch the temporary image URL and upload to S3
-                const imageResponse = await fetch(generated.imageUrl);
-                if (!imageResponse.ok) {
-                    throw new Error(`Failed to fetch generated image: ${imageResponse.status}`);
+                let imageBuffer = generated.imageBuffer;
+                if (!imageBuffer && generated.imageUrl) {
+                    const imageResponse = await fetch(generated.imageUrl);
+                    if (!imageResponse.ok) {
+                        throw new Error(`Failed to fetch generated image: ${imageResponse.status}`);
+                    }
+                    imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
                 }
-                const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+                if (!imageBuffer) throw new Error('Image provider returned no downloadable image');
 
                 const s3Key = `${batchPrefix}/scene-${String(scene.sceneNumber).padStart(3, '0')}.png`;
-                await putObject(s3Key, imageBuffer, 'image/png');
+                await putObject(s3Key, imageBuffer, generated.contentType);
 
-                const s3Url = `s3://${BUCKET}/${s3Key}`;
+                const publicUrl = getPublicUrl(s3Key);
                 const durationMs = Date.now() - sceneStart;
 
                 images.push({
                     sceneNumber: scene.sceneNumber,
-                    url: s3Url,
+                    url: publicUrl,
                     width: generated.width,
                     height: generated.height,
                     prompt: scene.prompt,
                 });
 
-                assets!.push({
+                assets.push({
                     assetType: 'IMAGE',
-                    mimeType: 'image/png',
+                    mimeType: generated.contentType,
                     data: imageBuffer,
                     metadata: {
                         sceneNumber: scene.sceneNumber,

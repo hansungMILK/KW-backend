@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 
-import type { EdgeView } from '../types';
-import type { Connection, DataPacket, NodeData, WorkflowState } from '@lemoncloud/eureka-flows-api';
+import type { Connection, DataPacket, EdgeView, NodeData, WorkflowState } from '../types';
 
 export interface Viewport {
     x: number;

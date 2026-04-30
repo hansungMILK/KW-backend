@@ -2,7 +2,7 @@ import { useCallback, useRef } from 'react';
 
 import { useCanvasStore } from '../stores';
 
-import type { WorkflowState } from '@lemoncloud/eureka-flows-api';
+import type { WorkflowState } from '../types';
 
 interface UseCanvasHistoryOptions {
     readOnly?: boolean;
@@ -30,6 +30,7 @@ export const useCanvasHistory = ({ readOnly }: UseCanvasHistoryOptions = {}) => 
 
         pastRef.current.push({
             nodes: JSON.parse(JSON.stringify(nodes)),
+            edges: [...connections],
             connections: [...connections],
         });
         futureRef.current = [];
@@ -44,6 +45,7 @@ export const useCanvasHistory = ({ readOnly }: UseCanvasHistoryOptions = {}) => 
         // Save current state to future stack
         futureRef.current.push({
             nodes: JSON.parse(JSON.stringify(nodes)),
+            edges: [...connections],
             connections: [...connections],
         });
 
@@ -51,7 +53,7 @@ export const useCanvasHistory = ({ readOnly }: UseCanvasHistoryOptions = {}) => 
         const previous = pastRef.current.pop();
         if (previous) {
             setNodes(previous.nodes);
-            setConnections(previous.connections);
+            setConnections(previous.connections ?? previous.edges);
         }
     }, [nodes, connections, readOnly, setNodes, setConnections]);
 
@@ -64,6 +66,7 @@ export const useCanvasHistory = ({ readOnly }: UseCanvasHistoryOptions = {}) => 
         // Save current state to past stack
         pastRef.current.push({
             nodes: JSON.parse(JSON.stringify(nodes)),
+            edges: [...connections],
             connections: [...connections],
         });
 
@@ -71,7 +74,7 @@ export const useCanvasHistory = ({ readOnly }: UseCanvasHistoryOptions = {}) => 
         const next = futureRef.current.pop();
         if (next) {
             setNodes(next.nodes);
-            setConnections(next.connections);
+            setConnections(next.connections ?? next.edges);
         }
     }, [nodes, connections, readOnly, setNodes, setConnections]);
 
@@ -103,6 +106,7 @@ export const useCanvasHistory = ({ readOnly }: UseCanvasHistoryOptions = {}) => 
     const saveDragSnapshot = useCallback(() => {
         dragStartSnapshotRef.current = {
             nodes: JSON.parse(JSON.stringify(nodes)),
+            edges: [...connections],
             connections: [...connections],
         };
     }, [nodes, connections]);

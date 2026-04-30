@@ -15,8 +15,7 @@ import { flowStorage } from '../utils/flowStorage';
 import { getNodeHeight } from '../utils/nodeHeight';
 
 import type { SaveStatus } from '../stores/useFlowsStore';
-import type { LoadFlowResult, SaveFlowBody } from '../types';
-import type { NodeData } from '@lemoncloud/eureka-flows-api';
+import type { LoadFlowResult, NodeData, SaveFlowBody } from '../types';
 
 /**
  * Hook for managing workflows/flows
@@ -239,7 +238,7 @@ export const useFlows = () => {
                 if (!flowId) {
                     console.log('[useFlows] Creating new flow via POST /flows/0/save');
                     const result = await createFlowMutation.mutateAsync(saveBody);
-                    flowId = result.id;
+                    flowId = result.id ?? null;
 
                     if (flowId) {
                         setCurrentFlowId(flowId);
@@ -253,7 +252,7 @@ export const useFlows = () => {
 
                 setLastSavedAt(new Date());
                 updateSaveStatus('success');
-                return { success: true, id: flowId || '' };
+                return { success: true, id: flowId ?? '' };
             } catch (error) {
                 console.error('[useFlows] Failed to save flow:', error);
                 updateSaveStatus('error', error instanceof Error ? error : new Error('Failed to save flow'));

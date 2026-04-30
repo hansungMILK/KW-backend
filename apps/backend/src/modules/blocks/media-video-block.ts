@@ -1,7 +1,8 @@
 import { randomUUID } from 'crypto';
 
-import { BUCKET, putObject } from '../../adapters/aws/s3';
+import { getPublicUrl, putObject } from '../../adapters/aws/s3';
 import { ffmpegAdapter } from '../../adapters/external/ffmpeg-adapter';
+import { env } from '../../config/env';
 import { traceService } from '../../services/trace-service';
 
 import type { BlockExecutor, BlockExecutorResult } from './types';
@@ -29,8 +30,7 @@ export const mediaVideoBlock: BlockExecutor = {
     async execute(input: unknown, _config?: Record<string, unknown>): Promise<BlockExecutorResult> {
         const start = Date.now();
 
-        // Mock mode (default): return dummy output immediately
-        if ((process.env.ORCHESTRATOR_MODE || 'mock') !== 'claude') {
+        if (env.orchestratorMode === 'mock') {
             const output = dummyVideoOutput();
             return {
                 output,
@@ -89,7 +89,7 @@ export const mediaVideoBlock: BlockExecutor = {
 
             const s3Key = `media/video/${randomUUID()}/output.mp4`;
             await putObject(s3Key, result.videoBuffer, 'video/mp4');
-            const s3Url = `s3://${BUCKET}/${s3Key}`;
+            const publicUrl = getPublicUrl(s3Key);
 
             const assets: BlockExecutorResult['assets'] = [
                 {
@@ -119,7 +119,7 @@ export const mediaVideoBlock: BlockExecutor = {
             return {
                 output: {
                     video: {
-                        url: s3Url,
+                        url: publicUrl,
                         durationSec: result.durationSec,
                         width: 1080,
                         height: 1920,

@@ -1,5 +1,6 @@
 import { SearchOutputSchema } from './types';
-import { claudeAdapter } from '../../adapters/ai/claude-adapter';
+import { openaiAdapter } from '../../adapters/ai/openai-adapter';
+import { env } from '../../config/env';
 import { log } from '../../utils/logger';
 
 import type { BlockExecutor, BlockExecutorResult } from './types';
@@ -92,27 +93,26 @@ export const searchBlock: BlockExecutor = {
     blockType: 'search',
 
     async execute(input: unknown, _config?: Record<string, unknown>): Promise<BlockExecutorResult> {
-        const mode = process.env.ORCHESTRATOR_MODE ?? 'mock';
-        if (mode !== 'claude') return dummySearch();
+        const mode = env.orchestratorMode;
+        if (mode === 'mock') return dummySearch();
 
         const start = Date.now();
         const topic = extractTopic(input);
 
         log.info('[search-block] Starting AI search', { topicLength: topic.length });
 
-        const response = await claudeAdapter.chat({
-            model: 'claude-haiku-4-5',
+        const response = await openaiAdapter.chatJson({
+            model: env.openaiModel,
             systemPrompt: SEARCH_SYSTEM_PROMPT,
             userMessage: `주제: ${topic}`,
             maxTokens: 1024,
-            temperature: 0.5,
         });
 
         let parsed: unknown;
         try {
             parsed = JSON.parse(response.content);
         } catch {
-            throw new Error(`[search-block] Claude returned non-JSON response (length=${response.content.length})`);
+            throw new Error(`[search-block] OpenAI returned non-JSON response (length=${response.content.length})`);
         }
 
         const validated = SearchOutputSchema.safeParse(parsed);

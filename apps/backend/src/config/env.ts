@@ -1,5 +1,7 @@
 const readEnv = (name: string, fallback = ''): string => {
-    return process.env[name] || fallback;
+    const value = process.env[name];
+    if (!value || value === '[object Object]') return fallback;
+    return value;
 };
 
 /**
@@ -19,8 +21,23 @@ export const env = {
     tracesTable: readEnv('TRACES_TABLE', 'eureka-flows-backend-traces-local'),
     assetsTable: readEnv('ASSETS_TABLE', 'eureka-flows-backend-assets-local'),
     settingsTable: readEnv('SETTINGS_TABLE', 'eureka-flows-backend-settings-local'),
-    orchestratorMode: readEnv('ORCHESTRATOR_MODE', 'mock'),
+    orchestratorMode: readEnv('ORCHESTRATOR_MODE', 'openai'),
+    aiProvider: readEnv('AI_PROVIDER', 'openai'),
     s3Bucket: readEnv('S3_BUCKET', 'eureka-flows-local'),
+    cdnDomain: readEnv('CLOUDFRONT_DOMAIN', readEnv('CDN_DOMAIN')),
+    executionQueueUrl: readEnv('EXECUTION_QUEUE_URL'),
+    anthropicDefaultModel: readEnv('ANTHROPIC_DEFAULT_MODEL', 'claude-sonnet-4-6'),
+    anthropicFastModel: readEnv('ANTHROPIC_FAST_MODEL', 'claude-haiku-4-5-20251001'),
+    openaiModel: readEnv('OPENAI_MODEL', readEnv('OPENAI_TEXT_MODEL', 'gpt-5-nano')),
+    openaiOrchestratorModel: readEnv('OPENAI_ORCHESTRATOR_MODEL', readEnv('OPENAI_MODEL', 'gpt-5-nano')),
+    openaiVisionModel: readEnv('OPENAI_VISION_MODEL', 'gpt-5-nano'),
+    openaiBaseUrl: readEnv('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
+    openaiImageModel: readEnv('OPENAI_IMAGE_MODEL', 'gpt-image-1-mini'),
+    openaiImageQuality: readEnv('OPENAI_IMAGE_QUALITY', 'medium'),
+    openaiTtsModel: readEnv('OPENAI_TTS_MODEL', 'tts-1'),
+    openaiTtsVoice: readEnv('OPENAI_TTS_VOICE', 'nova'),
+    nanobananaBaseUrl: readEnv('NANOBANANA_BASE_URL', 'https://www.nananobanana.com/api/v1'),
+    nanobananaModel: readEnv('NANOBANANA_MODEL', 'nano-banana'),
 } as const;
 
 export const isLocalStage = env.stage === 'local';

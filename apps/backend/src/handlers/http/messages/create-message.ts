@@ -50,7 +50,7 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
     };
     await messageRepo.put(userMessage);
 
-    // 2. Generate proposal (mock or claude, based on ORCHESTRATOR_MODE env)
+    // 2. Generate proposal (mock/openai/claude based on ORCHESTRATOR_MODE env)
     const orchestrator = await getOrchestrator();
     const result = await orchestrator.generateProposal(fid, bodyParsed.data.content, currentContext);
 

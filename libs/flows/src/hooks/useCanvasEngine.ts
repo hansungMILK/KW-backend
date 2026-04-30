@@ -6,8 +6,7 @@ import { useCanvasHistory } from './useCanvasHistory';
 import { useCanvasLayout } from './useCanvasLayout';
 import { getEffectiveState } from '../consts/status';
 
-import type { NodeState } from '../types';
-import type { DataPacket, NodeData, PortDefinition } from '@lemoncloud/eureka-flows-api';
+import type { DataPacket, NodeData, NodeState, PortDefinition } from '../types';
 
 const GRID_SIZE = 20;
 
@@ -189,10 +188,10 @@ export const useCanvasEngine = ({ readOnly, onNodeSelect, onChange }: UseCanvasE
             const currentNode = nodes.find(n => n.id === nodeId);
             if (!currentNode) return;
 
-            const inputs = manualOverrideInputs || currentNode.inputData;
+            const inputs = manualOverrideInputs ?? currentNode.inputData ?? {};
             const nodeDef = blockRegistry[currentNode.type];
 
-            if (!nodeDef) {
+            if (!nodeDef || !nodeDef.execute) {
                 setNodes(prev =>
                     prev.map(n =>
                         n.id === nodeId
@@ -200,7 +199,9 @@ export const useCanvasEngine = ({ readOnly, onNodeSelect, onChange }: UseCanvasE
                                   ...n,
                                   state: 'ERROR' as NodeState,
                                   status: 'ERROR', // Deprecated: kept for backward compatibility
-                                  errorMessage: t('nodes:errors.unknownBlockType'),
+                                  errorMessage: !nodeDef
+                                      ? t('nodes:errors.unknownBlockType')
+                                      : t('nodes:errors.backendExecutionRequired', 'This block must run on the backend.'),
                               }
                             : n
                     )

@@ -2,8 +2,7 @@ import { useMutation } from '@tanstack/react-query';
 
 import { upsertEdge, upsertFlow } from '../../api';
 
-import type { NodeView } from '../../types';
-import type { EdgeData, NodeData } from '@lemoncloud/eureka-flows-api';
+import type { EdgeData, NodeData, NodeView } from '../../types';
 import type { UseMutationResult } from '@tanstack/react-query';
 
 interface UpsertNodeVariables {
@@ -21,7 +20,7 @@ interface UpsertNodeVariables {
 export const useUpsertNodeMutation = () => {
     return useMutation({
         mutationFn: ({ id, flowId, body }: UpsertNodeVariables) =>
-            upsertFlow(flowId, { nodes: [{ id, ...(body as NodeData) }], edges: [] }),
+            upsertFlow(flowId, { nodes: [{ ...(body as Partial<NodeData>), id } as NodeData], edges: [] }),
         onError: (error: Error, { id }) => {
             console.error(`[useUpsertNodeMutation] Failed to upsert node ${id}:`, error);
         },

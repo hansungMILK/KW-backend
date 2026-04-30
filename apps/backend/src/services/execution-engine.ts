@@ -1,9 +1,12 @@
 import { blockExecutor } from './block-executor';
 import { traceService } from './trace-service';
 import { wsService } from './websocket-service';
+import { getPublicUrl, publicUrlFromS3Uri, putObject } from '../adapters/aws/s3';
 import { assetRepo } from '../repositories/asset-repository';
 import { runRepo } from '../repositories/run-repository';
 import { generateNumericId } from '../utils/id-generator';
+
+import type { BlockExecutorResult } from '../modules/blocks/types';
 
 /**
  * Execution engine — handles async run/node execution.
@@ -50,6 +53,25 @@ export function computeWaves(nodes: { nodeId: string; parentNodeIds: string[] }[
     }
 
     return waves;
+}
+
+async function resolveAssetPublicUrl(
+    asset: NonNullable<BlockExecutorResult['assets']>[number],
+    runId: string,
+    nodeId: string
+): Promise<string> {
+    if (typeof asset.data === 'string') {
+        if (asset.data.startsWith('s3://')) return publicUrlFromS3Uri(asset.data);
+        return asset.data;
+    }
+
+    const existingKey = typeof asset.metadata?.['s3Key'] === 'string' ? asset.metadata['s3Key'] : undefined;
+    if (existingKey) return getPublicUrl(existingKey);
+
+    const key = `runs/${runId}/${nodeId}/${generateNumericId()}-${asset.assetType.toLowerCase()}`;
+    await putObject(key, asset.data, asset.mimeType);
+    if (asset.metadata) asset.metadata['s3Key'] = key;
+    return getPublicUrl(key);
 }
 
 // ============================================================================
@@ -344,10 +366,7 @@ export const executionEngine = {
             if (assets && assets.length > 0 && runForNode) {
                 for (const asset of assets) {
                     const assetId = generateNumericId();
-                    const publicUrl =
-                        typeof asset.data === 'string' && asset.data.startsWith('fake://')
-                            ? asset.data
-                            : `s3://${process.env.S3_BUCKET || 'eureka-flows-local'}/${runId}/${nodeId}/${asset.assetType.toLowerCase()}`;
+                    const publicUrl = await resolveAssetPublicUrl(asset, runId, nodeId);
 
                     try {
                         await assetRepo.put({
