@@ -740,8 +740,82 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     const nodesWithExistingPortData = applyPortDataToNodes(loadedNodes, portsWithData);
                     const nodesWithPropagatedData = propagateData(nodesWithExistingPortData, loadedConnections);
 
+                    // Detect overlapping nodes (saved with bad positions) and auto-spread them
+                    const fixOverlappingNodes = (
+                        nodeList: typeof nodesWithPropagatedData
+                    ): typeof nodesWithPropagatedData => {
+                        if (nodeList.length <= 1) return nodeList;
+                        const hasOverlap = nodeList.some((a, i) =>
+                            nodeList
+                                .slice(i + 1)
+                                .some(
+                                    b =>
+                                        Math.abs(a.position.x - b.position.x) < 30 &&
+                                        Math.abs(a.position.y - b.position.y) < 30
+                                )
+                        );
+                        if (!hasOverlap) return nodeList;
+
+                        // Topological sort to assign horizontal levels
+                        const adj: Record<string, string[]> = {};
+                        const inDeg: Record<string, number> = {};
+                        nodeList.forEach(n => {
+                            adj[n.id] = [];
+                            inDeg[n.id] = 0;
+                        });
+                        loadedConnections.forEach(c => {
+                            if (adj[c.sourceNodeId] !== undefined && adj[c.targetNodeId] !== undefined) {
+                                adj[c.sourceNodeId].push(c.targetNodeId);
+                                inDeg[c.targetNodeId]++;
+                            }
+                        });
+                        const lvls: Record<string, number> = {};
+                        const q = nodeList.filter(n => inDeg[n.id] === 0).map(n => n.id);
+                        q.forEach(id => {
+                            lvls[id] = 0;
+                        });
+                        const tmp = { ...inDeg };
+                        const bfsQ = [...q];
+                        while (bfsQ.length > 0) {
+                            const cur = bfsQ.shift()!;
+                            (adj[cur] || []).forEach(next => {
+                                lvls[next] = Math.max(lvls[next] || 0, (lvls[cur] || 0) + 1);
+                                tmp[next]--;
+                                if (tmp[next] === 0) bfsQ.push(next);
+                            });
+                        }
+                        const maxLvl = nodeList.reduce((m, n) => Math.max(m, lvls[n.id] || 0), 0);
+                        nodeList.forEach(n => {
+                            if (lvls[n.id] === undefined) lvls[n.id] = maxLvl + 1;
+                        });
+
+                        // Group and position
+                        const groups: Record<number, typeof nodeList> = {};
+                        nodeList.forEach(n => {
+                            const l = lvls[n.id] || 0;
+                            if (!groups[l]) groups[l] = [];
+                            groups[l].push(n);
+                        });
+                        const result = [...nodeList];
+                        Object.keys(groups)
+                            .map(Number)
+                            .sort((a, b) => a - b)
+                            .forEach(level => {
+                                let cy = LAYOUT_CONFIG.START_Y;
+                                groups[level].forEach(node => {
+                                    const x = LAYOUT_CONFIG.START_X + level * LAYOUT_CONFIG.LEVEL_WIDTH;
+                                    const idx = result.findIndex(n => n.id === node.id);
+                                    if (idx !== -1) result[idx] = { ...result[idx], position: { x, y: cy } };
+                                    cy +=
+                                        (estimateNodeHeight(node, blockRegistry[node.type]) ||
+                                            LAYOUT_CONFIG.DEFAULT_HEIGHT) + LAYOUT_CONFIG.MIN_GAP;
+                                });
+                            });
+                        return result;
+                    };
+
                     // Display nodes immediately
-                    setNodes(nodesWithPropagatedData);
+                    setNodes(fixOverlappingNodes(nodesWithPropagatedData));
                     setConnections(loadedConnections);
                     pastRef.current = [];
                     futureRef.current = [];
