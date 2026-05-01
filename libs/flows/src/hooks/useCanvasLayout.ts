@@ -25,14 +25,14 @@ export const LAYOUT_CONFIG = {
 export const PORT_LAYOUT = {
     /** Node header height */
     HEADER_HEIGHT: 45,
-    /** First port Y offset from node top (header + centering) */
-    FIRST_PORT_Y: 58,
+    /** First port Y offset from node top: container top (45) + half port height (12) */
+    FIRST_PORT_Y: 57,
     /** Vertical spacing between ports (port height 24px + gap 4px) */
     PORT_SPACING: 28,
-    /** Input port X offset from node left edge */
-    INPUT_X: -3,
-    /** Output port X offset from node left edge (node width 260px + offset) */
-    OUTPUT_X: 263,
+    /** Input port X offset: port container at left-[-6px], circle center at node.x + 0 */
+    INPUT_X: 0,
+    /** Output port X offset from node left edge (node width, circle center at node.x + nodeWidth) */
+    OUTPUT_X: 260,
     /** Node width */
     NODE_WIDTH: 260,
     /** Port circle size */

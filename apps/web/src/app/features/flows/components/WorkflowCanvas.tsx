@@ -94,14 +94,14 @@ const TOUCH_PORT_HIT_THRESHOLD = 50;
 
 /** Port position constants for touch hit detection */
 const TOUCH_PORT_LAYOUT = {
-    /** Input port X offset from node left edge */
-    INPUT_X_OFFSET: -6,
-    /** First port Y offset from node top */
-    FIRST_PORT_Y: 45,
-    /** Vertical spacing between ports */
-    PORT_SPACING: 16,
-    /** Port center offset */
-    PORT_CENTER_OFFSET: 6,
+    /** Input port X: port container left-[-6px], circle center at node.x + 0 */
+    INPUT_X_OFFSET: 0,
+    /** First port Y: container top (45) + half port height (12) */
+    FIRST_PORT_Y: 57,
+    /** Vertical spacing between ports (port height 24px + gap-1 4px) */
+    PORT_SPACING: 28,
+    /** Port center offset (included in FIRST_PORT_Y) */
+    PORT_CENTER_OFFSET: 0,
 } as const;
 
 /**
@@ -491,7 +491,25 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
 
                     if (sourceNode) {
                         startX = sourceNode.position.x + 300;
-                        startY = sourceNode.position.y;
+                        // Prioritise lastPlacedPosRef for rapid-fire additions (pre-render).
+                        // Fall back to scanning rendered nodes in the same column.
+                        const lastPos = lastPlacedPosRef.current;
+                        if (lastPos && Math.abs(lastPos.x - startX) < 60) {
+                            startY = lastPos.y + 230;
+                        } else {
+                            const sameColNodes = nodesRef.current.filter(
+                                n => n.position && Math.abs(n.position.x - startX) < 60
+                            );
+                            if (sameColNodes.length > 0) {
+                                const bottomNode = sameColNodes.reduce((prev, n) =>
+                                    n.position.y > prev.position.y ? n : prev
+                                );
+                                const bottomH = estimateNodeHeight(bottomNode, blockRegistry[bottomNode.type]);
+                                startY = bottomNode.position.y + bottomH + LAYOUT_CONFIG.MIN_GAP;
+                            } else {
+                                startY = sourceNode.position.y;
+                            }
+                        }
                     } else {
                         // Use lastPlacedPosRef for the anchor so that rapid-fire additions
                         // (before React re-renders and updates the closure) never land on
@@ -668,10 +686,11 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                 }),
                 loadWorkflow: async (state: WorkflowStateWithPorts) => {
                     lastPlacedPosRef.current = null;
-                    // Normalize nodes to ensure config is never undefined
+                    // Normalize nodes: ensure config and position are never undefined
                     const loadedNodes = (state.nodes ?? []).map(n => ({
                         ...n,
                         config: n.config ?? {},
+                        position: n.position ?? { x: 50, y: 50 },
                     }));
 
                     const rawConnections = state.edges ?? state.connections ?? [];
@@ -2146,7 +2165,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
             // Use dynamic node width for output port position
             // If node is being resized, use the resizing width for real-time edge updates
             const nodeWidth = resizingNode?.nodeId === nodeId ? resizingNode.width : getNodeWidth(node);
-            const xOffset = type === 'input' ? PORT_LAYOUT.INPUT_X : nodeWidth + 3;
+            const xOffset = type === 'input' ? PORT_LAYOUT.INPUT_X : nodeWidth;
             return { x: node.position.x + xOffset, y: node.position.y + yOffset };
         };
 
