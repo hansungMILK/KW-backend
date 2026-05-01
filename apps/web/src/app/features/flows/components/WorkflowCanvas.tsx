@@ -486,10 +486,43 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                         }
                     }
 
+                    // Pre-scan: check if this node will auto-connect as SOURCE to an existing node.
+                    // Must happen before position calculation so we can place it to the LEFT of the target.
+                    let targetNode: NodeData | undefined;
+                    let targetInputPortId: string | undefined;
+                    let sourceOutputPortId: string | undefined;
+
+                    if (!sourceNode && newDef.outputs.length > 0 && nodes.length > 0) {
+                        const firstOutput = newDef.outputs[0];
+
+                        for (const existingNode of nodes) {
+                            const existingDef = blockRegistry[existingNode.type];
+                            if (!existingDef || existingDef.inputs.length === 0) continue;
+
+                            const compatibleInput = existingDef.inputs.find(inp => {
+                                const isConnected = connections.some(
+                                    c => c.targetNodeId === existingNode.id && c.targetPortId === inp.id
+                                );
+                                if (isConnected) return false;
+                                return (
+                                    inp.type === firstOutput.type || inp.type === 'any' || firstOutput.type === 'any'
+                                );
+                            });
+
+                            if (compatibleInput) {
+                                targetNode = existingNode;
+                                targetInputPortId = compatibleInput.id;
+                                sourceOutputPortId = firstOutput.id;
+                                break;
+                            }
+                        }
+                    }
+
                     let startX = 0;
                     let startY = 0;
 
                     if (sourceNode) {
+                        // New node is a TARGET — place to the right of sourceNode
                         startX = sourceNode.position.x + 300;
                         // Prioritise lastPlacedPosRef for rapid-fire additions (pre-render).
                         // Fall back to scanning rendered nodes in the same column.
@@ -517,14 +550,26 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                                 const bottomH = estimateNodeHeight(bottomNode, blockRegistry[bottomNode.type]);
                                 startY = bottomNode.position.y + bottomH + LAYOUT_CONFIG.MIN_GAP;
                             } else {
-                                // No existing nodes in this column — place alongside the source
                                 startY = sourceNode.position.y;
                             }
                         }
+                    } else if (targetNode) {
+                        // New node is a SOURCE — place to the LEFT of targetNode
+                        startX = targetNode.position.x - 300;
+                        const sameColNodes = nodesRef.current.filter(
+                            n => n.position && Math.abs(n.position.x - startX) < 60
+                        );
+                        if (sameColNodes.length > 0) {
+                            const bottomNode = sameColNodes.reduce((prev, n) =>
+                                n.position.y > prev.position.y ? n : prev
+                            );
+                            const bottomH = estimateNodeHeight(bottomNode, blockRegistry[bottomNode.type]);
+                            startY = bottomNode.position.y + bottomH + LAYOUT_CONFIG.MIN_GAP;
+                        } else {
+                            startY = targetNode.position.y;
+                        }
                     } else {
-                        // Use lastPlacedPosRef for the anchor so that rapid-fire additions
-                        // (before React re-renders and updates the closure) never land on
-                        // the same spot. Fall back to nodesRef then canvas center.
+                        // Standalone node — use lastPlacedPosRef or bottommost node, then canvas center.
                         const anchor =
                             lastPlacedPosRef.current ??
                             (nodesRef.current.length > 0
@@ -532,8 +577,17 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                                 : null);
 
                         if (anchor) {
+                            const lastNode = nodesRef.current.find(
+                                n =>
+                                    n.position &&
+                                    Math.abs(n.position.x - anchor.x) < 5 &&
+                                    Math.abs(n.position.y - anchor.y) < 5
+                            );
+                            const lastH = lastNode
+                                ? estimateNodeHeight(lastNode, blockRegistry[lastNode.type])
+                                : LAYOUT_CONFIG.DEFAULT_HEIGHT;
                             startX = anchor.x;
-                            startY = anchor.y + 230;
+                            startY = anchor.y + lastH + LAYOUT_CONFIG.MIN_GAP;
                         } else {
                             // First node on empty canvas — use canvas center
                             const rect = canvasRef.current?.getBoundingClientRect();
@@ -584,44 +638,14 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                         }
                     }
 
-                    let targetNode: NodeData | undefined;
-                    let targetInputPortId: string | undefined;
-                    let sourceOutputPortId: string | undefined;
-
-                    if (!newConnection && newDef.outputs.length > 0 && nodes.length > 0) {
-                        const firstOutput = newDef.outputs[0];
-
-                        for (const existingNode of nodes) {
-                            const existingDef = blockRegistry[existingNode.type];
-                            if (!existingDef || existingDef.inputs.length === 0) continue;
-
-                            const compatibleInput = existingDef.inputs.find(inp => {
-                                const isConnected = connections.some(
-                                    c => c.targetNodeId === existingNode.id && c.targetPortId === inp.id
-                                );
-                                if (isConnected) return false;
-                                return (
-                                    inp.type === firstOutput.type || inp.type === 'any' || firstOutput.type === 'any'
-                                );
-                            });
-
-                            if (compatibleInput) {
-                                targetNode = existingNode;
-                                targetInputPortId = compatibleInput.id;
-                                sourceOutputPortId = firstOutput.id;
-                                break;
-                            }
-                        }
-
-                        if (targetNode && targetInputPortId && sourceOutputPortId) {
-                            newConnection = {
-                                id: tempEdgeId,
-                                sourceNodeId: tempNodeId,
-                                sourcePortId: sourceOutputPortId,
-                                targetNodeId: targetNode.id,
-                                targetPortId: targetInputPortId,
-                            };
-                        }
+                    if (!newConnection && targetNode && targetInputPortId && sourceOutputPortId) {
+                        newConnection = {
+                            id: tempEdgeId,
+                            sourceNodeId: tempNodeId,
+                            sourcePortId: sourceOutputPortId,
+                            targetNodeId: targetNode.id,
+                            targetPortId: targetInputPortId,
+                        };
                     }
 
                     // Optimistic UI update
