@@ -495,7 +495,17 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                         // Fall back to scanning rendered nodes in the same column.
                         const lastPos = lastPlacedPosRef.current;
                         if (lastPos && Math.abs(lastPos.x - startX) < 60) {
-                            startY = lastPos.y + 230;
+                            // Find the node at lastPos to get its actual height
+                            const lastNode = nodesRef.current.find(
+                                n =>
+                                    n.position &&
+                                    Math.abs(n.position.x - lastPos.x) < 5 &&
+                                    Math.abs(n.position.y - lastPos.y) < 5
+                            );
+                            const lastH = lastNode
+                                ? estimateNodeHeight(lastNode, blockRegistry[lastNode.type])
+                                : LAYOUT_CONFIG.DEFAULT_HEIGHT;
+                            startY = lastPos.y + lastH + LAYOUT_CONFIG.MIN_GAP;
                         } else {
                             const sameColNodes = nodesRef.current.filter(
                                 n => n.position && Math.abs(n.position.x - startX) < 60
@@ -507,6 +517,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                                 const bottomH = estimateNodeHeight(bottomNode, blockRegistry[bottomNode.type]);
                                 startY = bottomNode.position.y + bottomH + LAYOUT_CONFIG.MIN_GAP;
                             } else {
+                                // No existing nodes in this column — place alongside the source
                                 startY = sourceNode.position.y;
                             }
                         }
@@ -773,7 +784,12 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                                         Math.abs(a.position.y - b.position.y) < 30
                                 )
                         );
-                        if (!hasOverlap) return nodeList;
+                        // Also detect "same column" layout: all nodes within 100px x-range
+                        // (indicates positions were never properly set — needs horizontal spread)
+                        const xValues = nodeList.map(n => n.position.x);
+                        const xRange = Math.max(...xValues) - Math.min(...xValues);
+                        const allSameColumn = xRange < 100;
+                        if (!hasOverlap && !allSameColumn) return nodeList;
 
                         // Topological sort to assign horizontal levels
                         const adj: Record<string, string[]> = {};
@@ -834,12 +850,38 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     };
 
                     // Display nodes immediately
-                    setNodes(fixOverlappingNodes(nodesWithPropagatedData));
+                    const finalNodes = fixOverlappingNodes(nodesWithPropagatedData);
+                    setNodes(finalNodes);
                     setConnections(loadedConnections);
                     pastRef.current = [];
                     futureRef.current = [];
                     handleSelectionChange(null);
                     setSelectedConnectionId(null);
+
+                    // Fit viewport so all nodes are visible after load/reposition
+                    const canvasEl = canvasRef.current;
+                    if (canvasEl && finalNodes.length > 0) {
+                        const canvasW = canvasEl.clientWidth;
+                        const canvasH = canvasEl.clientHeight;
+                        const pad = 60;
+                        const minX = Math.min(...finalNodes.map(n => n.position.x));
+                        const minY = Math.min(...finalNodes.map(n => n.position.y));
+                        const maxX = Math.max(...finalNodes.map(n => n.position.x + PORT_LAYOUT.NODE_WIDTH));
+                        const maxY = Math.max(
+                            ...finalNodes.map(
+                                n =>
+                                    n.position.y +
+                                    (estimateNodeHeight(n, blockRegistry[n.type]) || LAYOUT_CONFIG.DEFAULT_HEIGHT)
+                            )
+                        );
+                        const contentW = maxX - minX || 1;
+                        const contentH = maxY - minY || 1;
+                        const zoom = Math.min((canvasW - pad * 2) / contentW, (canvasH - pad * 2) / contentH, 1);
+                        const safeZoom = Math.max(zoom, MIN_ZOOM);
+                        const viewX = (canvasW - contentW * safeZoom) / 2 - minX * safeZoom;
+                        const viewY = (canvasH - contentH * safeZoom) / 2 - minY * safeZoom;
+                        setViewport({ x: Math.round(viewX), y: Math.round(viewY), zoom: safeZoom });
+                    }
 
                     // Step 2: Fetch missing port data (data: null) in background
                     // Each port updates individually when fetched for progressive loading UX
