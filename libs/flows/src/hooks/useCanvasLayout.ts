@@ -45,8 +45,8 @@ export const PORT_LAYOUT = {
 const NODE_HEIGHT = {
     /** Base: header(40) + description(20) + border(10) + padding(40) */
     BASE: 110,
-    /** Height per port row */
-    PORT_ROW: 26,
+    /** Height per port row: h-6(24px) + gap-1(4px) = 28px — must match PORT_LAYOUT.PORT_SPACING */
+    PORT_ROW: 28,
     /** Extra height for input nodes (Run button + visualization) */
     INPUT_NODE: 100,
     /** Extra height for output-console nodes (visualization area) */
