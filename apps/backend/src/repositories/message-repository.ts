@@ -25,4 +25,19 @@ export const messageRepo = {
     async get(messageId: string): Promise<Message | null> {
         return (memDb.get(TABLE, messageId) as unknown as Message) ?? null;
     },
+
+    /**
+     * Delete all messages belonging to a flow. Returns the count deleted.
+     * Used by Flow cascade delete (audit #7). Idempotent — returns 0 if none.
+     */
+    async deleteByFlowId(flowId: string): Promise<number> {
+        const owned = memDb.query(
+            TABLE,
+            item => (item as { flowId?: string }).flowId === flowId
+        ) as unknown as Message[];
+        for (const msg of owned) {
+            memDb.delete(TABLE, msg.messageId);
+        }
+        return owned.length;
+    },
 };

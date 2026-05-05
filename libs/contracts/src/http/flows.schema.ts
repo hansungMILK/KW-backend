@@ -122,8 +122,7 @@ export type FlowUpdateMetaRequest = z.infer<typeof FlowUpdateMetaRequestSchema>;
 export type FlowUpdateMetaResponse = z.infer<typeof FlowUpdateMetaResponseSchema>;
 
 // ============================================================================
-// FlowStatus  (spec)
-// Canonical uppercase values used across spec endpoints.
+// FlowStatus + spec schemas (P1) + lifecycle response shapes (P2)
 // ============================================================================
 
 export const FlowStatusSchema = z.enum(['DRAFT', 'READY', 'ARCHIVED']);
@@ -131,8 +130,6 @@ export type FlowStatus = z.infer<typeof FlowStatusSchema>;
 
 // ============================================================================
 // POST /flows  (spec)
-// Body: { title (required), description?, scenario? }
-// 201 → FlowSummary, status: DRAFT
 // ============================================================================
 
 export const FlowCreateRequestSchema = z.object({
@@ -155,8 +152,6 @@ export type FlowSummary = z.infer<typeof FlowSummarySchema>;
 
 // ============================================================================
 // GET /flows  (spec)
-// Query: limit, cursor, status
-// Returns: { items: FlowSummary[], nextCursor?: string }
 // ============================================================================
 
 export const FlowListQuerySchema = z.object({
@@ -175,8 +170,6 @@ export type FlowListResponse = z.infer<typeof FlowListResponseSchema>;
 
 // ============================================================================
 // GET /flows/{flowId}  (spec)
-// Returns: FlowDetail (summary + nodes/edges + latestProposalId/lastRunId join)
-// latestProposalId/lastRunId join is owned by 강연경/민경욱 — surfaced as null in P1.
 // ============================================================================
 
 export const FlowDetailResponseSchema = FlowSummarySchema.extend({
@@ -190,8 +183,6 @@ export type FlowDetailResponse = z.infer<typeof FlowDetailResponseSchema>;
 
 // ============================================================================
 // PUT /flows/{flowId}  (spec) — unified canvas save
-// Body: { title?, description?, nodes, edges }
-// Auto status transition: DRAFT → READY when nodes.length >= 1
 // ============================================================================
 
 export const FlowPutRequestSchema = z.object({
@@ -202,3 +193,21 @@ export const FlowPutRequestSchema = z.object({
 });
 
 export type FlowPutRequest = z.infer<typeof FlowPutRequestSchema>;
+
+// ============================================================================
+// DELETE /flows/{flowId}  (audit #7)
+// ============================================================================
+
+export const FlowDeleteResponseSchema = z.object({
+    deleted: z.literal(true),
+    messagesDeleted: z.number().int().nonnegative(),
+    proposalsDeleted: z.number().int().nonnegative(),
+});
+export type FlowDeleteResponse = z.infer<typeof FlowDeleteResponseSchema>;
+
+// ============================================================================
+// POST /flows/{flowId}/archive|unarchive|duplicate  (audit #8~10)
+// ============================================================================
+
+export const FlowLifecycleResponseSchema = FlowSummarySchema;
+export type FlowLifecycleResponse = z.infer<typeof FlowLifecycleResponseSchema>;
