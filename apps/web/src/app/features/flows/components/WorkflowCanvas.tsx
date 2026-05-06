@@ -9,13 +9,13 @@ import {
     PORT_LAYOUT,
     estimateNodeHeight,
     getEffectiveState,
+    getFlow,
     getNodeWidth,
     getPortData,
-    loadFlow,
     runNode,
     shouldUpdateState,
     toPortData,
-    upsertFlow,
+    updateFlow,
     upsertPortNode,
     useBlockRegistry,
     useEdgeSync,
@@ -388,7 +388,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
 
         useEffect(() => {
             if (modalFlowId) {
-                loadFlow(modalFlowId)
+                getFlow(modalFlowId)
                     .then(setModalFlowData)
                     .catch(() => setModalFlowData(null));
             } else {
@@ -1662,7 +1662,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     const nodesToDelete = [{ id: `#${id}` }] as unknown as NodeData[];
                     const edgesToDelete = serverEdges.map(e => ({ id: `#${e.id}` })) as unknown as Connection[];
 
-                    upsertFlow(flowId, { nodes: nodesToDelete, edges: edgesToDelete }).catch(err => {
+                    updateFlow(flowId, { nodes: nodesToDelete, edges: edgesToDelete }).catch(err => {
                         console.error('[WorkflowCanvas] Failed to delete node:', err);
                     });
                 }
@@ -1681,7 +1681,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                 if (flowId && !isTempId(id)) {
                     const edgesToDelete = [{ id: `#${id}` }] as unknown as Connection[];
 
-                    upsertFlow(flowId, { nodes: [], edges: edgesToDelete }).catch(err => {
+                    updateFlow(flowId, { nodes: [], edges: edgesToDelete }).catch(err => {
                         console.error('[WorkflowCanvas] Failed to delete edge:', err);
                     });
                 }
@@ -2015,7 +2015,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                             }));
 
                         if (nodesToUpdate.length > 0) {
-                            upsertFlow(flowId, { nodes: nodesToUpdate as NodeData[], edges: [] }).catch(err => {
+                            updateFlow(flowId, { nodes: nodesToUpdate as NodeData[], edges: [] }).catch(err => {
                                 console.error('[WorkflowCanvas] Failed to batch update node positions:', err);
                             });
                         }
@@ -2097,7 +2097,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                             }));
 
                         if (nodesToUpdate.length > 0) {
-                            upsertFlow(flowId, { nodes: nodesToUpdate as NodeData[], edges: [] }).catch(err => {
+                            updateFlow(flowId, { nodes: nodesToUpdate as NodeData[], edges: [] }).catch(err => {
                                 console.error('[WorkflowCanvas] Failed to batch update node positions:', err);
                             });
                         }
@@ -2408,7 +2408,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                                     id: `#${e.id}`,
                                 })) as unknown as Connection[];
 
-                                upsertFlow(flowId, { nodes: nodesToDelete, edges: edgesToDelete }).catch(err => {
+                                updateFlow(flowId, { nodes: nodesToDelete, edges: edgesToDelete }).catch(err => {
                                     console.error('[WorkflowCanvas] Failed to delete nodes:', err);
                                 });
                             }
@@ -2424,7 +2424,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                         if (flowId && targetId && !isTempId(targetId)) {
                             const edgesToDelete = [{ id: `#${targetId}` }] as unknown as Connection[];
 
-                            upsertFlow(flowId, { nodes: [], edges: edgesToDelete }).catch(err => {
+                            updateFlow(flowId, { nodes: [], edges: edgesToDelete }).catch(err => {
                                 console.error('[WorkflowCanvas] Failed to delete edge:', err);
                             });
                         }

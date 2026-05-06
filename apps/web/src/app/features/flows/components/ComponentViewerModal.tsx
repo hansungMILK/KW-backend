@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 
 import { X } from 'lucide-react';
 
-import { loadFlow } from '@flows/flows';
+import { getFlow } from '@flows/flows';
 
 import type { WorkflowState } from '@lemoncloud/eureka-flows-api';
 
@@ -24,7 +24,7 @@ export const ComponentViewerModal: React.FC<ComponentViewerModalProps> = ({
 
     useEffect(() => {
         if (flowId) {
-            loadFlow(flowId)
+            getFlow(flowId)
                 .then(setFlowData)
                 .catch(() => setFlowData(null));
         } else {

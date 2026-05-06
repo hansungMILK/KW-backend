@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 
 import { useQueryClient } from '@tanstack/react-query';
 
-import { createFlow, loadFlow } from '../api';
+import { createFlow, getFlow } from '../api';
 import {
     flowsKeys,
     useCreateFlowMutation,
@@ -86,7 +86,7 @@ export const useFlows = () => {
                 // Use queryClient.fetchQuery for caching benefit
                 const flowData = await queryClient.fetchQuery({
                     queryKey: flowsKeys.snapshot(savedFlowId),
-                    queryFn: () => loadFlow(savedFlowId),
+                    queryFn: () => getFlow(savedFlowId),
                 });
                 setCurrentFlowId(savedFlowId);
                 if (flowData.name) {
@@ -136,7 +136,7 @@ export const useFlows = () => {
                 // Use queryClient.fetchQuery for caching benefit
                 const flowData = await queryClient.fetchQuery({
                     queryKey: flowsKeys.snapshot(id),
-                    queryFn: () => loadFlow(id),
+                    queryFn: () => getFlow(id),
                 });
                 if (flowData.name) {
                     setFlowName(flowData.name);
@@ -239,7 +239,7 @@ export const useFlows = () => {
                 if (!flowId) {
                     console.log('[useFlows] Creating new flow via POST /flows/0/save');
                     const result = await createFlowMutation.mutateAsync(saveBody);
-                    flowId = result.id;
+                    flowId = result.id ?? null;
 
                     if (flowId) {
                         setCurrentFlowId(flowId);

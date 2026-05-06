@@ -5,49 +5,31 @@ import type { BlockDefinition, DataPacket, LogEntry } from '@lemoncloud/eureka-f
 
 const _log = console.log.bind(console, '[flows-api]');
 
-// NOTE: The backend only supports these APIs:
-// - POST /flows/:id/save (create with id='0', or update with existing id)
-// - GET /flows/:id/load (load flow snapshot)
-// - POST /nodes/:id/run (execute node)
-
 /**
- * Load flow snapshot (complete state with nodes and edges)
- * GET /flows/:id/load
- *
- * @see eureka-flows-api #0.26.111
- * @param id - Flow ID to load
- * @throws Error if id is missing or API call fails
+ * Get flow (full state with nodes and edges)
+ * GET /flows/{flowId}
  */
-export const loadFlow = async (id: string): Promise<LoadFlowResult> => {
-    if (!id) {
-        throw new Error('Flow ID is required');
-    }
-    _log(`> loadFlow(${id})`);
-    const response = await withRetry(() => api.get<LoadFlowResult>(`/flows/${id}/load`), 3, 'loadFlow');
+export const getFlow = async (id: string): Promise<LoadFlowResult> => {
+    if (!id) throw new Error('Flow ID is required');
+    _log(`> getFlow(${id})`);
+    const response = await withRetry(() => api.get<LoadFlowResult>(`/flows/${id}`), 3, 'getFlow');
     return response.data;
 };
 
 /**
- * Save flow snapshot (complete state with nodes and edges)
- * POST /flows/:id/save
- *
- * @see eureka-flows-api #0.26.111
- * @param id - Flow ID ('0' for create new)
- * @param body - SaveFlowBody { nodes: NodeData[], edges: EdgeData[] }
- * @returns SaveFlowView with the flow ID and saved state
+ * Update flow (batch update nodes and edges)
+ * PUT /flows/{flowId}
  */
-export const saveFlow = async (id: string, body: SaveFlowBody): Promise<SaveFlowView> => {
-    _log(`> saveFlow(${id})`, { nodeCount: body.nodes.length, edgeCount: body.edges?.length ?? 0 });
-    const response = await api.post<SaveFlowView>(`/flows/${id}/save`, body);
+export const updateFlow = async (id: string, body: SaveFlowBody): Promise<SaveFlowView> => {
+    if (!id) throw new Error('Flow ID is required');
+    _log(`> updateFlow(${id})`, { nodeCount: body.nodes?.length ?? 0, edgeCount: body.edges?.length ?? 0 });
+    const response = await api.put<SaveFlowView>(`/flows/${id}`, body);
     return response.data;
 };
 
 /**
- * Create new flow via POST /flows/0/save
- * This is the only way to create a new flow in the backend.
- *
- * @param body - Initial flow state (nodes, edges)
- * @returns SaveFlowView with the new flow ID from server
+ * Create new flow
+ * POST /flows/0/save
  */
 export const createFlow = async (body?: Partial<SaveFlowBody>): Promise<SaveFlowView> => {
     _log('> createFlow() via POST /flows/0/save');
@@ -55,58 +37,59 @@ export const createFlow = async (body?: Partial<SaveFlowBody>): Promise<SaveFlow
         nodes: body?.nodes ?? [],
         edges: body?.edges ?? [],
     };
-    return saveFlow('0', saveBody);
-};
-
-/**
- * Upsert flow (batch update nodes and edges)
- * POST /flows/:id/upsert
- *
- * Use this for batch operations like:
- * - Moving multiple nodes at once
- * - Bulk node/edge updates
- *
- * @see eureka-flows-api v0.26.212
- * @param id - Flow ID to upsert into
- * @param body - SaveFlowBody { nodes: NodeData[], edges: EdgeData[] }
- * @returns SaveFlowView with updated nodes, edges, ports
- */
-export const upsertFlow = async (id: string, body: SaveFlowBody): Promise<SaveFlowView> => {
-    if (!id) {
-        throw new Error('Flow ID is required');
-    }
-    _log(`> upsertFlow(${id})`, { nodeCount: body.nodes?.length ?? 0, edgeCount: body.edges?.length ?? 0 });
-    const response = await api.post<SaveFlowView>(`/flows/${id}/upsert`, body);
+    const response = await api.post<SaveFlowView>('/flows/0/save', saveBody);
     return response.data;
 };
 
 /**
  * Update flow metadata (name, etc.)
  * POST /flows/:id
- *
- * @see eureka-flows-api v0.26.126
- * @param id - Flow ID to update
- * @param body - UpdateFlowBody { name?: string }
- * @returns FlowView with updated metadata
  */
 export const updateFlowMetadata = async (id: string, body: UpdateFlowBody): Promise<FlowView> => {
-    if (!id) {
-        throw new Error('Flow ID is required');
-    }
+    if (!id) throw new Error('Flow ID is required');
     _log(`> updateFlowMetadata(${id})`, body);
     const response = await api.post<FlowView>(`/flows/${id}`, body);
     return response.data;
 };
 
 /**
+ * @deprecated Use getFlow() instead. Keep until smoke test passes.
+ * GET /flows/:id/load
+ */
+export const loadFlow = async (id: string): Promise<LoadFlowResult> => {
+    if (!id) throw new Error('Flow ID is required');
+    _log(`> loadFlow(${id}) [DEPRECATED — use getFlow()]`);
+    const response = await withRetry(() => api.get<LoadFlowResult>(`/flows/${id}/load`), 3, 'loadFlow');
+    return response.data;
+};
+
+/**
+ * @deprecated Use updateFlow() instead. Keep until smoke test passes.
+ * POST /flows/:id/save
+ */
+export const saveFlow = async (id: string, body: SaveFlowBody): Promise<SaveFlowView> => {
+    _log(`> saveFlow(${id}) [DEPRECATED — use updateFlow()]`);
+    const response = await api.post<SaveFlowView>(`/flows/${id}/save`, body);
+    return response.data;
+};
+
+/**
+ * @deprecated Use updateFlow() instead. Keep until smoke test passes.
+ * POST /flows/:id/upsert
+ */
+export const upsertFlow = async (id: string, body: SaveFlowBody): Promise<SaveFlowView> => {
+    if (!id) throw new Error('Flow ID is required');
+    _log(`> upsertFlow(${id}) [DEPRECATED — use updateFlow()]`);
+    const response = await api.post<SaveFlowView>(`/flows/${id}/upsert`, body);
+    return response.data;
+};
+
+/**
  * Fetch execution logs for a node
- * TODO: Implement when server API is available
- * @param nodeId - Node ID to fetch logs for
- * @returns Empty array (placeholder)
+ * TODO: Implement when GET /nodes/:id/logs API is available
  */
 export const fetchBlockLogs = async (nodeId: string): Promise<LogEntry[]> => {
     _log(`> fetchBlockLogs(${nodeId})`);
-    // TODO: Implement when GET /nodes/:id/logs API is available
     return [];
 };
 

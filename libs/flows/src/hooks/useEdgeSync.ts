@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 
 import { useMutation } from '@tanstack/react-query';
 
-import { upsertFlow } from '../api';
+import { updateFlow } from '../api';
 
 import type { EdgeData, NodeData } from '@lemoncloud/eureka-flows-api';
 
@@ -68,7 +68,7 @@ export const useEdgeSync = ({ flowId }: UseEdgeSyncOptions): UseEdgeSyncReturn =
     // Use upsertFlow mutation for POST /flows/:id/upsert
     const createMutation = useMutation({
         mutationFn: ({ flowId, edge, nodes }: { flowId: string; edge: EdgeData; nodes?: NodeData[] }) =>
-            upsertFlow(flowId, { nodes: nodes ?? [], edges: [edge] }),
+            updateFlow(flowId, { nodes: nodes ?? [], edges: [edge] }),
     });
 
     // Track pending temp edge IDs waiting for server response
