@@ -68,5 +68,31 @@
     "ports": {
         "in": "입력",
         "out": "출력"
+    },
+    "blocks": {
+        "descriptions": {
+            "input-text": "텍스트를 입력받아 플로우에 전달",
+            "input-image": "이미지를 입력받아 플로우에 전달",
+            "buffer-delay": "입력 패킷을 설정한 시간(ms)만큼 지연",
+            "text-transform": "텍스트 대소문자·공백 변환",
+            "length-validator": "텍스트 길이 유효성 검사",
+            "image-info": "이미지 메타데이터(크기·형식) 조회",
+            "image-resize": "이미지 크기·회전·반전 처리",
+            "image-3-4-filter": "이미지를 3:4 비율로 필터링",
+            "single-output-generator": "AI로 텍스트 1개 생성",
+            "single-image-generator": "AI로 이미지 1개 생성",
+            "mustache-text-generator": "Mustache 템플릿으로 텍스트 조합",
+            "schema-json-converter": "스키마 기반 JSON 변환",
+            "blog-title-generator": "AI로 블로그 제목 생성",
+            "blog-tags-generator": "AI로 블로그 태그 생성",
+            "title-generator": "AI로 제목 생성",
+            "output-console": "실행 로그 출력",
+            "console-log": "실행 로그 출력",
+            "debug-log": "디버그 로그 출력",
+            "output-preview": "결과물 미리보기",
+            "result-preview": "최종 결과 미리보기",
+            "echo": "입력값 그대로 출력",
+            "schema-extractor": "JSON에서 스키마 추출"
+        }
     }
 }

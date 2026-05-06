@@ -1,4 +1,5 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { LayoutGrid, Star } from 'lucide-react';
 
@@ -29,26 +30,30 @@ const BlockItem: React.FC<{
     block: BlockDefinitionWithFrontend;
     onSelect: () => void;
     disabled?: boolean;
-}> = ({ block, onSelect, disabled }) => (
-    <button
-        onClick={onSelect}
-        disabled={disabled}
-        className={cn(
-            'w-full text-left py-3 flex gap-3 items-start',
-            'border-b border-border last:border-0',
-            'hover:bg-accent/30 transition-colors',
-            'disabled:opacity-50 disabled:cursor-not-allowed'
-        )}
-    >
-        <Star className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
-        <div className="min-w-0 w-full">
-            <p className="text-sm font-medium text-foreground">{block.label}</p>
-            {block.description && (
-                <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">{block.description}</p>
+}> = ({ block, onSelect, disabled }) => {
+    const { t } = useTranslation('nodes');
+    const description = t(`blocks.descriptions.${block.type}`, { defaultValue: block.description ?? '' });
+    return (
+        <button
+            onClick={onSelect}
+            disabled={disabled}
+            className={cn(
+                'w-full text-left py-3 flex gap-3 items-start',
+                'border-b border-border last:border-0',
+                'hover:bg-accent/30 transition-colors',
+                'disabled:opacity-50 disabled:cursor-not-allowed'
             )}
-        </div>
-    </button>
-);
+        >
+            <Star className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
+            <div className="min-w-0 w-full">
+                <p className="text-sm font-medium text-foreground">{block.label}</p>
+                {description && (
+                    <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">{description}</p>
+                )}
+            </div>
+        </button>
+    );
+};
 
 export const Sidebar = forwardRef<SidebarRef, SidebarProps>(({ onAddNode, isLoading }, ref) => {
     const blockRegistry = useBlockRegistry();
