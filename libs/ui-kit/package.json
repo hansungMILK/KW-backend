@@ -1,5 +1,6 @@
 {
     "name": "@flows/ui-kit",
+    "description": "shadcn/ui 기반 공통 UI 컴포넌트 모음 (Button, Dialog, Input 등)",
     "version": "0.0.1",
     "private": true,
     "type": "module",

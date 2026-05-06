@@ -1,5 +1,6 @@
 {
     "name": "@flows/shared",
+    "description": "앱 전반에서 공유하는 공통 컴포넌트, 훅, 상수",
     "version": "0.0.1",
     "private": true,
     "type": "module",

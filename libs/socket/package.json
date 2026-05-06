@@ -1,5 +1,6 @@
 {
     "name": "@flows/socket",
+    "description": "WebSocket 연결 및 실시간 이벤트 처리 (노드 실행 상태, 제안 알림 등)",
     "version": "0.0.1",
     "private": true,
     "type": "module",
