@@ -4,6 +4,8 @@ import { imageAdapter } from '../../adapters/ai/image-adapter';
 import { getPublicUrl, putObject } from '../../adapters/aws/s3';
 import { env } from '../../config/env';
 import { traceService } from '../../services/trace-service';
+import { GPT_IMAGE_2_KOREAN_TEXT_RULES, sourceRefsToLabel } from '../shorts/rulepacks/base-shorts-rulepack';
+import { selectShortsRulepack } from '../shorts/topic-router';
 
 import type { BlockExecutor, BlockExecutorResult } from './types';
 
@@ -125,11 +127,19 @@ export const mediaImageBlock: BlockExecutor = {
             caption?: string;
             narration?: string;
             imagePrompt?: string;
+            visualText?: string;
+            sourceRefs?: unknown[];
             durationSec?: number;
         };
         const rawScenes: RawScene[] =
             (inp?.normalizedScenes as RawScene[] | undefined) ?? (inp?.scenes as RawScene[] | undefined) ?? [];
         const metadata = inp?.metadata as Record<string, unknown> | undefined;
+        const rulepack = selectShortsRulepack({
+            title: metadata?.title,
+            keywords: rawScenes.flatMap(scene => (Array.isArray(scene.sourceRefs) ? scene.sourceRefs : [])),
+            presetId: metadata?.presetId,
+        });
+        const sources = metadata?.sources;
         const frameTitle =
             (typeof metadata?.title === 'string' ? metadata.title : undefined) ??
             (typeof inp?.title === 'string' ? inp.title : undefined) ??
@@ -143,6 +153,9 @@ export const mediaImageBlock: BlockExecutor = {
             narration: string;
             durationSec: number;
             prompt: string;
+            visualText?: string;
+            sourceRefs?: unknown[];
+            sourceLabel?: string;
         }> =
             rawScenes.length > 0
                 ? rawScenes.map((s, i) => ({
@@ -150,10 +163,15 @@ export const mediaImageBlock: BlockExecutor = {
                       caption: s.caption ?? s.narration?.slice(0, 22) ?? `장면 ${i + 1}`,
                       narration: s.narration ?? '',
                       durationSec: s.durationSec ?? 5,
+                      visualText: s.visualText ?? s.caption,
+                      sourceRefs: s.sourceRefs ?? [],
+                      sourceLabel: sourceRefsToLabel(s.sourceRefs, sources),
                       prompt: buildShortsFramePrompt(
                           frameTitle,
-                          s.caption ?? s.narration ?? `장면 ${i + 1}`,
-                          s.imagePrompt
+                          s.visualText ?? s.caption ?? s.narration ?? `장면 ${i + 1}`,
+                          s.imagePrompt,
+                          sourceRefsToLabel(s.sourceRefs, sources),
+                          rulepack.imagePrompt
                       ),
                   }))
                 : dummy.images.map(img => ({
@@ -161,6 +179,9 @@ export const mediaImageBlock: BlockExecutor = {
                       caption: img.prompt.slice(0, 20),
                       narration: '',
                       durationSec: 5,
+                      visualText: img.prompt.slice(0, 20),
+                      sourceRefs: [],
+                      sourceLabel: '출처 확인 필요',
                       prompt: img.prompt,
                   }));
 
@@ -176,6 +197,9 @@ export const mediaImageBlock: BlockExecutor = {
             caption?: string;
             narration?: string;
             durationSec?: number;
+            visualText?: string;
+            sourceRefs?: unknown[];
+            sourceLabel?: string;
         };
 
         const images: ImageResult[] = [];
@@ -218,6 +242,9 @@ export const mediaImageBlock: BlockExecutor = {
                     caption: scene.caption,
                     narration: scene.narration,
                     durationSec: scene.durationSec,
+                    visualText: scene.visualText,
+                    sourceRefs: scene.sourceRefs,
+                    sourceLabel: scene.sourceLabel,
                 });
 
                 assets.push({
@@ -233,6 +260,9 @@ export const mediaImageBlock: BlockExecutor = {
                         caption: scene.caption,
                         narration: scene.narration,
                         durationSec: scene.durationSec,
+                        visualText: scene.visualText,
+                        sourceRefs: scene.sourceRefs,
+                        sourceLabel: scene.sourceLabel,
                         durationMs,
                     },
                 });
@@ -275,20 +305,36 @@ export const mediaImageBlock: BlockExecutor = {
         }
 
         return {
-            output: { title: frameTitle, images, normalizedScenes: scenePrompts },
+            output: {
+                title: frameTitle,
+                images,
+                normalizedScenes: scenePrompts,
+                ...(metadata ? { metadata } : {}),
+            },
             durationMs: Date.now() - start,
             assets,
         };
     },
 };
 
-function buildShortsFramePrompt(title: string, caption: string, visualPrompt?: string): string {
+function buildShortsFramePrompt(
+    title: string,
+    caption: string,
+    visualPrompt?: string,
+    sourceLabel?: string,
+    presetImageRules?: string
+): string {
     return [
-        'Create one complete 9:16 Korean YouTube Shorts frame, not a poster mockup.',
-        `Persistent top title band: black background, huge bold Korean title text "${title}" in neon yellow and white, similar to Korean Shorts thumbnails.`,
-        `Scene caption: large bold Korean text "${caption}" with black stroke, placed over the image without covering key characters.`,
-        'Style: clean viral educational shorts, high contrast, readable Korean typography, dynamic but not cluttered.',
+        'Create one complete 9:16 Korean YouTube Shorts frame with GPT-image-2, not a poster mockup.',
+        GPT_IMAGE_2_KOREAN_TEXT_RULES,
+        `Persistent top title band: black background, huge bold Korean title text "${title}" in neon yellow and white.`,
+        `Main scene caption: large bold Korean text "${caption.slice(0, 24)}" with black stroke, placed over the image without covering key characters.`,
+        sourceLabel ? `Optional tiny source label near bottom edge: "${sourceLabel.slice(0, 36)}".` : '',
+        presetImageRules || '',
+        'Style: clean viral Korean Shorts, high contrast, dynamic but not cluttered.',
         'Leave safe margins for mobile viewing.',
         visualPrompt || 'Korean university admission and student study scene, cinematic educational illustration.',
-    ].join(' ');
+    ]
+        .filter(Boolean)
+        .join(' ');
 }

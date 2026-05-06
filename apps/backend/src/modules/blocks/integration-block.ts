@@ -18,14 +18,22 @@ import type { BlockExecutor, BlockExecutorResult } from './types';
  */
 
 interface UpstreamData {
-    search?: { keywords?: string[]; articles?: Array<{ title: string }> };
+    search?: { keywords?: string[]; articles?: Array<{ title: string; url?: string; source?: string }> };
     content?: {
         hook?: string;
         scenes?: Array<{ narration?: string; imagePrompt?: string }>;
         cta?: string;
         totalDurationSec?: number;
     };
-    metadata?: { title?: string; hook?: string; cta?: string; totalDurationSec?: number; sceneCount?: number };
+    metadata?: {
+        title?: string;
+        hook?: string;
+        cta?: string;
+        totalDurationSec?: number;
+        sceneCount?: number;
+        sources?: Array<{ id?: string; title?: string; url?: string; source?: string; publishedAt?: string | null }>;
+        presetId?: string;
+    };
     analysis?: { safetyScore?: number; qualityScore?: number; approved?: boolean; issues?: unknown[] };
     mediaImage?: { images?: Array<{ url: string; sceneNumber: number; width: number; height: number }> };
     mediaTts?: { audio?: { url: string; durationSec: number; format: string } };
@@ -92,7 +100,14 @@ function generateDescription(upstream: UpstreamData): string {
     const hook = upstream.content?.hook || upstream.metadata?.hook || '';
     const cta = upstream.content?.cta || upstream.metadata?.cta || '구독하고 매일 입시 정보를 받아보세요!';
     const keywords = upstream.search?.keywords?.join(', ') || '입시';
-    return `${hook}\n\n${cta}\n\n키워드: ${keywords}`;
+    const sourceLines = (upstream.metadata?.sources || [])
+        .slice(0, 3)
+        .map(
+            source =>
+                `- ${source.source || source.title || 'source'}${source.publishedAt ? ` (${source.publishedAt})` : ''}${source.url ? ` ${source.url}` : ''}`
+        );
+    const sourcesText = sourceLines.length > 0 ? `\n\n출처:\n${sourceLines.join('\n')}` : '';
+    return `${hook}\n\n${cta}\n\n키워드: ${keywords}${sourcesText}`;
 }
 
 function generateHashtags(upstream: UpstreamData): string[] {
@@ -244,8 +259,14 @@ export const integrationBlock: BlockExecutor = {
                 : undefined,
             artifacts,
             warnings: warnings.length > 0 ? warnings : undefined,
+            sources: upstream.metadata?.sources || [],
+            presetId: upstream.metadata?.presetId,
             createdAt: new Date().toISOString(),
-            seoMetadata: { category: 'Education', language: 'ko', targetAudience: '수험생,학부모' },
+            seoMetadata: {
+                category: upstream.metadata?.presetId === 'education-admission' ? 'Education' : 'Shorts',
+                language: 'ko',
+                targetAudience: upstream.metadata?.presetId === 'education-admission' ? '수험생,학부모' : 'general',
+            },
         };
 
         return { output, durationMs: Date.now() - start };

@@ -2,6 +2,7 @@ import { AnalysisOutputSchema } from './types';
 import { openaiAdapter } from '../../adapters/ai/openai-adapter';
 import { env } from '../../config/env';
 import { log } from '../../utils/logger';
+import { selectShortsRulepack } from '../shorts/topic-router';
 
 import type { BlockExecutor, BlockExecutorResult } from './types';
 
@@ -16,6 +17,7 @@ const MAX_SCENE_COUNT = 15;
 
 const SAFETY_THRESHOLD = 70;
 const QUALITY_THRESHOLD = 60;
+const ADMISSION_SAFE_VIOLENCE_TERMS = ['학교폭력', '학폭', '폭력 조치사항'];
 
 // ── Prompts ───────────────────────────────────────────────────────────────────
 
@@ -42,8 +44,11 @@ interface Issue {
 
 interface NormalizedScene {
     sceneNumber?: unknown;
+    caption?: unknown;
     narration?: unknown;
     imagePrompt?: unknown;
+    visualText?: unknown;
+    sourceRefs?: unknown;
     keywords?: unknown;
 }
 
@@ -62,7 +67,10 @@ function dummyAnalysis(): BlockExecutorResult {
 
 // ── Rule-based checks ─────────────────────────────────────────────────────────
 
-function runRuleChecks(scenes: NormalizedScene[]): {
+function runRuleChecks(
+    scenes: NormalizedScene[],
+    presetId: string
+): {
     safetyScore: number;
     qualityScore: number;
     issues: Issue[];
@@ -85,6 +93,9 @@ function runRuleChecks(scenes: NormalizedScene[]): {
     for (const scene of scenes) {
         const sceneNum = typeof scene.sceneNumber === 'number' ? scene.sceneNumber : undefined;
         const narration = typeof scene.narration === 'string' ? scene.narration : '';
+        const caption = typeof scene.caption === 'string' ? scene.caption : '';
+        const visualText = typeof scene.visualText === 'string' ? scene.visualText : caption;
+        const sourceRefs = Array.isArray(scene.sourceRefs) ? scene.sourceRefs : [];
 
         // Narration length
         if (narration.length < MIN_NARRATION_CHARS) {
@@ -109,7 +120,7 @@ function runRuleChecks(scenes: NormalizedScene[]): {
             .toLowerCase();
 
         for (const banned of BANNED_KEYWORDS) {
-            if (combinedText.includes(banned)) {
+            if (hasBannedKeyword(combinedText, banned, presetId)) {
                 issues.push({
                     severity: 'high',
                     message: `금지 키워드 "${banned}" 감지됨.`,
@@ -118,6 +129,37 @@ function runRuleChecks(scenes: NormalizedScene[]): {
                 safetyDeductions += 20;
                 break; // one deduction per scene
             }
+        }
+
+        if (presetId === 'education-admission') {
+            const factualText = [caption, visualText, narration].join(' ');
+            const hasExactClaim = hasAdmissionExactClaim(factualText);
+            if (hasExactClaim && sourceRefs.length === 0) {
+                issues.push({
+                    severity: 'high',
+                    message: '입시 날짜/전형/점수/마감 등 확정성 정보에 sourceRefs가 없습니다.',
+                    sceneNumber: sceneNum,
+                });
+                qualityDeductions += 8;
+            }
+
+            if (hasAdmissionGuaranteeClaim(factualText)) {
+                issues.push({
+                    severity: 'high',
+                    message: '입시 콘텐츠에 보장/과장 표현이 포함되어 있습니다.',
+                    sceneNumber: sceneNum,
+                });
+                safetyDeductions += 12;
+            }
+        }
+
+        if (visualText.length > 24) {
+            issues.push({
+                severity: 'medium',
+                message: `이미지 안 텍스트가 너무 깁니다 (${visualText.length}자). GPT-image-2용 문구는 24자 이하 권장.`,
+                sceneNumber: sceneNum,
+            });
+            qualityDeductions += 4;
         }
     }
 
@@ -139,9 +181,35 @@ function runRuleChecks(scenes: NormalizedScene[]): {
     return { safetyScore, qualityScore, issues };
 }
 
+function hasBannedKeyword(text: string, banned: string, presetId: string): boolean {
+    if (banned === '폭력' && presetId === 'education-admission') {
+        const normalized = ADMISSION_SAFE_VIOLENCE_TERMS.reduce(
+            (current, safeTerm) => current.replaceAll(safeTerm, ''),
+            text
+        );
+        return normalized.includes(banned);
+    }
+    return text.includes(banned);
+}
+
+function hasAdmissionGuaranteeClaim(text: string): boolean {
+    return (
+        /100%/.test(text) ||
+        /합격\s*보장|반드시\s*합격/.test(text) ||
+        /무조건\s*(합격|붙|가능|성공|유리|불리|오른|떨어|된다|돼|됩니다)/.test(text)
+    );
+}
+
+function hasAdmissionExactClaim(text: string): boolean {
+    return (
+        /\d{4}|\d+월|\d+일|\d+%|\d+등급|\d+점/.test(text) ||
+        /정시|수시|모집|마감|원서|전형|수능|내신|등급|컷|경쟁률|반영/.test(text)
+    );
+}
+
 // ── AI enhancement ────────────────────────────────────────────────────────────
 
-async function runAIReview(scenes: NormalizedScene[], ruleIssues: Issue[]): Promise<Issue[]> {
+async function runAIReview(scenes: NormalizedScene[], ruleIssues: Issue[], analysisPrompt: string): Promise<Issue[]> {
     const narrationSummary = scenes
         .map(s => `씬 ${String(s.sceneNumber ?? '?')}: ${String(s.narration ?? '')}`)
         .join('\n');
@@ -149,7 +217,7 @@ async function runAIReview(scenes: NormalizedScene[], ruleIssues: Issue[]): Prom
     let response;
     try {
         response = await openaiAdapter.chatJson({
-            systemPrompt: ANALYSIS_SYSTEM_PROMPT,
+            systemPrompt: `${ANALYSIS_SYSTEM_PROMPT}\n\n${analysisPrompt}`,
             userMessage: `다음 씬 나레이션을 검토해주세요:\n\n${narrationSummary}`,
             maxTokens: 512,
         });
@@ -221,16 +289,21 @@ export const analysisBlock: BlockExecutor = {
                 metadata = obj['metadata'] as Record<string, unknown>;
             }
         }
+        const rulepack = selectShortsRulepack({
+            presetId: metadata?.['presetId'],
+            title: metadata?.['title'],
+            keywords: scenes.flatMap(scene => (Array.isArray(scene.keywords) ? scene.keywords : [])),
+        });
 
         if (scenes.length === 0) {
             log.warn('[analysis-block] No normalizedScenes found in input, running checks on empty set');
         }
 
         // Rule-based checks (always run)
-        const { safetyScore, qualityScore, issues: ruleIssues } = runRuleChecks(scenes);
+        const { safetyScore, qualityScore, issues: ruleIssues } = runRuleChecks(scenes, rulepack.id);
 
         // AI enhancement in real provider mode; non-fatal if it fails.
-        const allIssues = await runAIReview(scenes, ruleIssues);
+        const allIssues = await runAIReview(scenes, ruleIssues, rulepack.analysisPrompt);
 
         const approved = safetyScore >= SAFETY_THRESHOLD && qualityScore >= QUALITY_THRESHOLD;
 
@@ -258,6 +331,7 @@ export const analysisBlock: BlockExecutor = {
                 ...(validated.data as Record<string, unknown>),
                 normalizedScenes: scenes,
                 ...(metadata ? { metadata } : {}),
+                presetId: rulepack.id,
             },
             durationMs: Date.now() - start,
         };

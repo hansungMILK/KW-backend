@@ -259,9 +259,8 @@ export const runService = {
         await runRepo.putRunNode(runNode);
 
         await queue.send({
-            type: 'EXECUTE_NODE',
+            type: 'EXECUTE_RUN',
             runId,
-            nodeId,
             executionId: generateNumericId(),
             timestamp: now,
         });

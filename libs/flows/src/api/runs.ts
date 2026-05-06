@@ -1,6 +1,6 @@
 import { api } from '@flows/web-core';
 
-import type { RunCreateResponse } from '@flows/contracts';
+import type { RunCreateResponse, RunGetResponse, RunNode, RunNodesListResponse } from '@flows/contracts';
 
 const _log = console.log.bind(console, '[runs-api]');
 
@@ -25,4 +25,24 @@ export const createFlowRun = async (flowId: string): Promise<RunView> => {
         status: response.data.status,
         createdAt: Date.parse(response.data.createdAt),
     };
+};
+
+/**
+ * Get a run by ID
+ * GET /runs/{runId}
+ */
+export const getRun = async (runId: string): Promise<RunGetResponse> => {
+    _log(`> getRun(${runId})`);
+    const response = await api.get<RunGetResponse>(`/runs/${runId}`);
+    return response.data;
+};
+
+/**
+ * Get run node execution snapshots
+ * GET /runs/{runId}/nodes
+ */
+export const getRunNodes = async (runId: string): Promise<RunNode[]> => {
+    _log(`> getRunNodes(${runId})`);
+    const response = await api.get<RunNodesListResponse>(`/runs/${runId}/nodes`);
+    return response.data.items;
 };

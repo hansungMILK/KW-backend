@@ -16,6 +16,8 @@ function dummyData(): BlockExecutorResult {
                 narration: '[dummy] 매년 11월, 수험생들의 운명을 가르는 수능이 다가옵니다.',
                 imagePrompt:
                     '[dummy] A student nervously studying late at night, books and notes spread on desk, warm lamp light, cinematic',
+                visualText: '[dummy] 입시가 바뀐다',
+                sourceRefs: ['source-1'],
                 durationSec: 6,
                 keywords: ['수능', '수험생', '11월'],
             },
@@ -25,6 +27,8 @@ function dummyData(): BlockExecutorResult {
                 narration: '[dummy] 2026학년도 수능, 국어 비문학이 달라집니다.',
                 imagePrompt:
                     '[dummy] Close-up of Korean language exam paper with highlighted passages, clean white background',
+                visualText: '[dummy] 국어가 변수다',
+                sourceRefs: ['source-1'],
                 durationSec: 6,
                 keywords: ['2026', '국어', '비문학'],
             },
@@ -34,6 +38,8 @@ function dummyData(): BlockExecutorResult {
                 narration: '[dummy] 수학 영역은 여전히 수험생들의 최대 난관.',
                 imagePrompt:
                     '[dummy] Complex math equations floating in a blue abstract digital space, dramatic lighting',
+                visualText: '[dummy] 수학은 여전히 벽',
+                sourceRefs: ['source-2'],
                 durationSec: 6,
                 keywords: ['수학', '난관', '영역'],
             },
@@ -43,6 +49,8 @@ function dummyData(): BlockExecutorResult {
                 narration: '[dummy] 전문가들은 올해 수능 난이도가 작년보다 소폭 높아질 것으로 예측합니다.',
                 imagePrompt:
                     '[dummy] Expert teacher pointing at a graph showing difficulty trends, professional setting',
+                visualText: '[dummy] 난도 상승 예고',
+                sourceRefs: ['source-2'],
                 durationSec: 6,
                 keywords: ['난이도', '전문가', '예측'],
             },
@@ -51,6 +59,8 @@ function dummyData(): BlockExecutorResult {
                 caption: '[dummy] 정시 일정 체크',
                 narration: '[dummy] 정시 원서 접수는 12월 초, 지금부터 전략이 필요합니다.',
                 imagePrompt: '[dummy] Calendar showing December dates circled in red, urgency visual',
+                visualText: '[dummy] 정시 일정 체크',
+                sourceRefs: ['source-2'],
                 durationSec: 6,
                 keywords: ['정시', '원서접수', '전략'],
             },
@@ -60,6 +70,8 @@ function dummyData(): BlockExecutorResult {
                 narration: '[dummy] 합격의 비결은 단 하나 — 꾸준한 기출 분석과 약점 보완.',
                 imagePrompt:
                     '[dummy] Stack of past exam papers with sticky notes, organized study setup, motivational atmosphere',
+                visualText: '[dummy] 기출이 답이다',
+                sourceRefs: ['source-3'],
                 durationSec: 6,
                 keywords: ['합격', '기출', '약점보완'],
             },
@@ -69,6 +81,8 @@ function dummyData(): BlockExecutorResult {
                 narration: '[dummy] 지금 바로 전략을 세우세요. 당신의 합격을 응원합니다!',
                 imagePrompt:
                     '[dummy] Triumphant student raising fists in celebration, graduation cap flying, sunny campus background',
+                visualText: '[dummy] 지금 전략 세워라',
+                sourceRefs: ['source-3'],
                 durationSec: 6,
                 keywords: ['응원', '합격', '전략'],
             },
@@ -77,6 +91,8 @@ function dummyData(): BlockExecutorResult {
                 caption: '[dummy] 점수보다 전략',
                 narration: '[dummy] 같은 점수라도 대학별 반영 방식에 따라 결과가 달라질 수 있습니다.',
                 imagePrompt: '[dummy] Korean admission score report and strategy graph, bold vertical shorts layout',
+                visualText: '[dummy] 점수보다 전략',
+                sourceRefs: ['source-2'],
                 durationSec: 6,
                 keywords: ['점수', '반영비율', '전략'],
             },
@@ -86,6 +102,8 @@ function dummyData(): BlockExecutorResult {
                 narration: '[dummy] 담임 상담과 입시 자료를 함께 보며 지원 가능성을 좁혀야 합니다.',
                 imagePrompt:
                     '[dummy] Student and counselor planning university admission options, clean educational style',
+                visualText: '[dummy] 상담은 빠르게',
+                sourceRefs: ['source-1'],
                 durationSec: 6,
                 keywords: ['상담', '지원가능성', '자료'],
             },
@@ -94,6 +112,8 @@ function dummyData(): BlockExecutorResult {
                 caption: '[dummy] 마지막 체크',
                 narration: '[dummy] 마감일, 제출 서류, 모집 단위까지 마지막에 한 번 더 확인하세요.',
                 imagePrompt: '[dummy] Smartphone admission checklist with Korean bold text, vertical shorts frame',
+                visualText: '[dummy] 마지막 체크',
+                sourceRefs: ['source-2'],
                 durationSec: 6,
                 keywords: ['마감일', '제출서류', '체크리스트'],
             },
@@ -104,6 +124,18 @@ function dummyData(): BlockExecutorResult {
             sceneCount: 10,
             totalDurationSec: 60,
             language: 'ko',
+            presetId: 'education-admission',
+            sources: [
+                {
+                    id: 'source-1',
+                    title: '[dummy] 2026 수능 출제 경향 분석',
+                    url: 'fake://news.example.com/article/001',
+                    source: '[dummy] EduNews',
+                    publishedAt: null,
+                    sourceType: 'other',
+                    confidence: 0.5,
+                },
+            ],
         },
     };
     return { output, durationMs: Date.now() - start };
@@ -113,9 +145,12 @@ function dummyData(): BlockExecutorResult {
 
 interface RawScene {
     sceneNumber?: unknown;
+    imageSlot?: unknown;
     caption?: unknown;
     narration?: unknown;
     imagePrompt?: unknown;
+    visualText?: unknown;
+    sourceRefs?: unknown;
     durationSec?: unknown;
 }
 
@@ -147,6 +182,8 @@ function normalizeContent(input: unknown): BlockExecutorResult {
     let title = '';
     let hook = '';
     let cta = '';
+    let sources: unknown[] = [];
+    let presetId = '';
 
     if (input != null && typeof input === 'object' && !Array.isArray(input)) {
         const obj = input as Record<string, unknown>;
@@ -155,6 +192,8 @@ function normalizeContent(input: unknown): BlockExecutorResult {
         if (typeof obj['hook'] === 'string') hook = obj['hook'];
         if (typeof obj['cta'] === 'string') cta = obj['cta'];
         if (typeof obj['totalDurationSec'] === 'number') totalDurationSec = obj['totalDurationSec'];
+        if (Array.isArray(obj['sources'])) sources = obj['sources'];
+        if (typeof obj['presetId'] === 'string') presetId = obj['presetId'];
 
         if (Array.isArray(obj['scenes'])) {
             rawScenes = obj['scenes'] as RawScene[];
@@ -163,9 +202,13 @@ function normalizeContent(input: unknown): BlockExecutorResult {
 
     const normalizedScenes = rawScenes.map((scene, idx) => {
         const sceneNumber = typeof scene.sceneNumber === 'number' ? scene.sceneNumber : idx + 1;
+        const imageSlot = typeof scene.imageSlot === 'string' ? scene.imageSlot : `[Image #${sceneNumber}]`;
         const caption = typeof scene.caption === 'string' ? scene.caption : '';
         const narration = typeof scene.narration === 'string' ? scene.narration : '';
         const imagePrompt = typeof scene.imagePrompt === 'string' ? scene.imagePrompt : '';
+        const visualText =
+            typeof scene.visualText === 'string' ? scene.visualText : caption.length > 0 ? caption : undefined;
+        const sourceRefs = Array.isArray(scene.sourceRefs) ? scene.sourceRefs : [];
         const durationSec = typeof scene.durationSec === 'number' ? scene.durationSec : 5;
 
         // Derive per-scene keywords: prefer upstream list sliced per scene,
@@ -173,7 +216,17 @@ function normalizeContent(input: unknown): BlockExecutorResult {
         const sceneKeywords =
             upstreamKeywords.length > 0 ? upstreamKeywords.slice(0, Math.min(3, upstreamKeywords.length)) : [];
 
-        return { sceneNumber, caption, narration, imagePrompt, durationSec, keywords: sceneKeywords };
+        return {
+            sceneNumber,
+            imageSlot,
+            caption,
+            narration,
+            imagePrompt,
+            visualText,
+            sourceRefs,
+            durationSec,
+            keywords: sceneKeywords,
+        };
     });
 
     // If no scenes were extracted (edge case: empty content), produce placeholder
@@ -183,9 +236,12 @@ function normalizeContent(input: unknown): BlockExecutorResult {
             : [
                   {
                       sceneNumber: 1,
+                      imageSlot: '[Image #1]',
                       caption: '',
                       narration: '',
                       imagePrompt: '',
+                      visualText: '',
+                      sourceRefs: [],
                       durationSec: 5,
                       keywords: upstreamKeywords.slice(0, 3),
                   },
@@ -202,6 +258,8 @@ function normalizeContent(input: unknown): BlockExecutorResult {
             title: title || undefined,
             hook: hook || undefined,
             cta: cta || undefined,
+            sources,
+            presetId: presetId || undefined,
         },
     };
 

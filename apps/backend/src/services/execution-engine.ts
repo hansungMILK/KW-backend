@@ -204,9 +204,13 @@ export const executionEngine = {
 
             const failedNode = (await runRepo.listRunNodes(runId)).find(n => n.status === 'FAILED');
             const failedNodeId = failedNode?.nodeId ?? 'unknown';
+            const failedErrorCode = failedNode?.errorCode ?? null;
+            const failedErrorMessage = failedNode?.errorMessage ?? `Run failed at node ${failedNodeId}`;
             await runRepo.updateRunStatus(runId, 'FAILED', {
                 finalOutputSummary: {
                     failedNodeId,
+                    errorCode: failedErrorCode,
+                    errorMessage: failedErrorMessage,
                     failedAt: new Date().toISOString(),
                 },
             });
@@ -220,6 +224,8 @@ export const executionEngine = {
                     flowId: run.flowId,
                     status: 'FAILED',
                     failedNodeId,
+                    errorCode: failedErrorCode,
+                    error: failedErrorMessage,
                     timestamp: Date.now(),
                 });
             } catch {
@@ -376,6 +382,50 @@ export const executionEngine = {
                 } catch {
                     /* non-fatal */
                 }
+            }
+
+            if (node.blockType === 'analysis' && output['approved'] === false) {
+                const issueSummary = Array.isArray(output['issues'])
+                    ? output['issues']
+                          .slice(0, 3)
+                          .map(issue => {
+                              if (!issue || typeof issue !== 'object') return String(issue);
+                              const issueObj = issue as Record<string, unknown>;
+                              return String(issueObj['message'] ?? JSON.stringify(issueObj));
+                          })
+                          .join(' / ')
+                    : 'analysis rejected the content';
+                const errorMessage = `Analysis rejected content: ${issueSummary}`;
+
+                await runRepo.updateRunNodeStatus(runId, nodeId, 'FAILED', {
+                    errorCode: 'ANALYSIS_REJECTED',
+                    errorMessage,
+                    outputPayload: { ...output, durationMs },
+                });
+
+                if (runForNode) {
+                    try {
+                        await wsService.broadcastToFlow(runForNode.flowId, {
+                            type: 'node.failed',
+                            id: nodeId,
+                            runId,
+                            flowId: runForNode.flowId,
+                            nodeId,
+                            status: 'FAILED',
+                            errorCode: 'ANALYSIS_REJECTED',
+                            errorMessage,
+                            timestamp: Date.now(),
+                        });
+                    } catch {
+                        /* non-fatal */
+                    }
+                }
+                try {
+                    await traceService.record(runId, nodeId, 'ERROR', `Node ${nodeId} failed: ${errorMessage}`);
+                } catch {
+                    /* non-fatal */
+                }
+                return;
             }
 
             await runRepo.updateRunNodeStatus(runId, nodeId, 'COMPLETED', {

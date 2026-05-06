@@ -2,6 +2,7 @@ import { MessageCreateParamsSchema, MessageCreateRequestSchema } from '@flows/co
 
 import { env } from '../../../config/env';
 import { getOrchestrator } from '../../../modules/orchestrator';
+import { classifyMessageIntent, generateChatReply } from '../../../modules/orchestrator/chat-assistant';
 import { flowRepo } from '../../../repositories/flow-repository';
 import { messageRepo } from '../../../repositories/message-repository';
 import { proposalRepo } from '../../../repositories/proposal-repository';
@@ -13,9 +14,6 @@ import { badGateway, badRequest, created, notFound, unprocessableJson } from '..
 
 import type { ApiKeyProvider, Message, Proposal } from '@flows/contracts';
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
-
-const WORKFLOW_INTENT_PATTERN =
-    /(만들|제작|생성|설계|자동화|실행|쇼츠|영상|비디오|워크플로|플로우|블록|노드|workflow|flow|make|create|generate|build|run|shorts|video)/i;
 
 const ORCHESTRATOR_PROVIDER_BY_MODE: Record<string, ApiKeyProvider | undefined> = {
     openai: 'openai',
@@ -40,10 +38,10 @@ const ensureOrchestratorProviderKey = async (): Promise<APIGatewayProxyResult | 
  * POST /flows/{flowId}/messages
  *
  * 1. Save USER message
- * 2. Call orchestrator → generate proposal
- * 3. Save proposal
- * 4. Save ASSISTANT message
- * 5. Return { message, proposal, assistantMessage }
+ * 2. Route via AI intent classifier
+ * 3. For chat: save ASSISTANT text message
+ * 4. For workflow: call orchestrator → generate proposal
+ * 5. Return { message, proposal?, assistantMessage }
  */
 const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
     const flowId = getPathParam(event, 'flowId');
@@ -65,6 +63,7 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
 
     const now = new Date().toISOString();
     const fid = paramsParsed.data.flowId;
+    const { items: previousMessages } = await messageRepo.listByFlow(fid, 12);
 
     // 1. Save USER message
     const userMessage: Message = {
@@ -77,9 +76,30 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
     };
     await messageRepo.put(userMessage);
 
-    if (!WORKFLOW_INTENT_PATTERN.test(bodyParsed.data.content)) {
+    const intent = await classifyMessageIntent(bodyParsed.data.content, previousMessages, currentContext);
+
+    if (intent.action === 'chat') {
+        const assistantText = await generateChatReply(
+            bodyParsed.data.content,
+            [...previousMessages, userMessage],
+            currentContext
+        );
+        const assistantMessage: Message = {
+            messageId: generateNumericId(),
+            flowId: fid,
+            role: 'ASSISTANT',
+            messageType: 'TEXT',
+            content: assistantText,
+            metadata: {
+                intent,
+            },
+            createdAt: now,
+        };
+        await messageRepo.put(assistantMessage);
+
         return created({
             message: userMessage,
+            assistantMessage,
         });
     }
 

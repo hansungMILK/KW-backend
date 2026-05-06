@@ -26,6 +26,7 @@ provider:
         EXECUTION_QUEUE_URL: !If [IsLocalStage, '', !Ref ExecutionQueue]
         S3_BUCKET: !If [IsLocalStage, 'eureka-flows-local', !Ref AssetsBucket]
         CLOUDFRONT_DOMAIN: !If [IsLocalStage, '', !GetAtt AssetsDistribution.DomainName]
+        LOCAL_QUEUE_MODE: ${env:LOCAL_QUEUE_MODE, 'async'}
         WS_CALLBACK_ENDPOINT:
             !If [
                 IsLocalStage,
@@ -34,6 +35,8 @@ provider:
             ]
         FFMPEG_PATH: ${self:custom.ffmpegPath.${self:provider.stage}, '/opt/bin/ffmpeg'}
         FFMPEG_TIMEOUT_MS: ${env:FFMPEG_TIMEOUT_MS, '840000'}
+        FFMPEG_FONT_FILE: ${env:FFMPEG_FONT_FILE, '/opt/fonts/NotoSansCJKkr-Regular.otf'}
+        SHORTS_FFMPEG_OVERLAY: ${env:SHORTS_FFMPEG_OVERLAY, 'source'}
         ORCHESTRATOR_MODE: ${env:ORCHESTRATOR_MODE, 'openai'}
         AI_PROVIDER: ${env:AI_PROVIDER, 'openai'}
         OPENAI_MODEL: ${env:OPENAI_MODEL, 'gpt-5.4-nano'}
@@ -41,7 +44,7 @@ provider:
         OPENAI_VISION_MODEL: ${env:OPENAI_VISION_MODEL, 'gpt-5.4-nano'}
         OPENAI_SEARCH_MODEL: ${env:OPENAI_SEARCH_MODEL, 'gpt-5.4-nano'}
         OPENAI_IMAGE_MODEL: ${env:OPENAI_IMAGE_MODEL, 'gpt-image-2'}
-        OPENAI_IMAGE_QUALITY: ${env:OPENAI_IMAGE_QUALITY, 'low'}
+        OPENAI_IMAGE_QUALITY: ${env:OPENAI_IMAGE_QUALITY, 'medium'}
         OPENAI_TTS_MODEL: ${env:OPENAI_TTS_MODEL, 'gpt-4o-mini-tts'}
         OPENAI_TTS_VOICE: ${env:OPENAI_TTS_VOICE, 'nova'}
         LOCAL_ASSET_BASE_URL: ${env:LOCAL_ASSET_BASE_URL, 'http://localhost:8800/_local-assets'}

@@ -18,21 +18,37 @@ export const mediaVideoBlock: BlockExecutor = {
         // The execution engine merges both upstream parent outputs into this input.
         const inp = input as Record<string, unknown> | null;
 
-        type RawImage = { url?: string; sceneNumber?: number; durationSec?: number; caption?: string };
-        type RawScene = { sceneNumber?: number; durationSec?: number; caption?: string };
+        type RawImage = {
+            url?: string;
+            sceneNumber?: number;
+            durationSec?: number;
+            caption?: string;
+            visualText?: string;
+            sourceLabel?: string;
+        };
+        type RawScene = {
+            sceneNumber?: number;
+            durationSec?: number;
+            caption?: string;
+            visualText?: string;
+            sourceLabel?: string;
+        };
         const rawImages: RawImage[] = (inp?.images as RawImage[] | undefined) ?? [];
         const rawScenes: RawScene[] = (inp?.normalizedScenes as RawScene[] | undefined) ?? [];
+        const metadata = inp?.metadata as Record<string, unknown> | undefined;
 
         const images = rawImages
             .filter(img => typeof img.url === 'string')
             .map(img => ({
                 url: img.url as string,
                 durationSec: durationForImage(img, rawScenes),
+                title: typeof metadata?.title === 'string' ? metadata.title : undefined,
+                caption: img.visualText || img.caption,
+                sourceLabel: img.sourceLabel || sourceLabelForImage(img, rawScenes),
             }));
 
         const audioObj = inp?.audio as { url?: string } | undefined;
         const audioUrl = typeof audioObj?.url === 'string' ? audioObj.url : undefined;
-        const metadata = inp?.metadata as Record<string, unknown> | undefined;
 
         if (images.length === 0) {
             throw new Error('media-video requires image outputs from media-image');
@@ -117,7 +133,16 @@ function durationForImage(
 ): number {
     if (typeof image.durationSec === 'number' && image.durationSec > 0) return image.durationSec;
     const matchingScene = scenes.find(scene => scene.sceneNumber === image.sceneNumber);
-    if (typeof matchingScene?.durationSec === 'number' && matchingScene.durationSec > 0)
-        {return matchingScene.durationSec;}
+    if (typeof matchingScene?.durationSec === 'number' && matchingScene.durationSec > 0) {
+        return matchingScene.durationSec;
+    }
     return 5;
+}
+
+function sourceLabelForImage(
+    image: { sceneNumber?: number },
+    scenes: Array<{ sceneNumber?: number; sourceLabel?: string }>
+): string | undefined {
+    const matchingScene = scenes.find(scene => scene.sceneNumber === image.sceneNumber);
+    return matchingScene?.sourceLabel;
 }

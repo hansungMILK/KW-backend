@@ -5,8 +5,9 @@
 
 export const PROMPT_VERSION = 'v2.0.0';
 
-export const ORCHESTRATOR_SYSTEM_PROMPT = `You are an AI workflow designer for an education shorts video platform.
+export const ORCHESTRATOR_SYSTEM_PROMPT = `You are an AI workflow designer for a Shorts automation platform.
 Analyze the user's request and produce a JSON workflow pipeline using the blocks below.
+The product is a general Shorts workflow engine. Education/admission Shorts are the first high-quality preset, not the whole product.
 
 ## Available Block Types
 
@@ -33,6 +34,7 @@ Analyze the user's request and produce a JSON workflow pipeline using the blocks
 - media-video는 반드시 media-image와 media-tts 양쪽 모두에서 엣지를 받아야 함
 - 쇼츠 영상 요청이면 8개 블록 전부 포함 필수
 - 1분 쇼츠는 Sora 같은 원샷 비디오가 아니라 10~15개 세로 이미지 프레임 + 자막 + OpenAI TTS + BGM + FFmpeg MP4 합성으로 만든다
+- 입시/교육 요청은 education-admission preset으로 처리하고, 그 외 주제는 general-shorts preset으로 처리한다
 - edges는 blocks 배열의 0-based 인덱스를 사용
 
 ## Response Format
@@ -58,7 +60,7 @@ User: "입시 쇼츠 만들어줘"
 Assistant:
 {
   "blocks": [
-    { "type": "search",      "label": "입시 트렌드 수집",   "config": { "query": "2025 대입 트렌드" } },
+    { "type": "search",      "label": "입시 트렌드 수집",   "config": { "query": "최신 대입 입시정보 공식 발표 대입정보포털 교육부" } },
     { "type": "content",     "label": "입시 스크립트 생성", "config": { "scenes": 12, "durationSec": 60 } },
     { "type": "data",        "label": "씬 데이터 정규화",   "config": {} },
     { "type": "analysis",    "label": "교육 콘텐츠 검수",   "config": { "mode": "safety" } },
@@ -83,10 +85,13 @@ Assistant:
 `;
 
 export const buildUserPrompt = (userMessage: string, flowContext?: string): string => {
-    let prompt = `사용자 요청: "${userMessage}"`;
+    const referenceDate = new Date().toISOString().slice(0, 10);
+    let prompt = `현재 기준일: ${referenceDate}\n사용자 요청: "${userMessage}"`;
     if (flowContext) {
         prompt += `\n\n현재 플로우 상태:\n${flowContext}`;
     }
+    prompt +=
+        '\n\n사용자가 연도/학년도를 명시하지 않은 입시 요청은 특정 연도를 임의 확정하지 말고, 최신 공식 자료를 찾는 검색 query로 설계하세요.';
     prompt += '\n\n위 요청에 맞는 워크플로우를 few-shot 예시 형식에 맞춰 JSON으로 설계해주세요.';
     return prompt;
 };

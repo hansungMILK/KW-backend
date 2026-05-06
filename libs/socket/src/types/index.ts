@@ -155,6 +155,7 @@ export interface RunFailedMessage {
     flowId?: string;
     runId?: string;
     timestamp?: number;
+    errorCode?: string | null;
     error?: string;
     /** ID of the node that caused the failure — used to highlight it on canvas */
     failedNodeId?: string;

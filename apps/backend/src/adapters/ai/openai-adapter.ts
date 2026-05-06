@@ -46,6 +46,62 @@ interface ResponsesApiResponse {
 }
 
 export const openaiAdapter = {
+    async chatText(request: OpenAIJsonRequest): Promise<OpenAIJsonResponse> {
+        const apiKey = await settingsService.getKeyForProviderAsync('openai');
+        if (!apiKey) throw new Error('OPENAI_API_KEY not configured');
+
+        const model = request.model ?? env.openaiModel;
+        const start = Date.now();
+
+        log.info('OpenAI text chat API call', {
+            model,
+            maxTokens: request.maxTokens,
+            systemPromptLength: request.systemPrompt.length,
+            userMessageLength: request.userMessage.length,
+        });
+
+        const response = await fetch(`${env.openaiBaseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                model,
+                messages: [
+                    { role: 'system', content: request.systemPrompt },
+                    { role: 'user', content: request.userMessage },
+                ],
+                max_completion_tokens: request.maxTokens ?? 512,
+            }),
+        });
+
+        const body = (await response.json().catch(() => ({}))) as ChatCompletionResponse;
+        if (!response.ok) {
+            throw new Error(`OpenAI API error ${response.status}: ${body.error?.message ?? 'request failed'}`);
+        }
+
+        const content = body.choices?.[0]?.message?.content?.trim();
+        if (!content) throw new Error('OpenAI returned no message content');
+
+        const latencyMs = Date.now() - start;
+        log.info('OpenAI text chat API response', {
+            model: body.model ?? model,
+            inputTokens: body.usage?.prompt_tokens ?? 0,
+            outputTokens: body.usage?.completion_tokens ?? 0,
+            latencyMs,
+            contentLength: content.length,
+        });
+
+        return {
+            content,
+            model: body.model ?? model,
+            inputTokens: body.usage?.prompt_tokens ?? 0,
+            outputTokens: body.usage?.completion_tokens ?? 0,
+            latencyMs,
+        };
+    },
+
     async chatJson(request: OpenAIJsonRequest): Promise<OpenAIJsonResponse> {
         const apiKey = await settingsService.getKeyForProviderAsync('openai');
         if (!apiKey) throw new Error('OPENAI_API_KEY not configured');

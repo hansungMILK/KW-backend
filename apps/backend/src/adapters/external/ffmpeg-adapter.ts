@@ -1,10 +1,11 @@
 import { spawn } from 'child_process';
+import { existsSync } from 'fs';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
 export interface VideoCompositionRequest {
-    images: Array<{ url: string; durationSec: number }>;
+    images: Array<{ url: string; durationSec: number; title?: string; caption?: string; sourceLabel?: string }>;
     audioUrl?: string;
     backgroundMusic?: boolean;
     outputWidth: number;
@@ -20,6 +21,7 @@ export interface VideoCompositionResult {
 
 const FFMPEG_PATH = process.env.FFMPEG_PATH || '/opt/bin/ffmpeg';
 const FFMPEG_TIMEOUT_MS = Number(process.env.FFMPEG_TIMEOUT_MS || 840000);
+const FFMPEG_OVERLAY_MODE = process.env.SHORTS_FFMPEG_OVERLAY || 'source';
 
 export const ffmpegAdapter = {
     async compose(request: VideoCompositionRequest): Promise<VideoCompositionResult> {
@@ -31,7 +33,13 @@ export const ffmpegAdapter = {
                 throw new Error('FFmpeg composition requires at least one real image input');
             }
 
-            const imageFiles: Array<{ path: string; durationSec: number }> = [];
+            const imageFiles: Array<{
+                path: string;
+                durationSec: number;
+                title?: string;
+                caption?: string;
+                sourceLabel?: string;
+            }> = [];
 
             for (let i = 0; i < request.images.length; i++) {
                 const image = request.images[i];
@@ -41,6 +49,9 @@ export const ffmpegAdapter = {
                 imageFiles.push({
                     path,
                     durationSec: Math.max(1, Math.ceil(image.durationSec || 5)),
+                    title: image.title,
+                    caption: image.caption,
+                    sourceLabel: image.sourceLabel,
                 });
             }
 
@@ -68,7 +79,7 @@ export const ffmpegAdapter = {
 };
 
 function buildArgs(
-    imageFiles: Array<{ path: string; durationSec: number }>,
+    imageFiles: Array<{ path: string; durationSec: number; title?: string; caption?: string; sourceLabel?: string }>,
     audioPath: string | null,
     request: VideoCompositionRequest,
     outputPath: string
@@ -103,8 +114,10 @@ function buildArgs(
 
     const width = String(request.outputWidth);
     const height = String(request.outputHeight);
-    const filterParts = imageFiles.map((_, i) => {
-        return `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1[v${i}]`;
+    const fontFile = resolveOverlayFontFile();
+    const filterParts = imageFiles.map((image, i) => {
+        const overlay = buildOverlayFilter(image, fontFile);
+        return `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1${overlay}[v${i}]`;
     });
     const concatInputs = imageFiles.map((_, i) => `[v${i}]`).join('');
     filterParts.push(`${concatInputs}concat=n=${imageFiles.length}:v=1:a=0,format=yuv420p[v]`);
@@ -129,6 +142,64 @@ function buildArgs(
     args.push('-c:v', 'libx264', '-preset', 'veryfast', '-r', '30', '-movflags', '+faststart', outputPath);
 
     return args;
+}
+
+function resolveOverlayFontFile(): string | undefined {
+    const candidates = [
+        process.env.FFMPEG_FONT_FILE,
+        '/System/Library/Fonts/AppleSDGothicNeo.ttc',
+        '/System/Library/Fonts/Supplemental/AppleGothic.ttf',
+        '/opt/fonts/NotoSansCJKkr-Regular.otf',
+        '/opt/fonts/NotoSansKR-Regular.otf',
+    ].filter((candidate): candidate is string => Boolean(candidate));
+
+    return candidates.find(candidate => existsSync(candidate));
+}
+
+function buildOverlayFilter(
+    image: { title?: string; caption?: string; sourceLabel?: string },
+    fontFile: string | undefined
+): string {
+    if (FFMPEG_OVERLAY_MODE === 'off' || !fontFile) return '';
+
+    const filters: string[] = [];
+    const sourceLabel = compactOverlayText(image.sourceLabel, 36);
+    const caption = compactOverlayText(image.caption, 24);
+    const title = compactOverlayText(image.title, 20);
+    const font = escapeDrawtext(fontFile);
+
+    if (FFMPEG_OVERLAY_MODE === 'all' && title) {
+        filters.push('drawbox=x=0:y=0:w=w:h=230:color=black@0.88:t=fill');
+        filters.push(
+            `drawtext=fontfile='${font}':text='${escapeDrawtext(title)}':x=(w-text_w)/2:y=52:fontsize=86:fontcolor=yellow:borderw=4:bordercolor=black`
+        );
+    }
+
+    if (FFMPEG_OVERLAY_MODE === 'all' && caption) {
+        filters.push(
+            `drawtext=fontfile='${font}':text='${escapeDrawtext(caption)}':x=(w-text_w)/2:y=(h-text_h)/2:fontsize=66:fontcolor=white:borderw=5:bordercolor=black`
+        );
+    }
+
+    if ((FFMPEG_OVERLAY_MODE === 'source' || FFMPEG_OVERLAY_MODE === 'all') && sourceLabel) {
+        filters.push('drawbox=x=0:y=h-92:w=w:h=92:color=black@0.34:t=fill');
+        filters.push(
+            `drawtext=fontfile='${font}':text='${escapeDrawtext(sourceLabel)}':x=(w-text_w)/2:y=h-62:fontsize=30:fontcolor=white@0.86:borderw=2:bordercolor=black@0.7`
+        );
+    }
+
+    return filters.length > 0 ? `,${filters.join(',')}` : '';
+}
+
+function compactOverlayText(value: string | undefined, maxLength: number): string {
+    if (!value) return '';
+    const compact = value.replace(/\s+/g, ' ').trim();
+    if (compact.length <= maxLength) return compact;
+    return `${compact.slice(0, maxLength - 1)}...`;
+}
+
+function escapeDrawtext(value: string): string {
+    return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/:/g, '\\:').replace(/%/g, '\\%');
 }
 
 async function loadImageBinary(url: string): Promise<Buffer> {

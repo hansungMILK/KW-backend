@@ -23,7 +23,9 @@ const RequestSchema = z
  *
  * Spec path for single-node execution (F-11). Internally delegates to
  * runService.createSingleNodeRun which produces a Run of runType=SINGLE_NODE
- * and enqueues an EXECUTE_NODE message. Returns 202 Accepted.
+ * and enqueues an EXECUTE_RUN message against that one-node run so normal run
+ * status transitions (RUNNING → COMPLETED/FAILED) still apply. Returns 202
+ * Accepted.
  *
  * The legacy POST /nodes/{id}/run handler (run-node.ts) is kept as-is for
  * frontend compatibility — it performs a different fake-execution shape used

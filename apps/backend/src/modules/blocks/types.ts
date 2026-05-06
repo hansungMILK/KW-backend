@@ -20,6 +20,17 @@ export type BlockType = (typeof BLOCK_TYPES)[number];
 
 export const BlockTypeSchema = z.enum(BLOCK_TYPES);
 
+const SourceRefSchema = z.object({
+    id: z.string().optional(),
+    title: z.string().optional(),
+    url: z.string().optional(),
+    source: z.string().optional(),
+    publishedAt: z.string().nullable().optional(),
+    sourceType: z.enum(['official', 'news', 'blog', 'other']).optional(),
+    confidence: z.number().min(0).max(1).optional(),
+    summary: z.string().optional(),
+});
+
 /**
  * Common block executor interface.
  * Every block implements this contract.
@@ -50,13 +61,19 @@ export const SearchOutputSchema = z.object({
     keywords: z.array(z.string()),
     articles: z.array(
         z.object({
+            id: z.string().optional(),
             title: z.string(),
             url: z.string(),
             source: z.string(),
+            publishedAt: z.string().nullable().optional(),
+            sourceType: z.enum(['official', 'news', 'blog', 'other']).optional(),
+            confidence: z.number().min(0).max(1).optional(),
             summary: z.string().optional(),
         })
     ),
     trendScore: z.number().optional(),
+    retrievedAt: z.string().optional(),
+    presetId: z.string().optional(),
 });
 
 /** content block */
@@ -66,14 +83,19 @@ export const ContentOutputSchema = z.object({
     scenes: z.array(
         z.object({
             sceneNumber: z.number(),
+            imageSlot: z.string().optional(),
             caption: z.string().optional(),
             narration: z.string(),
             imagePrompt: z.string(),
+            visualText: z.string().optional(),
+            sourceRefs: z.array(SourceRefSchema.or(z.string())).optional(),
             durationSec: z.number().optional(),
         })
     ),
     cta: z.string(),
     totalDurationSec: z.number().optional(),
+    sources: z.array(SourceRefSchema).optional(),
+    presetId: z.string().optional(),
 });
 
 /** data block */
@@ -81,9 +103,12 @@ export const DataOutputSchema = z.object({
     normalizedScenes: z.array(
         z.object({
             sceneNumber: z.number(),
+            imageSlot: z.string().optional(),
             caption: z.string().optional(),
             narration: z.string(),
             imagePrompt: z.string(),
+            visualText: z.string().optional(),
+            sourceRefs: z.array(SourceRefSchema.or(z.string())).optional(),
             durationSec: z.number().optional(),
             keywords: z.array(z.string()).optional(),
         })

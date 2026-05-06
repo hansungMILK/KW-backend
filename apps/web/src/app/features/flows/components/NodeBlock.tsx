@@ -1130,7 +1130,10 @@ export const NodeBlock: React.FC<NodeBlockProps> = ({
                     ? 'border-accent/60'
                     : definition.isFrontend && !isSelected && nodeState === 'IDLE'
                       ? 'border-primary/50'
-                      : getStatusStyles(nodeState, isSelected)
+                      : getStatusStyles(nodeState, isSelected),
+                nodeState === 'RUNNING' &&
+                    !isDragging &&
+                    'ring-2 ring-status-running/70 shadow-[0_0_34px_rgba(234,179,8,0.45)]'
             )}
             style={{
                 left: node.position.x,
@@ -1141,6 +1144,19 @@ export const NodeBlock: React.FC<NodeBlockProps> = ({
             onTouchStart={onTouchStart}
             onDoubleClick={e => e.stopPropagation()}
         >
+            {nodeState === 'RUNNING' && (
+                <>
+                    <div className="pointer-events-none absolute inset-0 rounded-xl border border-status-running/70 animate-pulse" />
+                    <div className="pointer-events-none absolute -top-3 right-3 flex items-center gap-1.5 rounded-full border border-status-running/40 bg-background/95 px-2 py-0.5 text-[10px] font-semibold text-status-running shadow-[0_0_18px_rgba(234,179,8,0.35)]">
+                        <span className="relative flex h-2 w-2">
+                            <span className="absolute inline-flex h-full w-full rounded-full bg-status-running opacity-70 animate-ping" />
+                            <span className="relative inline-flex h-2 w-2 rounded-full bg-status-running" />
+                        </span>
+                        실행 중
+                    </div>
+                </>
+            )}
+
             {/* Header */}
             <div
                 className={cn(

@@ -15,6 +15,7 @@ export interface ImageGenerationResult {
     contentType: string;
     width: number;
     height: number;
+    model?: string;
 }
 
 const openAIImageSizeFor = (width: number, height: number): { size: string; width: number; height: number } => {
@@ -31,41 +32,63 @@ export const imageAdapter = {
         const width = request.width || 1080;
         const height = request.height || 1920;
         const size = openAIImageSizeFor(width, height);
+        const model = env.openaiImageModel;
 
-        log.info('OpenAI image generation', {
-            model: env.openaiImageModel,
-            promptLength: request.prompt.length,
-            size: size.size,
-            quality: env.openaiImageQuality,
-        });
-
-        const response = await fetch(`${env.openaiBaseUrl}/images/generations`, {
-            method: 'POST',
-            headers: {
-                Authorization: `Bearer ${apiKey}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                model: env.openaiImageModel,
-                prompt: request.prompt,
-                n: 1,
-                size: size.size,
-                quality: env.openaiImageQuality,
-                output_format: 'png',
-            }),
-        });
-
-        if (!response.ok) {
-            const errText = await response.text().catch(() => 'unknown');
-            throw new Error(`OpenAI image API error ${response.status}: ${errText.slice(0, 200)}`);
-        }
-
-        const data = (await response.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
-        const first = data.data?.[0];
-        if (!first?.b64_json && !first?.url) throw new Error('OpenAI returned no image data');
-
-        const imageBuffer = first.b64_json ? Buffer.from(first.b64_json, 'base64') : undefined;
-
-        return { imageBuffer, imageUrl: first.url, contentType: 'image/png', width: size.width, height: size.height };
+        return generateWithModel(apiKey, model, request.prompt, size);
     },
 };
+
+async function generateWithModel(
+    apiKey: string,
+    model: string,
+    prompt: string,
+    size: { size: string; width: number; height: number }
+): Promise<ImageGenerationResult> {
+    log.info('OpenAI image generation', {
+        model,
+        promptLength: prompt.length,
+        size: size.size,
+        quality: env.openaiImageQuality,
+    });
+
+    const response = await fetch(`${env.openaiBaseUrl}/images/generations`, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            model,
+            prompt,
+            n: 1,
+            size: size.size,
+            quality: env.openaiImageQuality,
+            output_format: 'png',
+        }),
+    });
+
+    if (!response.ok) {
+        const errText = await response.text().catch(() => 'unknown');
+        if (response.status === 403 && /verified|verification|organization/i.test(errText)) {
+            throw new Error(
+                `OpenAI image API error 403: ${model} requires OpenAI organization verification. Verify the organization at https://platform.openai.com/settings/organization/general, then rerun. Raw: ${errText.slice(0, 180)}`
+            );
+        }
+        throw new Error(`OpenAI image API error ${response.status}: ${errText.slice(0, 260)}`);
+    }
+
+    const data = (await response.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
+    const first = data.data?.[0];
+    if (!first?.b64_json && !first?.url) throw new Error('OpenAI returned no image data');
+
+    const imageBuffer = first.b64_json ? Buffer.from(first.b64_json, 'base64') : undefined;
+
+    return {
+        imageBuffer,
+        imageUrl: first.url,
+        contentType: 'image/png',
+        width: size.width,
+        height: size.height,
+        model,
+    };
+}

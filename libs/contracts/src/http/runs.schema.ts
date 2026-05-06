@@ -134,6 +134,7 @@ export const RunNodesListParamsSchema = z.object({
 export const RunNodesListResponseSchema = z.object({
     items: z.array(RunNodeSchema),
 });
+export type RunNodesListResponse = z.infer<typeof RunNodesListResponseSchema>;
 
 // ============================================================================
 // GET /runs/{runId}/nodes/{nodeId}

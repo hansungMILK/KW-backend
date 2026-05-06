@@ -24,6 +24,13 @@ interface FlowAgentPanelProps {
     onApproveProposal?: (nodes: unknown[], edges: unknown[]) => void;
     /** Externally pushed proposal.created WS event */
     externalProposal?: ProposalCreatedMessage | null;
+    runStatus?: 'running' | 'completed' | 'failed' | null;
+    runActivity?: {
+        nodeLabel?: string;
+        progress?: number;
+        state?: 'queued' | 'running' | 'completed' | 'failed';
+        error?: string | null;
+    } | null;
 }
 
 const formatEstimatedCost = (cost: ProposalCreatedMessage['estimatedCost']): string | undefined => {
@@ -37,12 +44,21 @@ const formatEstimatedCost = (cost: ProposalCreatedMessage['estimatedCost']): str
     return undefined;
 };
 
-export const FlowAgentPanel = ({ open, onClose, flowId, onApproveProposal, externalProposal }: FlowAgentPanelProps) => {
+export const FlowAgentPanel = ({
+    open,
+    onClose,
+    flowId,
+    onApproveProposal,
+    externalProposal,
+    runStatus,
+    runActivity,
+}: FlowAgentPanelProps) => {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [isThinking, setIsThinking] = useState(false);
     const bottomRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
+    const isComposingRef = useRef(false);
 
     useEffect(() => {
         if (open) inputRef.current?.focus();
@@ -88,14 +104,13 @@ export const FlowAgentPanel = ({ open, onClose, flowId, onApproveProposal, exter
                 const withoutThinking = prev.filter(m => !m.thinking);
                 if (!response) return withoutThinking;
 
-                const msgs: Message[] = [
-                    ...withoutThinking,
-                    { id: crypto.randomUUID(), role: 'agent', text: response.content },
-                ];
                 if (response.proposal) {
-                    msgs.push({ id: crypto.randomUUID(), role: 'agent', proposal: response.proposal });
+                    return withoutThinking.some(message => message.proposal?.id === response.proposal?.id)
+                        ? withoutThinking
+                        : [...withoutThinking, { id: crypto.randomUUID(), role: 'agent', proposal: response.proposal }];
                 }
-                return msgs;
+
+                return [...withoutThinking, { id: crypto.randomUUID(), role: 'agent', text: response.content }];
             });
         } catch (error) {
             setMessages(prev => [
@@ -118,6 +133,7 @@ export const FlowAgentPanel = ({ open, onClose, flowId, onApproveProposal, exter
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (e.nativeEvent.isComposing || isComposingRef.current) return;
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             void sendMessage();
@@ -139,6 +155,52 @@ export const FlowAgentPanel = ({ open, onClose, flowId, onApproveProposal, exter
                 </button>
             </div>
 
+            {runStatus && (
+                <div className="px-4 py-3 border-b border-border/70 bg-muted/20 shrink-0">
+                    <div
+                        className={`rounded-lg border px-3 py-2 text-[12px] ${
+                            runStatus === 'running'
+                                ? 'border-status-running/30 bg-status-running/10 text-status-running'
+                                : runStatus === 'completed'
+                                  ? 'border-status-completed/30 bg-status-completed/10 text-status-completed'
+                                  : 'border-destructive/30 bg-destructive/10 text-destructive'
+                        }`}
+                    >
+                        <div className="flex items-center gap-2 font-semibold">
+                            {runStatus === 'running' && (
+                                <span className="relative flex h-2.5 w-2.5">
+                                    <span className="absolute inline-flex h-full w-full rounded-full bg-status-running opacity-70 animate-ping" />
+                                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-status-running" />
+                                </span>
+                            )}
+                            <span>
+                                {runStatus === 'running' && '워크플로우 실행 중'}
+                                {runStatus === 'completed' && '워크플로우 실행 완료'}
+                                {runStatus === 'failed' && '워크플로우 실행 실패'}
+                            </span>
+                        </div>
+                        {runActivity?.nodeLabel && (
+                            <div className="mt-1 text-muted-foreground">
+                                현재 노드: <span className="text-foreground">{runActivity.nodeLabel}</span>
+                            </div>
+                        )}
+                        {typeof runActivity?.progress === 'number' && (
+                            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                                <div
+                                    className={`h-full rounded-full transition-all duration-300 ${
+                                        runStatus === 'failed' ? 'bg-destructive' : 'bg-status-running'
+                                    }`}
+                                    style={{ width: `${Math.min(100, Math.max(3, runActivity.progress))}%` }}
+                                />
+                            </div>
+                        )}
+                        {runStatus === 'failed' && runActivity?.error && (
+                            <div className="mt-1 text-destructive/90">{runActivity.error}</div>
+                        )}
+                    </div>
+                </div>
+            )}
+
             {/* Messages */}
             <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-3">
                 {messages.map(msg => {
@@ -148,8 +210,11 @@ export const FlowAgentPanel = ({ open, onClose, flowId, onApproveProposal, exter
                                 <div className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center shrink-0 mt-0.5">
                                     <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
                                 </div>
-                                <div className="bg-muted rounded-lg px-3 py-2 text-[12px] text-muted-foreground">
-                                    생각중...
+                                <div className="bg-muted rounded-lg px-3 py-2 text-[12px] text-muted-foreground flex items-center gap-1">
+                                    <span>답변 생성 중</span>
+                                    <span className="w-1 h-1 rounded-full bg-current animate-bounce" />
+                                    <span className="w-1 h-1 rounded-full bg-current animate-bounce [animation-delay:120ms]" />
+                                    <span className="w-1 h-1 rounded-full bg-current animate-bounce [animation-delay:240ms]" />
                                 </div>
                             </div>
                         );
@@ -231,6 +296,12 @@ export const FlowAgentPanel = ({ open, onClose, flowId, onApproveProposal, exter
                         ref={inputRef}
                         value={input}
                         onChange={e => setInput(e.target.value)}
+                        onCompositionStart={() => {
+                            isComposingRef.current = true;
+                        }}
+                        onCompositionEnd={() => {
+                            isComposingRef.current = false;
+                        }}
                         onKeyDown={handleKeyDown}
                         placeholder="메세지를 입력해주세요."
                         rows={1}

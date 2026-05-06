@@ -35,8 +35,8 @@ export const ttsAdapter = {
         }
 
         const buffer = Buffer.from(await response.arrayBuffer());
-        // Estimate: Korean ~4 chars/sec narration
-        const estimatedDurationSec = Math.ceil(request.text.length / 4);
+        // Estimate: OpenAI Korean narration is roughly 7.5 chars/sec with the current default voice.
+        const estimatedDurationSec = Math.ceil(request.text.length / 7.5);
 
         return { audioBuffer: buffer, contentType: 'audio/mpeg', estimatedDurationSec };
     },

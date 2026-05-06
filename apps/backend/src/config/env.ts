@@ -26,6 +26,7 @@ export const env = {
     s3Bucket: readEnv('S3_BUCKET', 'eureka-flows-local'),
     cdnDomain: readEnv('CLOUDFRONT_DOMAIN', readEnv('CDN_DOMAIN')),
     executionQueueUrl: readEnv('EXECUTION_QUEUE_URL'),
+    localQueueMode: readEnv('LOCAL_QUEUE_MODE', 'async'),
     anthropicDefaultModel: readEnv('ANTHROPIC_DEFAULT_MODEL', 'claude-sonnet-4-6'),
     anthropicFastModel: readEnv('ANTHROPIC_FAST_MODEL', 'claude-haiku-4-5-20251001'),
     openaiModel: readEnv('OPENAI_MODEL', readEnv('OPENAI_TEXT_MODEL', 'gpt-5.4-nano')),

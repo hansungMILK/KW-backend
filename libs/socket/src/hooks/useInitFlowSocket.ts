@@ -87,6 +87,8 @@ type NodeExecutionMessage = {
     runId?: string;
     status?: string;
     progress?: number;
+    errorCode?: string;
+    errorMessage?: string;
     timestamp?: number;
     no?: number;
 };
@@ -201,6 +203,8 @@ export interface NodeUpdateInfo {
      */
     prevState?: NodeState;
     progress?: number;
+    errorCode?: string;
+    errorMessage?: string;
     /**
      * Stereotype indicator for message content completeness
      * - 0: Socket message contains all necessary data - no API fetch needed
@@ -427,6 +431,8 @@ export const useInitFlowSocket = (options: UseInitFlowSocketOptions = {}) => {
                         isPort: false,
                         state: getNodeExecutionState(data),
                         progress: data.progress,
+                        errorCode: data.errorCode,
+                        errorMessage: data.errorMessage,
                         stereo: 0,
                     });
                 }

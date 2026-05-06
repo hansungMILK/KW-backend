@@ -2012,6 +2012,22 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
 
                 const isCtrlOrCmd = e.ctrlKey || e.metaKey;
 
+                if (isCtrlOrCmd && e.key.toLowerCase() === 'z') {
+                    e.preventDefault();
+                    if (e.shiftKey) {
+                        redo();
+                    } else {
+                        undo();
+                    }
+                    return;
+                }
+
+                if (isCtrlOrCmd && e.key.toLowerCase() === 'y') {
+                    e.preventDefault();
+                    redo();
+                    return;
+                }
+
                 if (isCtrlOrCmd && e.key.toLowerCase() === 'c') {
                     if (selectedNodeIds.size > 0) {
                         const nodesToCopy = nodes.filter(n => selectedNodeIds.has(n.id));
@@ -2148,6 +2164,8 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
             handleSelectionChange,
             createNodeAsync,
             flowId,
+            undo,
+            redo,
         ]);
 
         const activeConnectionId = selectedConnectionId || hoveredConnectionId;
