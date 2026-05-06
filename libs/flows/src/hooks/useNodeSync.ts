@@ -222,16 +222,16 @@ export const useNodeSync = ({ flowId }: UseNodeSyncOptions): UseNodeSyncReturn =
                 { flowId, body },
                 {
                     onSuccess: result => {
-                        // Extract server-assigned ID from response
-                        // Support multiple response formats:
-                        // 1. Direct node object: { id: '...', type: '...', ... }
-                        // 2. nodes array: { nodes: [{ id: '...', ... }] }
-                        // 3. nodes$$ array (deprecated): { nodes$$: [{ id: '...', ... }] }
+                        // Extract server-assigned ID from response.
+                        // upsertFlow returns SaveFlowView (extends FlowModel) so result.id is
+                        // the FLOW id, not the node id. Always prefer result.nodes[0] first.
                         const resultAny = result as Record<string, unknown>;
                         const createdNode =
-                            (resultAny.id ? (result as unknown as { id: string }) : null) ??
                             result.nodes?.[0] ??
-                            (resultAny['nodes$$'] as typeof result.nodes)?.[0];
+                            (resultAny['nodes$$'] as typeof result.nodes)?.[0] ??
+                            // Fallback: bare node object (legacy format where no nodes array exists
+                            // and top-level id is a node id, not flow id)
+                            (resultAny.id && !result.nodes ? (result as unknown as { id: string }) : null);
 
                         console.debug('[useNodeSync] API response:', { tempId, result, createdNode });
 

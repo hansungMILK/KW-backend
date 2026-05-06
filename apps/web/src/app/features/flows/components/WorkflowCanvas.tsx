@@ -92,14 +92,14 @@ const TOUCH_PORT_HIT_THRESHOLD = 50;
 
 /** Port position constants for touch hit detection */
 const TOUCH_PORT_LAYOUT = {
-    /** Input port X offset from node left edge */
-    INPUT_X_OFFSET: -6,
-    /** First port Y offset from node top */
-    FIRST_PORT_Y: 45,
-    /** Vertical spacing between ports */
-    PORT_SPACING: 16,
-    /** Port center offset */
-    PORT_CENTER_OFFSET: 6,
+    /** Input port X: port container left-[-6px], circle center at node.x + 0 */
+    INPUT_X_OFFSET: 0,
+    /** First port Y: container top (45) + half port height (12) */
+    FIRST_PORT_Y: 57,
+    /** Vertical spacing between ports (port height 24px + gap-1 4px) */
+    PORT_SPACING: 28,
+    /** Port center offset (included in FIRST_PORT_Y) */
+    PORT_CENTER_OFFSET: 0,
 } as const;
 
 /**
@@ -242,6 +242,11 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
         nodesRef.current = nodes;
         connectionsRef.current = connections;
 
+        // Tracks the most recently placed node position + node data.
+        // Updated synchronously inside addNode so rapid-fire additions
+        // never read stale React state and land on the same spot.
+        const lastPlacedPosRef = useRef<{ x: number; y: number; node: NodeData } | null>(null);
+
         const canvasRef = useRef<HTMLDivElement>(null);
 
         const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 });
@@ -302,16 +307,29 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
         const connectionDraftRef = useRef(connectionDraft);
         connectionDraftRef.current = connectionDraft;
 
+        // Keep onChange in a ref so the change-detection effect doesn't re-fire just
+        // because the parent re-renders and passes a new function reference each time.
+        const onChangeRef = useRef(onChange);
+        onChangeRef.current = onChange;
+
+        // Flag set by loadWorkflow to suppress one onChange cycle after a load.
+        // Prevents the load→save→WebSocket→load loop.
+        const suppressNextOnChangeRef = useRef(false);
+
         const isMounted = useRef(false);
         useEffect(() => {
             if (isMounted.current) {
-                if (onChange && !readOnly) {
-                    onChange();
+                if (suppressNextOnChangeRef.current) {
+                    suppressNextOnChangeRef.current = false;
+                    return;
+                }
+                if (onChangeRef.current && !readOnly) {
+                    onChangeRef.current();
                 }
             } else {
                 isMounted.current = true;
             }
-        }, [nodes, connections, onChange, readOnly]);
+        }, [nodes, connections, readOnly]);
 
         const saveCheckpoint = useCallback(() => {
             if (readOnly) return;
@@ -440,6 +458,11 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     const newDef = blockRegistry[type];
                     if (!newDef) return;
 
+                    // Always read from refs — these are synchronously updated after each addNode,
+                    // so rapid-fire clicks before React re-renders still get fresh data.
+                    const liveNodes = nodesRef.current;
+                    const liveConnections = connectionsRef.current;
+
                     let sourceNode: NodeData | undefined;
                     let sourcePortId: string | undefined;
                     let targetPortId: string | undefined;
@@ -457,7 +480,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                         };
 
                         if (selectedNodeId) {
-                            const selected = nodes.find(n => n.id === selectedNodeId);
+                            const selected = liveNodes.find(n => n.id === selectedNodeId);
                             if (selected) {
                                 const out = findCompatibleOutput(selected);
                                 if (out) {
@@ -467,12 +490,48 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                             }
                         }
 
-                        if (!sourceNode && nodes.length > 0) {
-                            const lastNode = nodes[nodes.length - 1];
-                            const out = findCompatibleOutput(lastNode);
-                            if (out) {
-                                sourceNode = lastNode;
-                                sourcePortId = out.id;
+                        if (!sourceNode && liveNodes.length > 0) {
+                            // Try all nodes in reverse order (most recently added first)
+                            for (let i = liveNodes.length - 1; i >= 0; i--) {
+                                const candidate = liveNodes[i];
+                                const out = findCompatibleOutput(candidate);
+                                if (out) {
+                                    sourceNode = candidate;
+                                    sourcePortId = out.id;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    // Pre-scan: check if this node will auto-connect as SOURCE to an existing node.
+                    // Must happen before position calculation so we can place it to the LEFT of the target.
+                    let targetNode: NodeData | undefined;
+                    let targetInputPortId: string | undefined;
+                    let sourceOutputPortId: string | undefined;
+
+                    if (!sourceNode && newDef.outputs.length > 0 && liveNodes.length > 0) {
+                        const firstOutput = newDef.outputs[0];
+
+                        for (const existingNode of liveNodes) {
+                            const existingDef = blockRegistry[existingNode.type];
+                            if (!existingDef || existingDef.inputs.length === 0) continue;
+
+                            const compatibleInput = existingDef.inputs.find(inp => {
+                                const isConnected = liveConnections.some(
+                                    c => c.targetNodeId === existingNode.id && c.targetPortId === inp.id
+                                );
+                                if (isConnected) return false;
+                                return (
+                                    inp.type === firstOutput.type || inp.type === 'any' || firstOutput.type === 'any'
+                                );
+                            });
+
+                            if (compatibleInput) {
+                                targetNode = existingNode;
+                                targetInputPortId = compatibleInput.id;
+                                sourceOutputPortId = firstOutput.id;
+                                break;
                             }
                         }
                     }
@@ -481,14 +540,113 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     let startY = 0;
 
                     if (sourceNode) {
+                        // New node is a TARGET — place to the right of sourceNode
                         startX = sourceNode.position.x + 300;
-                        startY = sourceNode.position.y;
+                        // Prioritise lastPlacedPosRef for rapid-fire additions (pre-render).
+                        // Fall back to scanning rendered nodes in the same column.
+                        const lastPos = lastPlacedPosRef.current;
+                        if (lastPos && Math.abs(lastPos.x - startX) < 60) {
+                            // Find the node at lastPos to get its actual height
+                            const lastNode = nodesRef.current.find(
+                                n =>
+                                    n.position &&
+                                    Math.abs(n.position.x - lastPos.x) < 5 &&
+                                    Math.abs(n.position.y - lastPos.y) < 5
+                            );
+                            const lastH = lastNode
+                                ? estimateNodeHeight(lastNode, blockRegistry[lastNode.type])
+                                : LAYOUT_CONFIG.DEFAULT_HEIGHT;
+                            startY = lastPos.y + lastH + LAYOUT_CONFIG.MIN_GAP;
+                        } else {
+                            const sameColNodes = nodesRef.current.filter(
+                                n => n.position && Math.abs(n.position.x - startX) < 60
+                            );
+                            if (sameColNodes.length > 0) {
+                                const bottomNode = sameColNodes.reduce((prev, n) =>
+                                    n.position.y > prev.position.y ? n : prev
+                                );
+                                const bottomH = estimateNodeHeight(bottomNode, blockRegistry[bottomNode.type]);
+                                startY = bottomNode.position.y + bottomH + LAYOUT_CONFIG.MIN_GAP;
+                            } else {
+                                startY = sourceNode.position.y;
+                            }
+                        }
+                    } else if (targetNode) {
+                        // New node is a SOURCE — place to the LEFT of targetNode
+                        startX = targetNode.position.x - 300;
+                        const sameColNodes = nodesRef.current.filter(
+                            n => n.position && Math.abs(n.position.x - startX) < 60
+                        );
+                        if (sameColNodes.length > 0) {
+                            const bottomNode = sameColNodes.reduce((prev, n) =>
+                                n.position.y > prev.position.y ? n : prev
+                            );
+                            const bottomH = estimateNodeHeight(bottomNode, blockRegistry[bottomNode.type]);
+                            startY = bottomNode.position.y + bottomH + LAYOUT_CONFIG.MIN_GAP;
+                        } else {
+                            startY = targetNode.position.y;
+                        }
                     } else {
-                        const rect = canvasRef.current?.getBoundingClientRect();
-                        const centerX = rect ? (rect.width / 2 - viewport.x) / viewport.zoom : 100;
-                        const centerY = rect ? (rect.height / 2 - viewport.y) / viewport.zoom : 100;
-                        startX = centerX - 100 + (Math.random() * 40 - 20);
-                        startY = centerY - 50 + (Math.random() * 40 - 20);
+                        // Standalone node — check if last placed node can chain to this one (rapid-fire),
+                        // otherwise fall back to placing below or at canvas center.
+                        const lastRef = lastPlacedPosRef.current;
+                        let placedRight = false;
+
+                        if (lastRef && newDef.inputs.length > 0) {
+                            const lastDef = blockRegistry[lastRef.node.type];
+                            const compatible = lastDef?.outputs.find(
+                                out =>
+                                    out.type === newDef.inputs[0].type ||
+                                    out.type === 'any' ||
+                                    newDef.inputs[0].type === 'any'
+                            );
+                            if (compatible) {
+                                // Place to the RIGHT of the last node, same column logic
+                                startX = lastRef.x + 300;
+                                const sameColNodes = nodesRef.current.filter(
+                                    n => n.position && Math.abs(n.position.x - startX) < 60
+                                );
+                                if (sameColNodes.length > 0) {
+                                    const bottomNode = sameColNodes.reduce((prev, n) =>
+                                        n.position.y > prev.position.y ? n : prev
+                                    );
+                                    const bottomH = estimateNodeHeight(bottomNode, blockRegistry[bottomNode.type]);
+                                    startY = bottomNode.position.y + bottomH + LAYOUT_CONFIG.MIN_GAP;
+                                } else {
+                                    startY = lastRef.y;
+                                }
+                                placedRight = true;
+                            }
+                        }
+
+                        if (!placedRight) {
+                            const anchor =
+                                lastRef ??
+                                (nodesRef.current.length > 0
+                                    ? nodesRef.current.reduce((p, c) => (c.position.y > p.position.y ? c : p)).position
+                                    : null);
+
+                            if (anchor) {
+                                const lastNode = nodesRef.current.find(
+                                    n =>
+                                        n.position &&
+                                        Math.abs(n.position.x - anchor.x) < 5 &&
+                                        Math.abs(n.position.y - anchor.y) < 5
+                                );
+                                const lastH = lastNode
+                                    ? estimateNodeHeight(lastNode, blockRegistry[lastNode.type])
+                                    : LAYOUT_CONFIG.DEFAULT_HEIGHT;
+                                startX = anchor.x;
+                                startY = anchor.y + lastH + LAYOUT_CONFIG.MIN_GAP;
+                            } else {
+                                // First node on empty canvas — use canvas center
+                                const rect = canvasRef.current?.getBoundingClientRect();
+                                const centerX = rect ? (rect.width / 2 - viewport.x) / viewport.zoom : 200;
+                                const centerY = rect ? (rect.height / 2 - viewport.y) / viewport.zoom : 200;
+                                startX = centerX - 100;
+                                startY = centerY - 50;
+                            }
+                        }
                     }
 
                     const snappedX = Math.round(startX / GRID_SIZE) * GRID_SIZE;
@@ -510,6 +668,10 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                         ...(customLabel ? { customLabel } : {}),
                     };
 
+                    // Synchronously record position + node so the next addNode call
+                    // (even before React re-renders) doesn't land in the same spot.
+                    lastPlacedPosRef.current = { x: snappedX, y: snappedY, node: newNode };
+
                     // Generate temp edge ID if connection will be created
                     const tempEdgeId = generateTempId('edge');
                     let newConnection: Connection | null = null;
@@ -530,44 +692,21 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                         }
                     }
 
-                    let targetNode: NodeData | undefined;
-                    let targetInputPortId: string | undefined;
-                    let sourceOutputPortId: string | undefined;
+                    if (!newConnection && targetNode && targetInputPortId && sourceOutputPortId) {
+                        newConnection = {
+                            id: tempEdgeId,
+                            sourceNodeId: tempNodeId,
+                            sourcePortId: sourceOutputPortId,
+                            targetNodeId: targetNode.id,
+                            targetPortId: targetInputPortId,
+                        };
+                    }
 
-                    if (!newConnection && newDef.outputs.length > 0 && nodes.length > 0) {
-                        const firstOutput = newDef.outputs[0];
-
-                        for (const existingNode of nodes) {
-                            const existingDef = blockRegistry[existingNode.type];
-                            if (!existingDef || existingDef.inputs.length === 0) continue;
-
-                            const compatibleInput = existingDef.inputs.find(inp => {
-                                const isConnected = connections.some(
-                                    c => c.targetNodeId === existingNode.id && c.targetPortId === inp.id
-                                );
-                                if (isConnected) return false;
-                                return (
-                                    inp.type === firstOutput.type || inp.type === 'any' || firstOutput.type === 'any'
-                                );
-                            });
-
-                            if (compatibleInput) {
-                                targetNode = existingNode;
-                                targetInputPortId = compatibleInput.id;
-                                sourceOutputPortId = firstOutput.id;
-                                break;
-                            }
-                        }
-
-                        if (targetNode && targetInputPortId && sourceOutputPortId) {
-                            newConnection = {
-                                id: tempEdgeId,
-                                sourceNodeId: tempNodeId,
-                                sourcePortId: sourceOutputPortId,
-                                targetNodeId: targetNode.id,
-                                targetPortId: targetInputPortId,
-                            };
-                        }
+                    // Synchronously update refs so the next rapid-fire addNode call
+                    // immediately sees this node/connection without waiting for re-render.
+                    nodesRef.current = [...nodesRef.current, newNode];
+                    if (newConnection) {
+                        connectionsRef.current = [...connectionsRef.current, newConnection];
                     }
 
                     // Optimistic UI update
@@ -593,6 +732,9 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                         },
                         (oldTempId, newServerId) => {
                             replaceNodeIdInState(oldTempId, newServerId, setNodes, setConnections, setSelectedNodeIds);
+                            setConnectionDraft(prev =>
+                                prev?.sourceNodeId === oldTempId ? { ...prev, sourceNodeId: newServerId } : prev
+                            );
 
                             // Now create the edge on the server if there was a connection
                             if (connectionToCreate) {
@@ -642,10 +784,12 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     edges: connections.filter(c => !c.id || !pendingEdgeIds.has(c.id)),
                 }),
                 loadWorkflow: async (state: WorkflowStateWithPorts) => {
-                    // Normalize nodes to ensure config is never undefined
+                    lastPlacedPosRef.current = null;
+                    // Normalize nodes: ensure config and position are never undefined
                     const loadedNodes = (state.nodes ?? []).map(n => ({
                         ...n,
                         config: n.config ?? {},
+                        position: n.position ?? { x: 50, y: 50 },
                     }));
 
                     const rawConnections = state.edges ?? state.connections ?? [];
@@ -711,13 +855,123 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     const nodesWithExistingPortData = applyPortDataToNodes(loadedNodes, portsWithData);
                     const nodesWithPropagatedData = propagateData(nodesWithExistingPortData, loadedConnections);
 
-                    // Display nodes immediately
-                    setNodes(nodesWithPropagatedData);
+                    // Detect overlapping nodes (saved with bad positions) and auto-spread them
+                    const fixOverlappingNodes = (
+                        nodeList: typeof nodesWithPropagatedData
+                    ): typeof nodesWithPropagatedData => {
+                        if (nodeList.length <= 1) return nodeList;
+                        // Detect visual overlap: two nodes whose top-left corners are closer than
+                        // NODE_WIDTH in x OR closer than MIN_GAP in y (i.e. they'd paint over each other).
+                        const hasOverlap = nodeList.some((a, i) =>
+                            nodeList
+                                .slice(i + 1)
+                                .some(
+                                    b =>
+                                        Math.abs(a.position.x - b.position.x) < PORT_LAYOUT.NODE_WIDTH &&
+                                        Math.abs(a.position.y - b.position.y) < LAYOUT_CONFIG.MIN_GAP
+                                )
+                        );
+                        // Also detect "same column" layout: all nodes within 100px x-range
+                        // (indicates positions were never properly set — needs horizontal spread)
+                        const xValues = nodeList.map(n => n.position.x);
+                        const xRange = Math.max(...xValues) - Math.min(...xValues);
+                        const allSameColumn = xRange < 100;
+                        if (!hasOverlap && !allSameColumn) return nodeList;
+
+                        // Topological sort to assign horizontal levels
+                        const adj: Record<string, string[]> = {};
+                        const inDeg: Record<string, number> = {};
+                        nodeList.forEach(n => {
+                            adj[n.id] = [];
+                            inDeg[n.id] = 0;
+                        });
+                        loadedConnections.forEach(c => {
+                            if (adj[c.sourceNodeId] !== undefined && adj[c.targetNodeId] !== undefined) {
+                                adj[c.sourceNodeId].push(c.targetNodeId);
+                                inDeg[c.targetNodeId]++;
+                            }
+                        });
+                        const lvls: Record<string, number> = {};
+                        const q = nodeList.filter(n => inDeg[n.id] === 0).map(n => n.id);
+                        q.forEach(id => {
+                            lvls[id] = 0;
+                        });
+                        const tmp = { ...inDeg };
+                        const bfsQ = [...q];
+                        while (bfsQ.length > 0) {
+                            const cur = bfsQ.shift()!;
+                            (adj[cur] || []).forEach(next => {
+                                lvls[next] = Math.max(lvls[next] || 0, (lvls[cur] || 0) + 1);
+                                tmp[next]--;
+                                if (tmp[next] === 0) bfsQ.push(next);
+                            });
+                        }
+                        const maxLvl = nodeList.reduce((m, n) => Math.max(m, lvls[n.id] || 0), 0);
+                        nodeList.forEach(n => {
+                            if (lvls[n.id] === undefined) lvls[n.id] = maxLvl + 1;
+                        });
+
+                        // Group and position
+                        const groups: Record<number, typeof nodeList> = {};
+                        nodeList.forEach(n => {
+                            const l = lvls[n.id] || 0;
+                            if (!groups[l]) groups[l] = [];
+                            groups[l].push(n);
+                        });
+                        const result = [...nodeList];
+                        Object.keys(groups)
+                            .map(Number)
+                            .sort((a, b) => a - b)
+                            .forEach(level => {
+                                let cy = LAYOUT_CONFIG.START_Y;
+                                groups[level].forEach(node => {
+                                    const x = LAYOUT_CONFIG.START_X + level * LAYOUT_CONFIG.LEVEL_WIDTH;
+                                    const idx = result.findIndex(n => n.id === node.id);
+                                    if (idx !== -1) result[idx] = { ...result[idx], position: { x, y: cy } };
+                                    cy +=
+                                        (estimateNodeHeight(node, blockRegistry[node.type]) ||
+                                            LAYOUT_CONFIG.DEFAULT_HEIGHT) + LAYOUT_CONFIG.MIN_GAP;
+                                });
+                            });
+                        return result;
+                    };
+
+                    // Display nodes immediately.
+                    // Suppress onChange for this batch: loading server data should not
+                    // echo back as a local save (load→save→WS→load loop prevention).
+                    const finalNodes = fixOverlappingNodes(nodesWithPropagatedData);
+                    suppressNextOnChangeRef.current = true;
+                    setNodes(finalNodes);
                     setConnections(loadedConnections);
                     pastRef.current = [];
                     futureRef.current = [];
                     handleSelectionChange(null);
                     setSelectedConnectionId(null);
+
+                    // Fit viewport so all nodes are visible after load/reposition
+                    const canvasEl = canvasRef.current;
+                    if (canvasEl && finalNodes.length > 0) {
+                        const canvasW = canvasEl.clientWidth;
+                        const canvasH = canvasEl.clientHeight;
+                        const pad = 60;
+                        const minX = Math.min(...finalNodes.map(n => n.position.x));
+                        const minY = Math.min(...finalNodes.map(n => n.position.y));
+                        const maxX = Math.max(...finalNodes.map(n => n.position.x + PORT_LAYOUT.NODE_WIDTH));
+                        const maxY = Math.max(
+                            ...finalNodes.map(
+                                n =>
+                                    n.position.y +
+                                    (estimateNodeHeight(n, blockRegistry[n.type]) || LAYOUT_CONFIG.DEFAULT_HEIGHT)
+                            )
+                        );
+                        const contentW = maxX - minX || 1;
+                        const contentH = maxY - minY || 1;
+                        const zoom = Math.min((canvasW - pad * 2) / contentW, (canvasH - pad * 2) / contentH, 1);
+                        const safeZoom = Math.max(zoom, MIN_ZOOM);
+                        const viewX = (canvasW - contentW * safeZoom) / 2 - minX * safeZoom;
+                        const viewY = (canvasH - contentH * safeZoom) / 2 - minY * safeZoom;
+                        setViewport({ x: Math.round(viewX), y: Math.round(viewY), zoom: safeZoom });
+                    }
 
                     // Step 2: Fetch missing port data (data: null) in background
                     // Each port updates individually when fetched for progressive loading UX
@@ -765,6 +1019,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     saveCheckpoint();
                     setNodes([]);
                     setConnections([]);
+                    lastPlacedPosRef.current = null;
                     handleSelectionChange(null);
                 },
                 newWorkflow: () => {
@@ -773,6 +1028,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     setConnections([]);
                     pastRef.current = [];
                     futureRef.current = [];
+                    lastPlacedPosRef.current = null;
                     setViewport({ x: 0, y: 0, zoom: 1 });
                     handleSelectionChange(null);
                 },
@@ -855,6 +1111,11 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     const nodeYPositions: Record<string, number> = {};
                     const positionedNodes = [...nodes];
 
+                    // When all nodes are unconnected, use a multi-column grid instead of
+                    // one impossibly tall column at x=50.
+                    const allUnconnected = sortedLevels.length === 1 && sortedLevels[0] === 0;
+                    const GRID_MAX_ROWS = 4;
+
                     sortedLevels.forEach(level => {
                         const group = levelGroups[level];
                         group.sort((a, b) => {
@@ -870,25 +1131,70 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                             return avgA - avgB;
                         });
 
-                        let currentY = LAYOUT_CONFIG.START_Y;
-                        group.forEach(node => {
-                            const x = LAYOUT_CONFIG.START_X + level * LAYOUT_CONFIG.LEVEL_WIDTH;
-                            const y = currentY;
-                            nodeYPositions[node.id] = y;
-                            const nodeIndex = positionedNodes.findIndex(n => n.id === node.id);
-                            if (nodeIndex !== -1) {
-                                positionedNodes[nodeIndex] = {
-                                    ...positionedNodes[nodeIndex],
-                                    position: { x, y },
-                                };
-                            }
-                            const nodeHeight = estimateNodeHeight(node, blockRegistry[node.type]);
-                            currentY += nodeHeight + LAYOUT_CONFIG.MIN_GAP;
-                        });
+                        if (allUnconnected && group.length > GRID_MAX_ROWS) {
+                            const colHeights: number[] = [];
+                            group.forEach((node, index) => {
+                                const col = Math.floor(index / GRID_MAX_ROWS);
+                                const row = index % GRID_MAX_ROWS;
+                                const x = LAYOUT_CONFIG.START_X + col * LAYOUT_CONFIG.LEVEL_WIDTH;
+                                if (row === 0) colHeights[col] = LAYOUT_CONFIG.START_Y;
+                                const y = colHeights[col];
+                                nodeYPositions[node.id] = y;
+                                const nodeIndex = positionedNodes.findIndex(n => n.id === node.id);
+                                if (nodeIndex !== -1) {
+                                    positionedNodes[nodeIndex] = { ...positionedNodes[nodeIndex], position: { x, y } };
+                                }
+                                const nodeHeight = estimateNodeHeight(node, blockRegistry[node.type]);
+                                colHeights[col] = y + nodeHeight + LAYOUT_CONFIG.MIN_GAP;
+                            });
+                        } else {
+                            let currentY = LAYOUT_CONFIG.START_Y;
+                            group.forEach(node => {
+                                const x = LAYOUT_CONFIG.START_X + level * LAYOUT_CONFIG.LEVEL_WIDTH;
+                                const y = currentY;
+                                nodeYPositions[node.id] = y;
+                                const nodeIndex = positionedNodes.findIndex(n => n.id === node.id);
+                                if (nodeIndex !== -1) {
+                                    positionedNodes[nodeIndex] = {
+                                        ...positionedNodes[nodeIndex],
+                                        position: { x, y },
+                                    };
+                                }
+                                const nodeHeight = estimateNodeHeight(node, blockRegistry[node.type]);
+                                currentY += nodeHeight + LAYOUT_CONFIG.MIN_GAP;
+                            });
+                        }
                     });
 
                     setNodes(positionedNodes);
-                    setViewport({ x: 20, y: 20, zoom: 1 });
+
+                    // Fit all positioned nodes into the viewport
+                    const canvas = canvasRef.current;
+                    if (canvas && positionedNodes.length > 0) {
+                        const canvasW = canvas.clientWidth;
+                        const canvasH = canvas.clientHeight;
+                        const pad = 60;
+                        const minX = Math.min(...positionedNodes.map(n => n.position.x));
+                        const minY = Math.min(...positionedNodes.map(n => n.position.y));
+                        const maxX = Math.max(...positionedNodes.map(n => n.position.x + PORT_LAYOUT.NODE_WIDTH + 10));
+                        const maxY = Math.max(
+                            ...positionedNodes.map(n => n.position.y + estimateNodeHeight(n, blockRegistry[n.type]))
+                        );
+                        const contentW = maxX - minX || 1;
+                        const contentH = maxY - minY || 1;
+                        const zoom = Math.min(
+                            (canvasW - pad * 2) / contentW,
+                            (canvasH - pad * 2) / contentH,
+                            1,
+                            MAX_ZOOM
+                        );
+                        const safeZoom = Math.max(zoom, MIN_ZOOM);
+                        const viewX = (canvasW - contentW * safeZoom) / 2 - minX * safeZoom;
+                        const viewY = (canvasH - contentH * safeZoom) / 2 - minY * safeZoom;
+                        setViewport({ x: Math.round(viewX), y: Math.round(viewY), zoom: safeZoom });
+                    } else {
+                        setViewport({ x: 20, y: 20, zoom: 1 });
+                    }
                 },
                 executeNode: async (nodeId: string) => {
                     if (executeNodeRef.current) {
@@ -1426,6 +1732,9 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     },
                     (oldTempId, newServerId) => {
                         replaceNodeIdInState(oldTempId, newServerId, setNodes, setConnections, setSelectedNodeIds);
+                        setConnectionDraft(prev =>
+                            prev?.sourceNodeId === oldTempId ? { ...prev, sourceNodeId: newServerId } : prev
+                        );
                     }
                 );
             },
@@ -1999,7 +2308,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
             // Use dynamic node width for output port position
             // If node is being resized, use the resizing width for real-time edge updates
             const nodeWidth = resizingNode?.nodeId === nodeId ? resizingNode.width : getNodeWidth(node);
-            const xOffset = type === 'input' ? PORT_LAYOUT.INPUT_X : nodeWidth + 3;
+            const xOffset = type === 'input' ? PORT_LAYOUT.INPUT_X : nodeWidth;
             return { x: node.position.x + xOffset, y: node.position.y + yOffset };
         };
 
@@ -2084,6 +2393,9 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                                         setNodes,
                                         setConnections,
                                         setSelectedNodeIds
+                                    );
+                                    setConnectionDraft(prev =>
+                                        prev?.sourceNodeId === oldTempId ? { ...prev, sourceNodeId: newServerId } : prev
                                     );
                                 }
                             );
@@ -2262,10 +2574,12 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     >
                         <svg className="absolute overflow-visible top-0 left-0 w-full h-full">
                             {connections.map(conn => {
-                                const start = getPortPosition(conn.sourceNodeId, conn.sourcePortId, 'output');
-                                const end = getPortPosition(conn.targetNodeId, conn.targetPortId, 'input');
                                 const sourceNode = nodes.find(n => n.id === conn.sourceNodeId);
                                 const targetNode = nodes.find(n => n.id === conn.targetNodeId);
+                                // Skip ghost connections where either node no longer exists
+                                if (!sourceNode || !targetNode) return null;
+                                const start = getPortPosition(conn.sourceNodeId, conn.sourcePortId, 'output');
+                                const end = getPortPosition(conn.targetNodeId, conn.targetPortId, 'input');
                                 const packet = sourceNode?.outputData?.[conn.sourcePortId];
                                 const isActive = !!packet;
                                 // Use getEffectiveState for backward compatibility (state preferred, status fallback)

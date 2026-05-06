@@ -43,7 +43,9 @@ const BlockItem: React.FC<{
         <Star className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
         <div className="min-w-0 w-full">
             <p className="text-sm font-medium text-foreground">{block.label}</p>
-            {block.description && <p className="text-xs text-muted-foreground leading-relaxed">{block.description}</p>}
+            {block.description && (
+                <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">{block.description}</p>
+            )}
         </div>
     </button>
 );
@@ -67,7 +69,14 @@ export const Sidebar = forwardRef<SidebarRef, SidebarProps>(({ onAddNode, isLoad
 
     // Build categorized block list from server registry
     const blocksByCategory = useMemo(() => {
-        const all = Object.values(blockRegistry);
+        // blockRegistry indexes each block by both type and id for backward compat,
+        // so deduplicate by block.type before categorizing
+        const seen = new Set<string>();
+        const all = Object.values(blockRegistry).filter(block => {
+            if (seen.has(block.type)) return false;
+            seen.add(block.type);
+            return true;
+        });
         const map: Record<BlockStereo, BlockDefinitionWithFrontend[]> = {
             input: [],
             process: [],
