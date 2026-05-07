@@ -2777,6 +2777,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     {logViewerNodeId && <LogModal nodeId={logViewerNodeId} onClose={() => setLogViewerNodeId(null)} />}
 
                     <DetailPanel
+                        flowId={flowId}
                         selectedNode={detailNode}
                         selectedConnection={detailConnection}
                         nodes={nodes}

@@ -1,8 +1,15 @@
-import { api, withRetry } from '@flows/web-core';
+import { getFlow, upsertFlow } from './flows';
 
-import type { ApiListResult, EdgeBody, EdgeView } from '../types';
+import type { EdgeBody, EdgeData, EdgeView } from '../types';
 
 const _log = console.log.bind(console, '[edges-api]');
+
+const createClientEdgeId = (): string => `edge_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+const requireFlowId = (flowId?: string): string => {
+    if (!flowId) throw new Error('flowId is required after P3 legacy /edges endpoint removal');
+    return flowId;
+};
 
 // ============================================================================
 // Edge CRUD API
@@ -15,12 +22,8 @@ const _log = console.log.bind(console, '[edges-api]');
  */
 export const listEdges = async (flowId: string): Promise<EdgeView[]> => {
     _log(`> listEdges(${flowId})`);
-    const response = await withRetry(
-        () => api.post<ApiListResult<EdgeView>>('/edges/0/list', { flowId }),
-        3,
-        'listEdges'
-    );
-    return response.data.list || [];
+    const flow = await getFlow(flowId);
+    return (flow.edges ?? []) as unknown as EdgeView[];
 };
 
 /**
@@ -30,8 +33,7 @@ export const listEdges = async (flowId: string): Promise<EdgeView[]> => {
  */
 export const getEdge = async (id: string): Promise<EdgeView> => {
     _log(`> getEdge(${id})`);
-    const response = await api.get<EdgeView>(`/edges/${id}`);
-    return response.data;
+    throw new Error(`getEdge(${id}) requires flow context after P3 legacy /edges endpoint removal`);
 };
 
 /**
@@ -41,8 +43,10 @@ export const getEdge = async (id: string): Promise<EdgeView> => {
  */
 export const createEdge = async (body: EdgeBody): Promise<EdgeView> => {
     _log('> createEdge()', body);
-    const response = await api.post<EdgeView>('/edges/0', body);
-    return response.data;
+    const flowId = requireFlowId(body.flowId);
+    const edge = { id: body.id || createClientEdgeId(), ...(body as Partial<EdgeData>) } as EdgeData;
+    const result = await upsertFlow(flowId, { nodes: [], edges: [edge] });
+    return (result.edges?.find(item => item.id === edge.id) ?? edge) as unknown as EdgeView;
 };
 
 /**
@@ -52,8 +56,10 @@ export const createEdge = async (body: EdgeBody): Promise<EdgeView> => {
  */
 export const updateEdge = async (id: string, body: EdgeBody): Promise<EdgeView> => {
     _log(`> updateEdge(${id})`, body);
-    const response = await api.post<EdgeView>(`/edges/${id}`, body);
-    return response.data;
+    const flowId = requireFlowId(body.flowId);
+    const edge = { id, ...(body as Partial<EdgeData>) } as EdgeData;
+    const result = await upsertFlow(flowId, { nodes: [], edges: [edge] });
+    return (result.edges?.find(item => item.id === id) ?? edge) as unknown as EdgeView;
 };
 
 /**
@@ -61,9 +67,9 @@ export const updateEdge = async (id: string, body: EdgeBody): Promise<EdgeView> 
  * Delete edge
  * DELETE /edges/:id
  */
-export const deleteEdge = async (id: string): Promise<void> => {
-    _log(`> deleteEdge(${id})`);
-    await api.delete(`/edges/${id}`);
+export const deleteEdge = async (id: string, flowId?: string): Promise<void> => {
+    _log(`> deleteEdge(${id}, flowId=${flowId ?? 'n/a'})`);
+    await upsertFlow(requireFlowId(flowId), { nodes: [], edges: [{ id: `#${id}` } as EdgeData] });
 };
 
 // Re-export types

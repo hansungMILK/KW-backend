@@ -46,6 +46,7 @@ import { tryParseJson } from '../utils';
 import type { BlockDefinition, ConfigField, Connection, DataPacket, NodeData } from '@flows/flows';
 
 interface DetailPanelProps {
+    flowId?: string | null;
     selectedNode: NodeData | null;
     selectedConnection: Connection | null;
     nodes: NodeData[];
@@ -394,6 +395,7 @@ const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
 };
 
 export const DetailPanel: React.FC<DetailPanelProps> = ({
+    flowId,
     selectedNode,
     selectedConnection,
     nodes,
@@ -1026,6 +1028,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                     <TouchDialog
                         open={isTouchDialogOpen}
                         onOpenChange={setIsTouchDialogOpen}
+                        flowId={flowId}
                         nodeId={selectedNode.id}
                         initialNode={selectedNode}
                         onSuccess={msg => onShowNotification?.(msg, 'success')}
@@ -1038,6 +1041,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                     <TouchDialog
                         open={!!touchPortId}
                         onOpenChange={open => !open && setTouchPortId(null)}
+                        flowId={flowId}
                         nodeId={touchPortId}
                         onSuccess={msg => {
                             onShowNotification?.(msg, 'success');
@@ -1168,6 +1172,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                     <TouchDialog
                         open={isTouchDialogOpen}
                         onOpenChange={setIsTouchDialogOpen}
+                        flowId={flowId}
                         nodeId={selectedConnection.id}
                         initialConnection={selectedConnection}
                         onSuccess={msg => onShowNotification?.(msg, 'success')}

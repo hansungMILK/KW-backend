@@ -6,7 +6,6 @@ import { Play } from 'lucide-react';
 import {
     EXECUTE_FUNCTIONS,
     createFlowRun,
-    getNode,
     getPortData,
     getRun,
     getRunAssets,
@@ -220,20 +219,11 @@ export const FlowEditorPage = () => {
                     });
                     return;
                 }
-                try {
-                    const nodeData = await getNode(nodeId);
-                    canvasRef.current.updateNodeFromServer(nodeId, {
-                        state,
-                        status: state,
-                        errorMessage: nodeData.errorMessage,
-                    });
-                } catch {
-                    // Fallback: update state without errorMessage if API fails
-                    canvasRef.current.updateNodeFromServer(nodeId, {
-                        state,
-                        status: state,
-                    });
-                }
+                canvasRef.current.updateNodeFromServer(nodeId, {
+                    state,
+                    status: state,
+                    errorMessage: currentNode?.errorMessage,
+                });
                 return;
             }
 

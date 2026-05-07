@@ -1,4 +1,4 @@
-import { api } from '@flows/web-core';
+import { API_URL, api } from '@flows/web-core';
 
 import { getFlow, upsertFlow } from './flows';
 
@@ -57,6 +57,24 @@ export interface RunNodeBody {
     /** Output data from frontend execution (for isFrontend nodes) */
     output?: Record<string, DataPacket>;
 }
+
+const getAssetBaseUrl = (): string => {
+    const runtimeWindow =
+        typeof window !== 'undefined' ? (window as typeof window & { VITE_ASSET_BASE_URL?: string }) : undefined;
+    const configured = runtimeWindow?.VITE_ASSET_BASE_URL;
+    if (configured) return configured.replace(/\/+$/, '');
+
+    const apiUrl = API_URL.replace(/\/+$/, '');
+    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(apiUrl)) {
+        return `${apiUrl}/_local-assets`;
+    }
+
+    throw new Error('VITE_ASSET_BASE_URL is required to display legacy s3:// image URLs');
+};
+
+const keyFromS3Url = (s3Url: string): string => s3Url.replace(/^s3:\/\/[^/]+\//, '');
+
+const encodeAssetPath = (key: string): string => key.split('/').map(encodeURIComponent).join('/');
 
 /**
  * @deprecated Use GET /flows/{flowId} nodes array instead. Removal in P3.
@@ -250,9 +268,10 @@ export const toPortData = (packet: DataPacket): PortData => {
  * Delete node
  * DELETE /nodes/:id
  */
-export const deleteNode = async (id: string): Promise<void> => {
-    _log(`> deleteNode(${id})`);
-    await api.delete(`/nodes/${id}`);
+export const deleteNode = async (id: string, flowId?: string): Promise<void> => {
+    _log(`> deleteNode(${id}, flowId=${flowId ?? 'n/a'})`);
+    if (!flowId) throw new Error('flowId is required after P3 legacy /nodes endpoint removal');
+    await upsertFlow(flowId, { nodes: [{ id: `#${id}` } as NodeData], edges: [] });
 };
 
 /**
@@ -306,39 +325,23 @@ export const runNode = async (
 };
 
 /**
- * Get image from S3 URL
- * GET /nodes/0/image?s3Url=...
+ * Resolve an S3 URL to the current asset public URL.
  *
- * Fetches image binary from S3 via proxy endpoint.
- * Returns base64 data URL for direct use in <img> src.
- *
- * @see eureka-flows-api v0.26.126
  * @param s3Url - S3 reference (s3://bucket/key)
- * @returns Data URL (data:image/...;base64,...)
+ * @returns Public URL for browser display
  */
 export const getImageFromS3 = async (s3Url: string): Promise<string> => {
     if (!s3Url || !s3Url.startsWith('s3://')) {
         throw new Error('Invalid S3 URL');
     }
     _log(`> getImageFromS3(${s3Url})`);
-
-    const response = await api.get<{ body: string; headers: { 'Content-Type': string } }>('/nodes/0/image', {
-        params: { s3Url },
-    });
-
-    const contentType = response.data.headers?.['Content-Type'] || 'image/png';
-    const base64Body = response.data.body;
-
-    return `data:${contentType};base64,${base64Body}`;
+    return `${getAssetBaseUrl()}/${encodeAssetPath(keyFromS3Url(s3Url))}`;
 };
 
 /**
- * Get S3 image info (metadata only)
- * GET /nodes/0/image-info?s3Url=...
+ * Get S3 image info (metadata only) without calling removed legacy /nodes endpoints.
+ * Size/hash are unknown on the client; the UI uses this only for safe parsing.
  *
- * Returns parsed S3 URL information without fetching the image.
- *
- * @see eureka-flows-api v0.26.126
  * @param s3Url - S3 reference (s3://bucket/key)
  * @returns S3ImageInfo with parsed URL data
  */
@@ -347,12 +350,20 @@ export const getImageInfo = async (s3Url: string): Promise<S3ImageInfo> => {
         throw new Error('Invalid S3 URL');
     }
     _log(`> getImageInfo(${s3Url})`);
-
-    const response = await api.get<S3ImageInfo>('/nodes/0/image-info', {
-        params: { s3Url },
-    });
-
-    return response.data;
+    const key = keyFromS3Url(s3Url);
+    const ext = key.includes('.') ? key.slice(key.lastIndexOf('.') + 1).toLowerCase() : '';
+    return {
+        s3Url,
+        parsed: {
+            bucket: s3Url.replace(/^s3:\/\//, '').split('/')[0] ?? '',
+            key,
+            md5: '',
+            sizeKb: 0,
+            ext,
+            prefix: key.includes('/') ? key.slice(0, key.lastIndexOf('/')) : undefined,
+        },
+        allowed: true,
+    };
 };
 
 /**
@@ -384,8 +395,27 @@ export interface TouchNodeBody {
  * @param body - Touch body with optional fields
  * @returns Updated NodeView
  */
-export const touchNode = async (nodeId: string, body: TouchNodeBody): Promise<NodeView> => {
-    _log(`> touchNode(${nodeId})`, body);
-    const response = await api.post<NodeView>(`/nodes/${nodeId}/touch`, body);
-    return response.data;
+export const touchNode = async (
+    flowId: string,
+    nodeId: string,
+    body: TouchNodeBody,
+    options: { target?: 'node' | 'edge' } = {}
+): Promise<NodeView> => {
+    _log(`> touchNode(flowId=${flowId}, nodeId=${nodeId})`, body);
+    if (!flowId) throw new Error('flowId is required to touch canvas data after P3 legacy endpoint removal');
+
+    if (options.target === 'edge') {
+        const edgePatch: EdgeData = {
+            id: nodeId,
+            ...('position' in body && body.position ? { position: body.position } : {}),
+            ...('disabled' in body && body.disabled !== undefined ? { disabled: body.disabled } : {}),
+            ...('name' in body && body.name ? { label: body.name } : {}),
+        } as EdgeData;
+        await upsertFlow(flowId, { nodes: [], edges: [edgePatch] });
+        return edgePatch as unknown as NodeView;
+    }
+
+    const nodePatch: NodeData = { id: nodeId, ...(body as Partial<NodeData>) } as NodeData;
+    const result = await upsertFlow(flowId, { nodes: [nodePatch], edges: [] });
+    return (result.nodes?.find(item => item.id === nodeId) ?? nodePatch) as unknown as NodeView;
 };

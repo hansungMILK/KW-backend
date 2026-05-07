@@ -277,10 +277,10 @@ export interface UseInitFlowSocketOptions {
  *   channelId: '1000011',
  *   currentFlowId: '1000011',
  *   onFlowUpdate: (flowId) => {
- *     // Reload entire flow: GET /flows/:id/load
+ *     // Reload entire flow: GET /flows/:flowId
  *   },
  *   onNodeReload: (info) => {
- *     // Reload node: GET /nodes/:id
+ *     // Reload the owning flow and update the matching node locally.
  *     // info contains: nodeId, flowId, timestamp, status, prevStatus
  *   },
  * });

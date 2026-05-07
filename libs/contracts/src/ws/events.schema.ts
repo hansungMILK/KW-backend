@@ -55,7 +55,7 @@ export const WsNodeUpdatedSchema = z.object({
 export type WsNodeUpdated = z.infer<typeof WsNodeUpdatedSchema>;
 
 // ============================================================================
-// Port update — port data changed, client fetches via GET /nodes/{portId}/port
+// Port update — port data changed, client refreshes via GET /flows/{flowId}
 // ============================================================================
 
 export const WsPortUpdatedSchema = z.object({

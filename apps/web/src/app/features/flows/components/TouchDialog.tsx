@@ -21,6 +21,7 @@ import type { Connection, NodeData, TouchNodeBody } from '@flows/flows';
 interface TouchDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
+    flowId?: string | null;
     nodeId: string;
     /** Initial node data to populate form defaults */
     initialNode?: NodeData | null;
@@ -86,6 +87,7 @@ const buildTouchBody = (formData: FormData): TouchNodeBody => {
 export const TouchDialog = ({
     open,
     onOpenChange,
+    flowId,
     nodeId,
     initialNode,
     initialConnection,
@@ -149,8 +151,9 @@ export const TouchDialog = ({
         setIsLoading(true);
 
         try {
+            if (!flowId) throw new Error('flowId is required for touch debug');
             const body = buildTouchBody(formData);
-            await touchNode(nodeId, body);
+            await touchNode(flowId, nodeId, body, { target: initialConnection ? 'edge' : 'node' });
             onSuccess(t('flows:detailPanel.touchDialog.success'));
             onOpenChange(false);
         } catch (error) {

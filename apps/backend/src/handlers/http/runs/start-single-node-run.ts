@@ -28,9 +28,8 @@ const RequestSchema = z
  * status transitions (RUNNING → COMPLETED/FAILED) still apply. Returns 202
  * Accepted.
  *
- * The legacy POST /nodes/{id}/run handler (run-node.ts) is kept as-is for
- * frontend compatibility — it performs a different fake-execution shape used
- * by the current canvas UI. Both paths coexist until frontend migration completes.
+ * This is now the only supported single-node execution route after P3 legacy
+ * /nodes/* handler removal. The frontend compatibility layer calls this path.
  */
 const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
     const paramsParsed = ParamsSchema.safeParse({
