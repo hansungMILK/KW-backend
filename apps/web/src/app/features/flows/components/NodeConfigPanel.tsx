@@ -5,7 +5,7 @@ import { FileText, Settings, X } from 'lucide-react';
 
 import { cn } from '@flows/lib/utils';
 
-import type { NodeData } from '@lemoncloud/eureka-flows-api';
+import type { NodeData } from '@flows/flows';
 
 interface NodeConfigPanelProps {
     selectedNode: NodeData | null;

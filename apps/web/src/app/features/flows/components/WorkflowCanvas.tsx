@@ -30,6 +30,7 @@ import { DetailPanel } from './DetailPanel';
 import { LogModal } from './LogModal';
 import { MobileControls } from './MobileControls';
 import { NodeBlock } from './NodeBlock';
+import { NodeConfigPanel, isCustomNode } from './NodeConfigPanel';
 import { ZoomControls } from './ZoomControls';
 import { TOUCH_GESTURE_THRESHOLD, useTouchCanvas } from '../hooks';
 import {
@@ -2776,31 +2777,44 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
 
                     {logViewerNodeId && <LogModal nodeId={logViewerNodeId} onClose={() => setLogViewerNodeId(null)} />}
 
-                    <DetailPanel
-                        flowId={flowId}
-                        selectedNode={detailNode}
-                        selectedConnection={detailConnection}
-                        nodes={nodes}
-                        connections={connections}
-                        onConfigChange={handleConfigChange}
-                        onDescriptionChange={handleDescriptionChange}
-                        onLabelChange={handleLabelChange}
-                        onToggleAuto={handleToggleAuto}
-                        onViewLogs={() => selectedNodeId && setLogViewerNodeId(selectedNodeId)}
-                        onDeleteNode={deleteNode}
-                        onDeleteConnection={deleteConnection}
-                        onTriggerNode={executeNode}
-                        onSelectNode={id => handleSelectionChange(id)}
-                        onSelectConnection={id => {
-                            setSelectedConnectionId(id);
-                            handleSelectionChange(null);
-                        }}
-                        onClose={() => {
-                            handleSelectionChange(null);
-                            setSelectedConnectionId(null);
-                        }}
-                        onShowNotification={onShowNotification}
-                    />
+                    {isCustomNode(detailNode) ? (
+                        <NodeConfigPanel
+                            selectedNode={detailNode}
+                            onClose={() => {
+                                handleSelectionChange(null);
+                                setSelectedConnectionId(null);
+                            }}
+                            onLabelChange={handleLabelChange}
+                            onDescriptionChange={handleDescriptionChange}
+                            onConfigChange={handleConfigChange}
+                        />
+                    ) : (
+                        <DetailPanel
+                            flowId={flowId}
+                            selectedNode={detailNode}
+                            selectedConnection={detailConnection}
+                            nodes={nodes}
+                            connections={connections}
+                            onConfigChange={handleConfigChange}
+                            onDescriptionChange={handleDescriptionChange}
+                            onLabelChange={handleLabelChange}
+                            onToggleAuto={handleToggleAuto}
+                            onViewLogs={() => selectedNodeId && setLogViewerNodeId(selectedNodeId)}
+                            onDeleteNode={deleteNode}
+                            onDeleteConnection={deleteConnection}
+                            onTriggerNode={executeNode}
+                            onSelectNode={id => handleSelectionChange(id)}
+                            onSelectConnection={id => {
+                                setSelectedConnectionId(id);
+                                handleSelectionChange(null);
+                            }}
+                            onClose={() => {
+                                handleSelectionChange(null);
+                                setSelectedConnectionId(null);
+                            }}
+                            onShowNotification={onShowNotification}
+                        />
+                    )}
                 </div>
             </div>
         );

@@ -125,7 +125,6 @@ export const FlowEditorPage = () => {
         currentFlowId,
         flowName,
         isLoading,
-        isSaving,
         lastSavedAt,
         isAutoSaveEnabled,
         saveStatus,
@@ -1066,7 +1065,6 @@ export const FlowEditorPage = () => {
                     onSave: handleSave,
                 }}
                 saveState={{
-                    isSaving,
                     lastSavedAt,
                     isAutoSaveEnabled,
                     onToggleAutoSave: toggleAutoSave,
