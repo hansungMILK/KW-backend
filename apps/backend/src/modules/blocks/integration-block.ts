@@ -39,6 +39,7 @@ interface UpstreamData {
     mediaTts?: { audio?: { url: string; durationSec: number; format: string } };
     mediaVideo?: {
         video?: { url: string; durationSec: number; width: number; height: number; format: string; sizeBytes?: number };
+        backgroundMusic?: Record<string, unknown>;
     };
 }
 
@@ -243,6 +244,7 @@ export const integrationBlock: BlockExecutor = {
                       format: upstream.mediaTts.audio.format,
                   }
                 : undefined,
+            backgroundMusic: upstream.mediaVideo.backgroundMusic,
             thumbnailUrl: upstream.mediaImage?.images?.[0]?.url || null,
             sceneCount,
             durationSec,

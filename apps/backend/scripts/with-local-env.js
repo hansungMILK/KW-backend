@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Cross-platform equivalent of with-local-env.sh
 // Loads .env if present, then spawns the given command with those env vars.
+const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { spawnSync } = require('child_process');
 
 const envFile = path.join(process.cwd(), '.env');
 if (fs.existsSync(envFile)) {

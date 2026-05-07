@@ -209,6 +209,19 @@ export const MediaVideoOutputSchema = z.object({
         format: z.string(),
         sizeBytes: z.number().optional(),
     }),
+    backgroundMusic: z
+        .object({
+            enabled: z.boolean().optional(),
+            id: z.string().optional(),
+            title: z.string().optional(),
+            mood: z.string().optional(),
+            volume: z.number().optional(),
+            source: z.string().optional(),
+            license: z.string().optional(),
+            attribution: z.string().optional(),
+            reason: z.string().optional(),
+        })
+        .optional(),
 });
 
 /** integration block — final deliverable */

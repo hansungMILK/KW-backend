@@ -2,7 +2,9 @@ import { randomUUID } from 'crypto';
 
 import { getPublicUrl, putObject } from '../../adapters/aws/s3';
 import { ffmpegAdapter } from '../../adapters/external/ffmpeg-adapter';
+import { env } from '../../config/env';
 import { traceService } from '../../services/trace-service';
+import { selectBgmForShorts } from '../shorts/bgm/bgm-selector';
 
 import type { BlockExecutor, BlockExecutorResult } from './types';
 
@@ -36,6 +38,7 @@ export const mediaVideoBlock: BlockExecutor = {
         const rawImages: RawImage[] = (inp?.images as RawImage[] | undefined) ?? [];
         const rawScenes: RawScene[] = (inp?.normalizedScenes as RawScene[] | undefined) ?? [];
         const metadata = inp?.metadata as Record<string, unknown> | undefined;
+        const enableBackgroundMusic = _config?.backgroundMusic !== false;
 
         const images = rawImages
             .filter(img => typeof img.url === 'string')
@@ -58,14 +61,54 @@ export const mediaVideoBlock: BlockExecutor = {
         }
 
         try {
+            const backgroundMusic = enableBackgroundMusic
+                ? selectBgmForShorts({
+                      metadata,
+                      scenes: rawScenes as Array<Record<string, unknown>>,
+                      requestText: typeof metadata?.requestText === 'string' ? metadata.requestText : undefined,
+                  })
+                : undefined;
+
+            if (enableBackgroundMusic && env.shortsBgmRequired && !backgroundMusic) {
+                throw new Error(
+                    `media-video requires licensed BGM, but no configured track was found in ${env.shortsBgmAssetsDir}`
+                );
+            }
+
             const result = await ffmpegAdapter.compose({
                 images,
                 audioUrl,
-                backgroundMusic: true,
+                backgroundMusic: backgroundMusic
+                    ? {
+                          path: backgroundMusic.track.filePath,
+                          volume: backgroundMusic.volume,
+                          title: backgroundMusic.track.title,
+                          license: backgroundMusic.track.license,
+                          attribution: backgroundMusic.track.attribution,
+                      }
+                    : false,
                 outputWidth: 1080,
                 outputHeight: 1920,
                 outputFormat: 'mp4',
             });
+
+            const backgroundMusicMetadata = backgroundMusic
+                ? {
+                      id: backgroundMusic.track.id,
+                      title: backgroundMusic.track.title,
+                      mood: backgroundMusic.track.mood,
+                      volume: backgroundMusic.volume,
+                      source: backgroundMusic.track.source,
+                      license: backgroundMusic.track.license,
+                      attribution: backgroundMusic.track.attribution,
+                      reason: backgroundMusic.reason,
+                  }
+                : {
+                      enabled: false,
+                      reason: enableBackgroundMusic
+                          ? `no licensed BGM track found in ${env.shortsBgmAssetsDir}`
+                          : 'disabled by node config',
+                  };
 
             const s3Key = `media/video/${randomUUID()}/output.mp4`;
             await putObject(s3Key, result.videoBuffer, 'video/mp4');
@@ -82,6 +125,7 @@ export const mediaVideoBlock: BlockExecutor = {
                         sizeBytes: result.sizeBytes,
                         width: 1080,
                         height: 1920,
+                        backgroundMusic: backgroundMusicMetadata,
                     },
                 },
             ];
@@ -91,6 +135,7 @@ export const mediaVideoBlock: BlockExecutor = {
                     s3Key,
                     durationSec: result.durationSec,
                     sizeBytes: result.sizeBytes,
+                    backgroundMusic: backgroundMusicMetadata,
                 });
             } catch {
                 /* non-fatal */
@@ -106,6 +151,7 @@ export const mediaVideoBlock: BlockExecutor = {
                         format: 'mp4',
                         sizeBytes: result.sizeBytes,
                     },
+                    backgroundMusic: backgroundMusicMetadata,
                     images: rawImages,
                     ...(audioObj ? { audio: audioObj } : {}),
                     normalizedScenes: rawScenes,

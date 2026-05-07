@@ -9,7 +9,16 @@ import { getLocalAssetPath } from '../aws/s3';
 export interface VideoCompositionRequest {
     images: Array<{ url: string; durationSec: number; title?: string; caption?: string; sourceLabel?: string }>;
     audioUrl?: string;
-    backgroundMusic?: boolean;
+    backgroundMusic?:
+        | boolean
+        | {
+              url?: string;
+              path?: string;
+              volume?: number;
+              title?: string;
+              license?: string;
+              attribution?: string;
+          };
     outputWidth: number;
     outputHeight: number;
     outputFormat: 'mp4';
@@ -77,7 +86,9 @@ export const ffmpegAdapter = {
                 await writeFile(audioPath, await loadAudioBinary(request.audioUrl));
             }
 
-            await runFfmpeg(buildArgs(imageFiles, audioPath, request, outputPath));
+            const backgroundMusicPath = await resolveBackgroundMusicPath(request.backgroundMusic, workDir);
+
+            await runFfmpeg(buildArgs(imageFiles, audioPath, backgroundMusicPath, request, outputPath));
 
             const videoBuffer = await readFile(outputPath);
             const { size } = await stat(outputPath);
@@ -104,6 +115,7 @@ function buildArgs(
         overlayPath?: string;
     }>,
     audioPath: string | null,
+    backgroundMusicPath: string | null,
     request: VideoCompositionRequest,
     outputPath: string
 ): string[] {
@@ -131,16 +143,10 @@ function buildArgs(
     }
 
     let bgmInputIndex: number | null = null;
-    if (request.backgroundMusic !== false) {
+    if (backgroundMusicPath) {
         bgmInputIndex = nextInputIndex;
-        args.push(
-            '-f',
-            'lavfi',
-            '-t',
-            String(durationSec),
-            '-i',
-            'aevalsrc=exprs=0.020*(sin(2*PI*196*t)+sin(2*PI*246.94*t)+sin(2*PI*293.66*t)):sample_rate=44100'
-        );
+        nextInputIndex += 1;
+        args.push('-stream_loop', '-1', '-t', String(durationSec), '-i', backgroundMusicPath);
     }
 
     const width = String(request.outputWidth);
@@ -167,13 +173,14 @@ function buildArgs(
     filterParts.push(`${concatInputs}concat=n=${imageFiles.length}:v=1:a=0,format=yuv420p[v]`);
 
     let audioMap: string | null = null;
+    const backgroundMusicVolume = resolveBackgroundMusicVolume(request.backgroundMusic);
     if (narrationInputIndex !== null && bgmInputIndex !== null) {
         filterParts.push(`[${narrationInputIndex}:a]volume=1.0[a0]`);
-        filterParts.push(`[${bgmInputIndex}:a]volume=0.08[a1]`);
+        filterParts.push(`[${bgmInputIndex}:a]volume=${backgroundMusicVolume}[a1]`);
         filterParts.push('[a0][a1]amix=inputs=2:duration=longest:dropout_transition=0[a]');
         audioMap = '[a]';
     } else if (bgmInputIndex !== null) {
-        filterParts.push(`[${bgmInputIndex}:a]volume=0.08[a]`);
+        filterParts.push(`[${bgmInputIndex}:a]volume=${backgroundMusicVolume}[a]`);
         audioMap = '[a]';
     }
 
@@ -386,6 +393,36 @@ function escapeXml(value: string): string {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&apos;');
+}
+
+async function resolveBackgroundMusicPath(
+    backgroundMusic: VideoCompositionRequest['backgroundMusic'],
+    workDir: string
+): Promise<string | null> {
+    if (!backgroundMusic || backgroundMusic === true) return null;
+    if (typeof backgroundMusic !== 'object') return null;
+
+    if (backgroundMusic.path) {
+        if (!existsSync(backgroundMusic.path)) {
+            throw new Error(`Configured BGM file does not exist: ${backgroundMusic.path}`);
+        }
+        return backgroundMusic.path;
+    }
+
+    if (backgroundMusic.url) {
+        const bgmPath = join(workDir, 'background-music.mp3');
+        await writeFile(bgmPath, await loadAudioBinary(backgroundMusic.url));
+        return bgmPath;
+    }
+
+    return null;
+}
+
+function resolveBackgroundMusicVolume(backgroundMusic: VideoCompositionRequest['backgroundMusic']): number {
+    if (!backgroundMusic || typeof backgroundMusic !== 'object') return 0.07;
+    const volume = backgroundMusic.volume;
+    if (typeof volume !== 'number' || !Number.isFinite(volume)) return 0.07;
+    return Math.min(0.3, Math.max(0, volume));
 }
 
 async function loadImageBinary(url: string): Promise<Buffer> {

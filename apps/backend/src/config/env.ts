@@ -61,6 +61,10 @@ export const env = {
     openaiImageSceneConcurrency: readIntEnv('OPENAI_IMAGE_SCENE_CONCURRENCY', 12, 1),
     openaiTtsModel: readEnv('OPENAI_TTS_MODEL', 'gpt-4o-mini-tts'),
     openaiTtsVoice: readEnv('OPENAI_TTS_VOICE', 'nova'),
+    shortsBgmMode: readEnv('SHORTS_BGM_MODE', 'catalog'),
+    shortsBgmRequired: readBoolEnv('SHORTS_BGM_REQUIRED', false),
+    shortsBgmAssetsDir: readEnv('SHORTS_BGM_ASSETS_DIR', 'assets/bgm'),
+    shortsBgmVolume: readNumberEnv('SHORTS_BGM_VOLUME', 0.07, 0),
     nanobananaBaseUrl: readEnv('NANOBANANA_BASE_URL', 'https://www.nananobanana.com/api/v1'),
     nanobananaModel: readEnv('NANOBANANA_MODEL', 'nano-banana'),
 } as const;
