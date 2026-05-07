@@ -1313,6 +1313,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                 selectedNodeId,
                 handleSelectionChange,
                 blockRegistry,
+                flowId,
                 createNodeAsync,
                 createEdgeAsync,
                 pendingEdgeIds,
