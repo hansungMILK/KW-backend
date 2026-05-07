@@ -1,6 +1,7 @@
 import { FlowSaveRequestSchema } from '@flows/contracts';
 
 import { flowRepo } from '../../../repositories/flow-repository';
+import { wsService } from '../../../services/websocket-service';
 import { getBody, getPathParam, withMiddleware } from '../../../utils/middleware';
 import { badRequest, notFound, ok } from '../../../utils/response';
 
@@ -35,6 +36,15 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
             : flow;
 
     if (!saved) return notFound(`Flow ${flow.id} not found after create`);
+
+    // Broadcast only for updates — new flows have no subscribers yet
+    if (id !== '0') {
+        void wsService.broadcastToFlow(saved.id, {
+            type: 'flow',
+            id: saved.id,
+            timestamp: Date.now(),
+        });
+    }
 
     return ok({
         id: saved.id,

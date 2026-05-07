@@ -1,6 +1,7 @@
 import { FlowSaveRequestSchema } from '@flows/contracts';
 
 import { flowRepo } from '../../../repositories/flow-repository';
+import { wsService } from '../../../services/websocket-service';
 import { getBody, getPathParam, withMiddleware } from '../../../utils/middleware';
 import { badRequest, notFound, ok } from '../../../utils/response';
 
@@ -101,6 +102,12 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
 
     const flow = await flowRepo.updateCanvas(id, { nodes, edges });
     if (!flow) return notFound(`Flow ${id} not found`);
+
+    void wsService.broadcastToFlow(id, {
+        type: 'flow',
+        id,
+        timestamp: Date.now(),
+    });
 
     return ok({
         id: flow.id,
