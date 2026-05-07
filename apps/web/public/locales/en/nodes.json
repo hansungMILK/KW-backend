@@ -74,6 +74,7 @@
             "input-text": "Accept text input and pass it to the flow",
             "input-image": "Accept image input and pass it to the flow",
             "buffer-delay": "Delay input packets by the configured duration (ms)",
+            "buffer": "Delay input packets by the configured duration (ms)",
             "text-transform": "Transform text case and whitespace",
             "length-validator": "Validate text length constraints",
             "image-info": "Retrieve image metadata (dimensions, format)",
@@ -92,7 +93,9 @@
             "output-preview": "Preview output results",
             "result-preview": "Preview final results",
             "echo": "Output the input value as-is",
-            "schema-extractor": "Extract schema from JSON"
+            "schema-extractor": "Extract schema from JSON",
+            "html-upload": "Upload HTML via eureka codes",
+            "input-html": "Upload HTML via eureka codes"
         }
     }
 }
