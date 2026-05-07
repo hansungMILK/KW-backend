@@ -38,5 +38,8 @@ jobs:
             - name: Install dependencies
               run: yarn install --frozen-lockfile
 
+            - name: Build contracts
+              run: npx tsc -p libs/contracts/tsconfig.json
+
             - name: Type check backend
               run: npx tsc --noEmit -p apps/backend/tsconfig.json
