@@ -15,13 +15,16 @@
         "graph": "nx graph",
         "!web": "------------- web scripts -------------",
         "web:start": "yarn clean:cache && npx nx serve web --port 3000",
+        "web:start:win": "node node_modules/nx/bin/nx.js serve web --port 3000",
         "web:build": "npx nx build web",
         "web:build:dev": "yarn clean:cache && npx nx build web -- --mode dev",
         "web:build:prod": "yarn clean:cache && npx nx build web -- --mode prod",
         "web:test": "npx nx test web",
         "web:deploy": "(rm -rf ./dist/apps/web || true) && yarn web:build:dev && ./scripts/deploy-web.sh",
         "web:deploy:dev": "(rm -rf ./dist/apps/web || true) && yarn web:build:dev && ./scripts/deploy-web.sh dev",
-        "web:deploy:prod": "(rm -rf ./dist/apps/web || true) && yarn web:build:prod && ./scripts/deploy-web.sh prod"
+        "web:deploy:prod": "(rm -rf ./dist/apps/web || true) && yarn web:build:prod && ./scripts/deploy-web.sh prod",
+        "!backend": "------------- backend scripts -------------",
+        "backend:start:win": "yarn workspace @flows/backend start:win"
     },
     "dependencies": {
         "@aws-sdk/client-kms": "^3.1028.0",

@@ -4,6 +4,7 @@
     "private": true,
     "scripts": {
         "start": "npx serverless offline --httpPort 8800 --websocketPort 8801 --noPrependStageInUrl",
+        "start:win": "if exist .esbuild rmdir /s /q .esbuild & node ..\\..\\node_modules\\serverless\\bin\\serverless.js offline --httpPort 8800 --websocketPort 8801 --noPrependStageInUrl",
         "deploy:dev": "npx serverless deploy --stage dev",
         "deploy:prod": "npx serverless deploy --stage prod"
     },
