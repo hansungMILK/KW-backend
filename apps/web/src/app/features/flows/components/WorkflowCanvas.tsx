@@ -981,7 +981,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     if (nullDataPorts.length > 0) {
                         nullDataPorts.forEach(p => {
                             const direction = p.portId === 'out' ? 'out' : 'in';
-                            getPortData(p.id, direction)
+                            getPortData(p.id, direction, flowId ?? undefined)
                                 .then(portData => {
                                     if (portData.data) {
                                         setNodes(prev => {
@@ -1465,8 +1465,8 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                         if (flowId) {
                             // Send frontend execution output to server
                             // Server will save outputs to ports and propagate to downstream nodes
-                            // await runNode(nodeId, { output: outputs }, { force: true });
-                            await runNode(nodeId, { config: currentNode.config || {} }, { force: true });
+                            // await runNode(flowId, nodeId, { output: outputs }, { force: true });
+                            await runNode(flowId, nodeId, { config: currentNode.config || {} }, { force: true });
                         }
                     } else {
                         // ============================================================
@@ -1513,7 +1513,9 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                         }
 
                         // Step 3: Run the node (server will hydrate inputs from saved port nodes)
-                        const result = await runNode(nodeId, {
+                        if (!flowId) throw new Error('flowId is required to run a node');
+
+                        const result = await runNode(flowId, nodeId, {
                             config: currentNode.config || {},
                         });
 

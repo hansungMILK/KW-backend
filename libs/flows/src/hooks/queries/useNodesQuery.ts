@@ -32,11 +32,14 @@ interface CreateNodeVariables {
 /** Mutation hook for creating a new node via PUT /flows/{flowId} */
 export const useCreateNodeMutation = () => {
     return useMutation({
-        mutationFn: ({ flowId, body }: CreateNodeVariables) =>
-            upsertFlow(flowId, {
-                nodes: [{ id: createClientNodeId(), ...(body as Partial<NodeData>) } as NodeData],
-                edges: [],
-            }),
+        mutationFn: async ({ flowId, body }: CreateNodeVariables) => {
+            const node = { id: createClientNodeId(), ...(body as Partial<NodeData>) } as NodeData;
+            const result = await upsertFlow(flowId, { nodes: [node], edges: [] });
+            return {
+                ...result,
+                nodes: [node, ...(result.nodes ?? []).filter(item => item.id !== node.id)],
+            };
+        },
         onError: (error: Error) => {
             console.error('[useCreateNodeMutation] Failed to create node:', error);
         },

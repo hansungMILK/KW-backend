@@ -108,7 +108,7 @@ export const useEdgeSync = ({ flowId }: UseEdgeSyncOptions): UseEdgeSyncReturn =
 
             // Prepare edge data for server (no id field, server will assign)
             const edgeData: EdgeData & { id?: string } = {
-                id: '', // Optional: can omit or set to tempId for debugging
+                id: tempId,
                 sourceNodeId: edge.sourceNodeId,
                 sourcePortId: edge.sourcePortId,
                 targetNodeId: edge.targetNodeId,

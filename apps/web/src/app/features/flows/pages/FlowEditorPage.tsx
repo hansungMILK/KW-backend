@@ -365,7 +365,7 @@ export const FlowEditorPage = () => {
             const direction = isOutputPort ? 'out' : 'in';
 
             try {
-                const portData = await getPortData(portId, direction);
+                const portData = await getPortData(portId, direction, currentFlowId ?? undefined);
 
                 if (portData?.data) {
                     const dataPacket = {

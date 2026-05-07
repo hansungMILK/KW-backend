@@ -1,10 +1,12 @@
-import { api, withRetry } from '@flows/web-core';
+import { api } from '@flows/web-core';
+
+import { getFlow, upsertFlow } from './flows';
 
 import type {
-    ApiListResult,
     DataPacket,
     EdgeData,
     NodeBody,
+    NodeData,
     NodeView,
     PortData,
     PortDataResponse,
@@ -13,6 +15,37 @@ import type {
 } from '../types';
 
 const _log = console.log.bind(console, '[nodes-api]');
+
+const createClientNodeId = (): string => `node_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+const parsePortRef = (portId: string, direction: 'in' | 'out'): { nodeId: string; portName: string } => {
+    const [nodeId, rawPortName] = portId.split(':', 2);
+    const portName = rawPortName?.split('@')[0] || direction;
+    return { nodeId: nodeId || portId, portName };
+};
+
+const toDataPacket = (raw: unknown): PortDataResponse['data'] | null => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const data = raw as Record<string, unknown>;
+    const timestamp = typeof data['timestamp'] === 'number' ? data['timestamp'] : undefined;
+
+    if ('value' in data && typeof data['type'] === 'string') {
+        return { value: data['value'], type: data['type'], timestamp };
+    }
+    if ('S' in data) return { value: String(data['S'] ?? ''), type: 'text', timestamp };
+    if ('N' in data) return { value: Number(data['N']), type: 'number', timestamp };
+    if ('F' in data) return { value: Number(data['F']), type: 'number', timestamp };
+    if ('M' in data) {
+        const value = data['M'];
+        if (typeof value !== 'string') return { value, type: 'json', timestamp };
+        try {
+            return { value: JSON.parse(value), type: 'json', timestamp };
+        } catch {
+            return { value, type: 'json', timestamp };
+        }
+    }
+    return null;
+};
 
 /**
  * Body for POST /nodes/:id/run
@@ -32,12 +65,8 @@ export interface RunNodeBody {
  */
 export const listNodes = async (flowId: string): Promise<NodeView[]> => {
     _log(`> listNodes(${flowId})`);
-    const response = await withRetry(
-        () => api.post<ApiListResult<NodeView>>('/nodes/0/list', { flowId }),
-        3,
-        'listNodes'
-    );
-    return response.data.list || [];
+    const flow = await getFlow(flowId);
+    return (flow.nodes ?? []) as unknown as NodeView[];
 };
 
 /**
@@ -46,8 +75,7 @@ export const listNodes = async (flowId: string): Promise<NodeView[]> => {
  */
 export const getNode = async (id: string): Promise<NodeView> => {
     _log(`> getNode(${id})`);
-    const response = await api.get<NodeView>(`/nodes/${id}`);
-    return response.data;
+    throw new Error(`getNode(${id}) requires flow context after P3 legacy endpoint removal`);
 };
 
 /**
@@ -61,10 +89,43 @@ export const getNode = async (id: string): Promise<NodeView> => {
  * @param direction - Port direction ('in' or 'out')
  * @returns PortDataResponse with port data
  */
-export const getPortData = async (portId: string, direction: 'in' | 'out'): Promise<PortDataResponse> => {
-    _log(`> getPortData(${portId}, direction=${direction})`);
-    const response = await api.get<PortDataResponse>(`/nodes/${portId}/port`, { params: { direction } });
-    return response.data;
+export const getPortData = async (
+    portId: string,
+    direction: 'in' | 'out',
+    flowId?: string
+): Promise<PortDataResponse> => {
+    _log(`> getPortData(${portId}, direction=${direction}, flowId=${flowId ?? 'n/a'})`);
+    if (!flowId) throw new Error('flowId is required to read port data after P3 legacy endpoint removal');
+
+    const { nodeId, portName } = parsePortRef(portId, direction);
+    const flow = await getFlow(flowId);
+    const port = flow.ports?.find(item => item.id === portId || (item.nodeId === nodeId && item.portId === portName));
+    if (port?.data) {
+        return { id: port.id, nodeId: port.nodeId, portId: port.portId, direction, data: port.data };
+    }
+
+    const portNode = (flow.nodes ?? []).find(node => {
+        const record = node as unknown as Record<string, unknown>;
+        return (
+            record['stereo'] === 'port' &&
+            record['parentId'] === nodeId &&
+            record['direction'] === direction &&
+            record['name'] === portName
+        );
+    }) as unknown as Record<string, unknown> | undefined;
+
+    const data = toDataPacket(
+        portNode?.['data$'] ?? (portNode?.['data'] as Record<string, unknown> | undefined)?.['data$']
+    );
+    if (!data) throw new Error(`Port data not found: ${portId}`);
+
+    return {
+        id: portId,
+        nodeId,
+        portId: portName,
+        direction,
+        data,
+    };
 };
 
 /**
@@ -81,8 +142,10 @@ export const createNode = async (body: NodeBody): Promise<NodeView> => {
     if (!body.flowId) throw new Error('Node flowId is required');
     if (!body.blockId) throw new Error('Node blockId is required');
 
-    const response = await api.post<NodeView>('/nodes/0', body);
-    return response.data;
+    const flowId = body.flowId;
+    const node = { id: createClientNodeId(), ...(body as unknown as Partial<NodeView>) } as unknown as NodeData;
+    const result = await upsertFlow(flowId, { nodes: [node], edges: [] });
+    return (result.nodes?.find(item => item.id === node.id) ?? node) as unknown as NodeView;
 };
 
 /**
@@ -105,10 +168,13 @@ export const createNode = async (body: NodeBody): Promise<NodeView> => {
  */
 export const upsertNode = async (id: string, flowId: string, body: Partial<NodeView>): Promise<UpsertNodeResult> => {
     _log(`> upsertNode(${id}, flowId=${flowId})`, body);
-    // Send body directly - server expects { config?, output?, ...nodeFields }
-    // NOT wrapped in { nodes: [...] } format
-    const response = await api.post<UpsertNodeResult>(`/nodes/${id}/upsert`, body, { params: { flowId } });
-    return response.data;
+    const nodeId = id === '0' ? createClientNodeId() : id;
+    const node = { id: nodeId, ...(body as unknown as Partial<NodeData>) } as NodeData;
+    const result = await upsertFlow(flowId, { nodes: [node], edges: [] });
+    return {
+        nodes: [node, ...(result.nodes ?? []).filter(item => item.id !== nodeId)],
+        edges: result.edges,
+    };
 };
 
 /**
@@ -120,11 +186,8 @@ export const upsertNode = async (id: string, flowId: string, body: Partial<NodeV
 export const upsertEdge = async (flowId: string, edge: EdgeData): Promise<UpsertNodeResult> => {
     console.warn('[DEPRECATED] upsertEdge() is deprecated. Use upsertFlow() for edge operations.');
     _log(`> upsertEdge(flowId=${flowId})`, edge);
-    // This is incorrect - /nodes/:id/upsert only supports { config, output } format
-    // Edge operations should use POST /flows/:id/upsert with { nodes: [], edges: [...] }
-    const body = { edges: [edge] };
-    const response = await api.post<UpsertNodeResult>('/nodes/0/upsert', body, { params: { flowId } });
-    return response.data;
+    const result = await upsertFlow(flowId, { nodes: [], edges: [edge] });
+    return { nodes: result.nodes ?? [], edges: result.edges ?? [] };
 };
 
 /**
@@ -152,9 +215,12 @@ export interface PortNodeBody {
  */
 export const upsertPortNode = async (flowId: string, body: PortNodeBody): Promise<UpsertNodeResult> => {
     _log(`> upsertPortNode(flowId=${flowId})`, body);
-    const requestBody = { nodes: [body] };
-    const response = await api.post<UpsertNodeResult>('/nodes/0/upsert', requestBody, { params: { flowId } });
-    return response.data;
+    const node = {
+        id: `port_${body.parentId}_${body.direction}_${body.name}`,
+        ...body,
+    } as unknown as NodeData;
+    const result = await upsertFlow(flowId, { nodes: [node], edges: [] });
+    return { nodes: [node], edges: result.edges ?? [] };
 };
 
 /**
@@ -218,18 +284,21 @@ export interface RunNodeOptions {
  * @param options.force - If true, forces execution even for isFrontend nodes
  * @param options.propagate - If true, propagates to downstream nodes (default: true)
  */
-export const runNode = async (nodeId: string, body?: RunNodeBody, options?: RunNodeOptions): Promise<NodeView> => {
-    _log(`> runNode(${nodeId})`, { body, options });
+export const runNode = async (
+    flowId: string,
+    nodeId: string,
+    body?: RunNodeBody,
+    options?: RunNodeOptions
+): Promise<NodeView> => {
+    _log(`> runNode(${flowId}, ${nodeId})`, { body, options });
     try {
-        // Build query params
-        const queryParams: string[] = [];
-        if (options?.async) queryParams.push('async');
-        if (options?.force) queryParams.push('force');
-        if (options?.propagate === false) queryParams.push('propagate=0');
-
-        const params = queryParams.length > 0 ? `?${queryParams.join('&')}` : '';
-        const response = await api.post<NodeView>(`/nodes/${nodeId}/run${params}`, body || {});
-        return response.data;
+        const response = await api.post<{ runId: string; status: string }>(`/flows/${flowId}/nodes/${nodeId}/runs`, {
+            triggerSource: 'MANUAL',
+            config: body?.config,
+            output: body?.output,
+            async: options?.async,
+        });
+        return { id: nodeId, state: 'RUNNING', status: response.data.status } as unknown as NodeView;
     } catch (err) {
         _log('> runNode error:', err);
         throw err;
