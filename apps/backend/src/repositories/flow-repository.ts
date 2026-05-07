@@ -91,13 +91,14 @@ export const flowRepo = {
 
         if (id === '0') {
             // Create new flow
+            const flowId = generateNumericId();
             const record: FlowRecord = {
-                id: generateNumericId(),
+                id: flowId,
                 name: 'Untitled Flow',
                 state: 'DRAFT',
                 nodes,
                 edges,
-                channelId: generateNumericId(),
+                channelId: flowId,
                 createdAt: now,
                 updatedAt: now,
             };
@@ -115,7 +116,7 @@ export const flowRepo = {
             description: existing?.description,
             nodes,
             edges,
-            channelId: existing?.channelId ?? generateNumericId(),
+            channelId: existing?.channelId ?? id,
             createdAt: existing?.createdAt ?? now,
             updatedAt: now,
         };
@@ -157,8 +158,9 @@ export const flowRepo = {
         ownerId?: string;
     }): Promise<FlowRecord> {
         const now = new Date().toISOString();
+        const flowId = generateNumericId();
         const record: FlowRecord = {
-            id: generateNumericId(),
+            id: flowId,
             name: fields.title,
             state: 'DRAFT',
             description: fields.description,
@@ -166,7 +168,7 @@ export const flowRepo = {
             ownerId: fields.ownerId,
             nodes: [],
             edges: [],
-            channelId: generateNumericId(),
+            channelId: flowId,
             createdAt: now,
             updatedAt: now,
         };
@@ -315,8 +317,9 @@ export const flowRepo = {
         if (!existing) return null;
 
         const now = new Date().toISOString();
+        const copyId = generateNumericId();
         const copy: FlowRecord = {
-            id: generateNumericId(),
+            id: copyId,
             name: `${existing.name ?? 'Untitled Flow'} (복사본)`,
             state: 'DRAFT',
             stereo: existing.stereo,
@@ -326,7 +329,7 @@ export const flowRepo = {
             // Deep-clone payload arrays so future edits don't bleed into the original.
             nodes: JSON.parse(JSON.stringify(existing.nodes ?? [])),
             edges: JSON.parse(JSON.stringify(existing.edges ?? [])),
-            channelId: generateNumericId(),
+            channelId: copyId,
             createdAt: now,
             updatedAt: now,
         };

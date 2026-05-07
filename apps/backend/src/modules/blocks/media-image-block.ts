@@ -4,10 +4,14 @@ import { imageAdapter } from '../../adapters/ai/image-adapter';
 import { getPublicUrl, putObject } from '../../adapters/aws/s3';
 import { env } from '../../config/env';
 import { traceService } from '../../services/trace-service';
-import { GPT_IMAGE_2_KOREAN_TEXT_RULES, sourceRefsToLabel } from '../shorts/rulepacks/base-shorts-rulepack';
+import { sourceRefsToLabel } from '../shorts/rulepacks/base-shorts-rulepack';
 import { selectShortsRulepack } from '../shorts/topic-router';
 
-import type { BlockExecutor, BlockExecutorResult } from './types';
+import type { BlockExecutor, BlockExecutorContext, BlockExecutorResult } from './types';
+
+const IMAGE_SCENE_TIMEOUT_MS = env.openaiImageSceneTimeoutMs;
+const IMAGE_SCENE_MAX_ATTEMPTS = env.openaiImageSceneMaxAttempts;
+const IMAGE_SCENE_CONCURRENCY = env.openaiImageSceneConcurrency;
 
 // ─── dummy output ─────────────────────────────────────────────────────────────
 
@@ -93,7 +97,11 @@ function dummyImageOutput() {
 export const mediaImageBlock: BlockExecutor = {
     blockType: 'media-image',
 
-    async execute(input: unknown, _config?: Record<string, unknown>): Promise<BlockExecutorResult> {
+    async execute(
+        input: unknown,
+        _config?: Record<string, unknown>,
+        context?: BlockExecutorContext
+    ): Promise<BlockExecutorResult> {
         const start = Date.now();
 
         if (env.orchestratorMode === 'mock') {
@@ -128,6 +136,12 @@ export const mediaImageBlock: BlockExecutor = {
             narration?: string;
             imagePrompt?: string;
             visualText?: string;
+            visual?: {
+                topTitle?: string;
+                mainCaption?: string;
+                sourceLabel?: string;
+            };
+            topTitle?: string;
             sourceRefs?: unknown[];
             durationSec?: number;
         };
@@ -140,13 +154,18 @@ export const mediaImageBlock: BlockExecutor = {
             presetId: metadata?.presetId,
         });
         const sources = metadata?.sources;
+        const sceneTopTitle = rawScenes.find(scene => scene.visual?.topTitle || scene.topTitle);
         const frameTitle =
+            sceneTopTitle?.visual?.topTitle ??
+            sceneTopTitle?.topTitle ??
             (typeof metadata?.title === 'string' ? metadata.title : undefined) ??
             (typeof inp?.title === 'string' ? inp.title : undefined) ??
             '입시 정보 핵심 정리';
 
-        // Fall back to dummy prompts if upstream gave us nothing
-        const dummy = dummyImageOutput();
+        if (rawScenes.length === 0) {
+            throw new Error('media-image requires upstream scenes or normalizedScenes in real execution mode');
+        }
+
         const scenePrompts: Array<{
             sceneNumber: number;
             caption: string;
@@ -156,34 +175,23 @@ export const mediaImageBlock: BlockExecutor = {
             visualText?: string;
             sourceRefs?: unknown[];
             sourceLabel?: string;
-        }> =
-            rawScenes.length > 0
-                ? rawScenes.map((s, i) => ({
-                      sceneNumber: s.sceneNumber ?? i + 1,
-                      caption: s.caption ?? s.narration?.slice(0, 22) ?? `장면 ${i + 1}`,
-                      narration: s.narration ?? '',
-                      durationSec: s.durationSec ?? 5,
-                      visualText: s.visualText ?? s.caption,
-                      sourceRefs: s.sourceRefs ?? [],
-                      sourceLabel: sourceRefsToLabel(s.sourceRefs, sources),
-                      prompt: buildShortsFramePrompt(
-                          frameTitle,
-                          s.visualText ?? s.caption ?? s.narration ?? `장면 ${i + 1}`,
-                          s.imagePrompt,
-                          sourceRefsToLabel(s.sourceRefs, sources),
-                          rulepack.imagePrompt
-                      ),
-                  }))
-                : dummy.images.map(img => ({
-                      sceneNumber: img.sceneNumber,
-                      caption: img.prompt.slice(0, 20),
-                      narration: '',
-                      durationSec: 5,
-                      visualText: img.prompt.slice(0, 20),
-                      sourceRefs: [],
-                      sourceLabel: '출처 확인 필요',
-                      prompt: img.prompt,
-                  }));
+        }> = rawScenes.map((s, i) => {
+            const caption =
+                s.visual?.mainCaption ?? s.visualText ?? s.caption ?? s.narration?.slice(0, 22) ?? `장면 ${i + 1}`;
+            const title = s.visual?.topTitle ?? s.topTitle ?? frameTitle;
+            const sourceLabel =
+                cleanSourceLabel(s.visual?.sourceLabel) || sourceRefsToLabel(s.sourceRefs, sources) || undefined;
+            return {
+                sceneNumber: s.sceneNumber ?? i + 1,
+                caption,
+                narration: s.narration ?? '',
+                durationSec: s.durationSec ?? 5,
+                visualText: s.visualText ?? caption,
+                sourceRefs: s.sourceRefs ?? [],
+                sourceLabel,
+                prompt: buildShortsFramePrompt(title, caption, s.imagePrompt, sourceLabel, rulepack.imagePrompt),
+            };
+        });
 
         // Unique prefix for this execution batch
         const batchPrefix = `media/images/${randomUUID()}`;
@@ -202,10 +210,28 @@ export const mediaImageBlock: BlockExecutor = {
             sourceLabel?: string;
         };
 
-        const images: ImageResult[] = [];
-        const assets: NonNullable<BlockExecutorResult['assets']> = [];
+        console.info(
+            `[media-image-block] generating ${scenePrompts.length} scenes with concurrency ${IMAGE_SCENE_CONCURRENCY}`
+        );
 
-        for (const scene of scenePrompts) {
+        let completedScenes = 0;
+        const totalScenes = scenePrompts.length;
+
+        const reportSceneComplete = async (sceneNumber: number): Promise<void> => {
+            completedScenes += 1;
+            const progress = 25 + (completedScenes / totalScenes) * 60;
+            await context?.onProgress?.(
+                progress,
+                `이미지 ${completedScenes}/${totalScenes} 생성 완료 (scene ${sceneNumber})`
+            );
+        };
+
+        const activeSceneAttempts = new Map<number, string>();
+
+        const generateSceneImage = async (
+            scene: (typeof scenePrompts)[number],
+            attemptId: string
+        ): Promise<{ image: ImageResult; asset: NonNullable<BlockExecutorResult['assets']>[number] }> => {
             const sceneStart = Date.now();
             try {
                 // 1. Generate image via the configured OpenAI image model.
@@ -230,10 +256,14 @@ export const mediaImageBlock: BlockExecutor = {
                 const s3Key = `${batchPrefix}/scene-${String(scene.sceneNumber).padStart(3, '0')}.png`;
                 await putObject(s3Key, imageBuffer, generated.contentType);
 
+                if (activeSceneAttempts.get(scene.sceneNumber) !== attemptId) {
+                    throw new Error(`stale scene ${scene.sceneNumber} image attempt ignored`);
+                }
+
                 const publicUrl = getPublicUrl(s3Key);
                 const durationMs = Date.now() - sceneStart;
 
-                images.push({
+                const image: ImageResult = {
                     sceneNumber: scene.sceneNumber,
                     url: publicUrl,
                     width: generated.width,
@@ -245,9 +275,9 @@ export const mediaImageBlock: BlockExecutor = {
                     visualText: scene.visualText,
                     sourceRefs: scene.sourceRefs,
                     sourceLabel: scene.sourceLabel,
-                });
+                };
 
-                assets.push({
+                const asset: NonNullable<BlockExecutorResult['assets']>[number] = {
                     assetType: 'IMAGE',
                     mimeType: generated.contentType,
                     data: imageBuffer,
@@ -265,13 +295,13 @@ export const mediaImageBlock: BlockExecutor = {
                         sourceLabel: scene.sourceLabel,
                         durationMs,
                     },
-                });
+                };
 
                 // Record per-image trace (non-fatal)
                 try {
                     await traceService.record(
-                        'pending',
-                        null,
+                        context?.runId ?? 'pending',
+                        context?.nodeId ?? null,
                         'STATUS',
                         `media-image: scene ${scene.sceneNumber} generated`,
                         {
@@ -283,13 +313,18 @@ export const mediaImageBlock: BlockExecutor = {
                 } catch {
                     /* non-fatal */
                 }
+
+                await context?.onAsset?.(asset);
+                await reportSceneComplete(scene.sceneNumber);
+
+                return { image, asset };
             } catch (err: unknown) {
                 const msg = err instanceof Error ? err.message : String(err);
                 console.error(`[media-image-block] scene ${scene.sceneNumber} failed: ${msg}`);
                 try {
                     await traceService.record(
-                        'pending',
-                        null,
+                        context?.runId ?? 'pending',
+                        context?.nodeId ?? null,
                         'ERROR',
                         `media-image: scene ${scene.sceneNumber} failed: ${msg}`
                     );
@@ -298,7 +333,75 @@ export const mediaImageBlock: BlockExecutor = {
                 }
                 throw new Error(`media-image scene ${scene.sceneNumber} failed: ${msg}`);
             }
+        };
+
+        const generateSceneImageWithRetries = async (
+            scene: (typeof scenePrompts)[number]
+        ): Promise<{ image: ImageResult; asset: NonNullable<BlockExecutorResult['assets']>[number] }> => {
+            let lastError: unknown;
+
+            for (let attempt = 1; attempt <= IMAGE_SCENE_MAX_ATTEMPTS; attempt += 1) {
+                const attemptId = randomUUID();
+                activeSceneAttempts.set(scene.sceneNumber, attemptId);
+                const attemptPromise = generateSceneImage(scene, attemptId);
+
+                try {
+                    return await withTimeout(
+                        attemptPromise,
+                        IMAGE_SCENE_TIMEOUT_MS,
+                        `media-image scene ${scene.sceneNumber} timed out after ${Math.round(
+                            IMAGE_SCENE_TIMEOUT_MS / 1000
+                        )} seconds`
+                    );
+                } catch (err) {
+                    activeSceneAttempts.set(scene.sceneNumber, `inactive:${attemptId}`);
+                    void attemptPromise.catch(() => {
+                        /* late attempt already superseded */
+                    });
+                    lastError = err;
+
+                    if (attempt < IMAGE_SCENE_MAX_ATTEMPTS) {
+                        console.warn(
+                            `[media-image-block] scene ${scene.sceneNumber} attempt ${attempt}/${IMAGE_SCENE_MAX_ATTEMPTS} failed; retrying: ${
+                                err instanceof Error ? err.message : String(err)
+                            }`
+                        );
+                    }
+                }
+            }
+
+            throw lastError instanceof Error ? lastError : new Error(`media-image scene ${scene.sceneNumber} failed`);
+        };
+
+        const settledResults = await runWithConcurrency(
+            scenePrompts,
+            IMAGE_SCENE_CONCURRENCY,
+            generateSceneImageWithRetries
+        );
+        const generatedResults: Array<{
+            image: ImageResult;
+            asset: NonNullable<BlockExecutorResult['assets']>[number];
+        }> = [];
+        const failureMessages: string[] = [];
+
+        settledResults.forEach((result, index) => {
+            if (result.status === 'fulfilled') {
+                generatedResults.push(result.value);
+            } else {
+                failureMessages.push(`scene ${scenePrompts[index]?.sceneNumber ?? index + 1}: ${result.reason}`);
+            }
+        });
+
+        if (failureMessages.length > 0) {
+            throw new Error(
+                `media-image failed after ${generatedResults.length}/${totalScenes} scenes: ${failureMessages.join('; ')}`
+            );
         }
+
+        generatedResults.sort((a, b) => a.image.sceneNumber - b.image.sceneNumber);
+
+        const images = generatedResults.map(result => result.image);
+        const assets = generatedResults.map(result => result.asset);
 
         if (assets.length === 0) {
             throw new Error('media-image generated no usable image assets');
@@ -324,17 +427,71 @@ function buildShortsFramePrompt(
     sourceLabel?: string,
     presetImageRules?: string
 ): string {
+    const compactRules = compactPromptText(presetImageRules, 180);
+    const scene = compactPromptText(
+        visualPrompt || 'Korean university admission and student study scene, clean educational illustration.',
+        260
+    );
+
     return [
-        'Create one complete 9:16 Korean YouTube Shorts frame with GPT-image-2, not a poster mockup.',
-        GPT_IMAGE_2_KOREAN_TEXT_RULES,
-        `Persistent top title band: black background, huge bold Korean title text "${title}" in neon yellow and white.`,
-        `Main scene caption: large bold Korean text "${caption.slice(0, 24)}" with black stroke, placed over the image without covering key characters.`,
-        sourceLabel ? `Optional tiny source label near bottom edge: "${sourceLabel.slice(0, 36)}".` : '',
-        presetImageRules || '',
-        'Style: clean viral Korean Shorts, high contrast, dynamic but not cluttered.',
-        'Leave safe margins for mobile viewing.',
-        visualPrompt || 'Korean university admission and student study scene, cinematic educational illustration.',
+        'Create one vertical 9:16 Korean YouTube Shorts frame.',
+        'Use clean viral Korean Shorts style, high contrast, safe mobile margins.',
+        `Top title text: "${compactPromptText(title, 16)}".`,
+        `Main caption text: "${compactPromptText(caption, 18)}".`,
+        sourceLabel ? `Small bottom source text: "${compactPromptText(sourceLabel, 24)}".` : '',
+        'Text must be short, bold, legible, with black stroke/shadow.',
+        compactRules,
+        `Scene: ${scene}`,
     ]
         .filter(Boolean)
         .join(' ');
+}
+
+function compactPromptText(value: string | undefined, maxLength: number): string {
+    if (!value) return '';
+    const compact = value.replace(/\s+/g, ' ').trim();
+    if (compact.length <= maxLength) return compact;
+    return `${compact.slice(0, maxLength - 1)}...`;
+}
+
+function cleanSourceLabel(value: string | undefined): string | undefined {
+    if (!value) return undefined;
+    const compact = value.replace(/\s+/g, ' ').trim();
+    if (!compact || compact === '출처 확인 필요') return undefined;
+    return compact;
+}
+
+async function runWithConcurrency<T, R>(
+    items: T[],
+    concurrency: number,
+    worker: (item: T) => Promise<R>
+): Promise<PromiseSettledResult<R>[]> {
+    const results: PromiseSettledResult<R>[] = new Array(items.length);
+    let nextIndex = 0;
+
+    const runNext = async (): Promise<void> => {
+        while (nextIndex < items.length) {
+            const currentIndex = nextIndex;
+            nextIndex += 1;
+            try {
+                results[currentIndex] = { status: 'fulfilled', value: await worker(items[currentIndex]) };
+            } catch (reason) {
+                results[currentIndex] = { status: 'rejected', reason };
+            }
+        }
+    };
+
+    await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => runNext()));
+    return results;
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+    });
+
+    return Promise.race([promise, timeoutPromise]).finally(() => {
+        if (timeout) clearTimeout(timeout);
+    });
 }

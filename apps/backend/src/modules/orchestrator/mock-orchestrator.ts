@@ -18,6 +18,15 @@ const SHORTS_BLOCKS = [
     { type: 'integration', label: '메타데이터 생성', config: {} },
 ] as const;
 
+const IMAGE_BLOCKS = [
+    {
+        type: 'content',
+        label: '이미지 프롬프트 구성',
+        config: { mode: 'single-image', scenes: 1, topic: '이미지 생성 요청' },
+    },
+    { type: 'media-image', label: '이미지 생성', config: { count: 1, style: 'single-image' } },
+] as const;
+
 const COST_PER_BLOCK: Record<string, number> = {
     search: 0.02,
     content: 0.15,
@@ -32,9 +41,50 @@ const COST_PER_BLOCK: Record<string, number> = {
 export const mockOrchestrator: Orchestrator = {
     async generateProposal(
         _flowId: string,
-        _userMessage: string,
+        userMessage: string,
         _currentContext?: Record<string, unknown>
     ): Promise<ProposalResult> {
+        if (isImageOnlyRequest(userMessage)) {
+            const nodes = IMAGE_BLOCKS.map((block, i) => ({
+                id: generateNumericId(),
+                blockId: `blk-${block.type}`,
+                name: block.label,
+                blockType: block.type,
+                position: { x: 300, y: 100 + i * 120 },
+                state: 'IDLE',
+                config: {
+                    ...block.config,
+                    ...(block.type === 'content' ? { topic: userMessage } : {}),
+                },
+            }));
+            const edges = [
+                {
+                    id: generateNumericId(),
+                    sourceNodeId: nodes[0].id,
+                    sourcePortId: 'out',
+                    targetNodeId: nodes[1].id,
+                    targetPortId: 'in',
+                },
+            ];
+            const breakdown = IMAGE_BLOCKS.map(b => ({
+                blockType: b.type,
+                amount: COST_PER_BLOCK[b.type] ?? 0,
+            }));
+            const total = breakdown.reduce((sum, b) => sum + b.amount, 0);
+
+            return {
+                proposedNodes: nodes,
+                proposedEdges: edges,
+                estimatedCost: {
+                    currency: 'USD',
+                    total: Math.round(total * 100) / 100,
+                    breakdown,
+                },
+                approvalRequired: true,
+                assistantMessage: `이미지 생성용 2개 블록이 필요합니다. 예상 비용: $${total.toFixed(2)}. 승인하시겠습니까?`,
+            };
+        }
+
         // Generate 8 nodes in a vertical layout
         const nodes = SHORTS_BLOCKS.map((block, i) => ({
             id: generateNumericId(),
@@ -119,3 +169,12 @@ export const mockOrchestrator: Orchestrator = {
         };
     },
 };
+
+function isImageOnlyRequest(message: string): boolean {
+    const normalized = message.toLowerCase().replace(/\s+/g, '');
+    const hasImageTarget = ['이미지', '그림', '사진', '일러스트', 'image', 'picture', 'photo'].some(term =>
+        normalized.includes(term)
+    );
+    const hasVideoTarget = ['쇼츠', '영상', '비디오', 'shorts', 'video'].some(term => normalized.includes(term));
+    return hasImageTarget && !hasVideoTarget;
+}

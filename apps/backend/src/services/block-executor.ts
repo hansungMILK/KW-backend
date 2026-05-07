@@ -7,7 +7,7 @@
 import { blockRegistry } from '../modules/blocks';
 import { log } from '../utils/logger';
 
-import type { BlockExecutorResult } from '../modules/blocks/types';
+import type { BlockExecutorContext, BlockExecutorResult } from '../modules/blocks/types';
 
 export const blockExecutor = {
     /**
@@ -17,19 +17,22 @@ export const blockExecutor = {
      * @param blockType  The type identifier of the block (e.g. "search", "content")
      * @param input      The resolved input payload for this block
      */
-    async execute(blockType: string, input: unknown, config?: Record<string, unknown>): Promise<BlockExecutorResult> {
+    async execute(
+        blockType: string,
+        input: unknown,
+        config?: Record<string, unknown>,
+        context?: BlockExecutorContext
+    ): Promise<BlockExecutorResult> {
         const executor = blockRegistry.get(blockType);
 
         if (!executor) {
-            log.warn(`Unknown block type: ${blockType}, using fallback`);
-            return {
-                output: { error: `Unknown block type: ${blockType}`, blockType },
-                durationMs: 0,
-            };
+            const message = `Unknown block type: ${blockType}`;
+            log.error(message);
+            throw new Error(message);
         }
 
         const start = Date.now();
-        const result = await executor.execute(input, config);
+        const result = await executor.execute(input, config, context);
         return {
             output: result.output,
             durationMs: Date.now() - start,

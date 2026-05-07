@@ -28,6 +28,7 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
         id: flow.id,
         name: flow.name,
         state: flow.state,
+        channelId: flow.id,
         createdAt: flow.createdAt,
         updatedAt: flow.updatedAt,
     });

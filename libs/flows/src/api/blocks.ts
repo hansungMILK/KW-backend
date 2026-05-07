@@ -3,7 +3,7 @@ import { api, withRetry } from '@flows/web-core';
 import { EXECUTE_FUNCTIONS } from './execute-functions';
 
 import type { BlockDefinition, BlockDefinitionWithFrontend, BlockStereo, PortDefinition } from '../types';
-import type { BlockView, ListResult } from '@lemoncloud/eureka-flows-api';
+import type { BlockView } from '@lemoncloud/eureka-flows-api';
 
 const _log = console.log.bind(console, '[blocks-api]');
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -14,6 +14,17 @@ const LEGACY_BACKEND_PROCESSOR_TYPES = [
     'blog-tags-generator',
     'single-image-generator',
     'title-generator',
+] as const;
+
+const SPEC_BACKEND_PROCESSOR_TYPES = [
+    'search',
+    'content',
+    'data',
+    'analysis',
+    'media-image',
+    'media-tts',
+    'media-video',
+    'integration',
 ] as const;
 
 type RawBlockDefinition = NonNullable<BlockView['$definition']>;
@@ -55,6 +66,41 @@ interface BlockViewWithFrontend extends Omit<BlockView, 'isFrontend'> {
     isRunnable?: boolean;
 }
 
+interface SpecBlockView {
+    blockType: string;
+    name: string;
+    description: string;
+    category: BlockStereo;
+    inputSchema: RawPortDefinition[];
+    outputSchema: RawPortDefinition[];
+    estimatedCost: number;
+}
+
+interface SpecBlocksResponse {
+    items?: SpecBlockView[];
+    list?: BlockViewWithFrontend[];
+}
+
+const specBlockToLegacyView = (item: SpecBlockView): BlockViewWithFrontend => {
+    const isBackend = (SPEC_BACKEND_PROCESSOR_TYPES as readonly string[]).includes(item.blockType);
+    return {
+        id: item.blockType,
+        $definition: {
+            id: `blk-${item.blockType}`,
+            type: item.blockType,
+            label: item.name,
+            description: item.description,
+            inputs: item.inputSchema,
+            outputs: item.outputSchema,
+            defaultConfig: {},
+            configSchema: [],
+        },
+        stereo: item.category,
+        isFrontend: isBackend ? 0 : 1,
+        isRunnable: true,
+    } as BlockViewWithFrontend;
+};
+
 /**
  * Check if a block definition requires backend processing
  *
@@ -78,7 +124,7 @@ export const requiresBackendProcessing = (blockDef: BlockDefinitionWithFrontend)
 
 /**
  * Fetch all available block definitions from server
- * GET /blocks/0/list?cores=1
+ * GET /blocks
  *
  * Server response contains $definition for each block with:
  * - id: block ID (e.g., "1000006")
@@ -90,13 +136,9 @@ export const listBlocks = async (): Promise<BlockDefinitionWithFrontend[]> => {
     _log('> listBlocks()');
     await delay(500);
 
-    const response = await withRetry(
-        () => api.get<ListResult<BlockViewWithFrontend>>('/blocks/0/list?cores=1&limit=-1'),
-        3,
-        'listBlocks'
-    );
+    const response = await withRetry(() => api.get<SpecBlocksResponse>('/blocks'), 3, 'listBlocks');
 
-    const rawList = response.data?.list;
+    const rawList = response.data?.items?.map(specBlockToLegacyView) ?? response.data?.list;
 
     if (!rawList?.length) {
         throw new Error('No block definitions returned from server');

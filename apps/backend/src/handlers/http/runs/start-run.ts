@@ -1,5 +1,6 @@
 import { RunCreateParamsSchema, RunCreateRequestSchema } from '@flows/contracts';
 
+import { PAID_OPENAI_DISABLED } from '../../../adapters/ai/paid-openai-guard';
 import { runService } from '../../../services/run-service';
 import { getBody, getPathParam, withMiddleware } from '../../../utils/middleware';
 import { accepted, badRequest, notFound, unprocessableJson } from '../../../utils/response';
@@ -31,6 +32,23 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
     if (!result.ok) {
         if (result.status === 404) return notFound(result.error);
         if (result.status === 422) {
+            if (result.error === PAID_OPENAI_DISABLED) {
+                return unprocessableJson({
+                    error: PAID_OPENAI_DISABLED,
+                    message:
+                        'Paid OpenAI calls are disabled. Set ALLOW_PAID_OPENAI=1 only when you intentionally want to spend API credits.',
+                    missingProviders: [],
+                });
+            }
+            if (result.error === 'RUN_COST_LIMIT_EXCEEDED') {
+                const cost = result as { estimatedCostUsd?: number; maxCostUsd?: number };
+                return unprocessableJson({
+                    error: 'RUN_COST_LIMIT_EXCEEDED',
+                    message: `Estimated run cost $${(cost.estimatedCostUsd ?? 0).toFixed(2)} exceeds the per-run cap $${(cost.maxCostUsd ?? 0).toFixed(2)}.`,
+                    estimatedCostUsd: cost.estimatedCostUsd,
+                    maxCostUsd: cost.maxCostUsd,
+                });
+            }
             const missingProviders = (result as { missingProviders?: string[] }).missingProviders ?? [];
             return unprocessableJson({
                 error: 'MISSING_API_KEYS',

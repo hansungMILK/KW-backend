@@ -18,16 +18,16 @@ const VALID_RUN_TRANSITIONS: Record<RunStatus, RunStatus[]> = {
     QUEUED: ['RUNNING', 'CANCELLED'],
     RUNNING: ['COMPLETED', 'FAILED', 'CANCELLED'],
     COMPLETED: [],
-    FAILED: [],
+    FAILED: ['RUNNING'],
     CANCELLED: [],
 };
 
 const VALID_NODE_TRANSITIONS: Record<RunNodeStatus, RunNodeStatus[]> = {
     PENDING: ['RUNNING', 'CANCELLED'],
-    RUNNING: ['COMPLETED', 'FAILED', 'CANCELLED'],
+    RUNNING: ['RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED'],
     COMPLETED: [],
     FAILED: ['PENDING'], // retry only
-    SKIPPED: [],
+    SKIPPED: ['PENDING'], // downstream retry
     CANCELLED: [],
 };
 
@@ -234,13 +234,25 @@ export const runRepo = {
             };
         }
 
+        const retryReset =
+            newStatus === 'PENDING' && (node.status === 'FAILED' || node.status === 'SKIPPED')
+                ? {
+                      retryCount: node.status === 'FAILED' ? node.retryCount + 1 : node.retryCount,
+                      errorCode: null,
+                      errorMessage: null,
+                      outputPayload: undefined,
+                      progress: 0,
+                      completedAt: null,
+                  }
+                : {};
+        const successReset = newStatus === 'COMPLETED' ? { errorCode: null, errorMessage: null } : {};
         const updated: RunNode = {
             ...node,
+            ...retryReset,
             ...extra,
+            ...successReset,
             status: newStatus,
             updatedAt: new Date().toISOString(),
-            // reset retryCount bookkeeping on retry (FAILED → PENDING)
-            ...(newStatus === 'PENDING' && node.status === 'FAILED' ? { retryCount: node.retryCount + 1 } : {}),
         };
         await this.putRunNode(updated);
         return { ok: true, node: updated };

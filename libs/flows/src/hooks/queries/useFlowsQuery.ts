@@ -23,7 +23,10 @@ import type {
 export const useLoadFlowQuery = (flowId: string | null) => {
     return useQuery({
         queryKey: flowsKeys.snapshot(flowId ?? ''),
-        queryFn: () => loadFlow(flowId!),
+        queryFn: () => {
+            if (!flowId) throw new Error('flowId is required');
+            return loadFlow(flowId);
+        },
         enabled: !!flowId,
     });
 };
@@ -62,7 +65,7 @@ export const useSaveFlowMutation = () => {
             // Optimistically update the cache
             if (previousData) {
                 queryClient.setQueryData<LoadFlowResult>(flowsKeys.snapshot(id), old => ({
-                    ...old!,
+                    ...(old ?? previousData),
                     nodes: body.nodes,
                     edges: body.edges,
                 }));

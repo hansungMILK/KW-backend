@@ -32,6 +32,7 @@ import type { HelpTab } from '../components/help';
 import type { SidebarRef } from '../components/Sidebar';
 import type { WorkflowCanvasRef } from '../components/WorkflowCanvas';
 import type { RunGetResponse, RunNode } from '@flows/contracts';
+import type { DataPacket } from '@flows/flows';
 import type { AssetCreatedMessage, NodeUpdateInfo, PortUpdateInfo, ProposalCreatedMessage } from '@flows/socket';
 
 const serializeWorkflowState = (data: { nodes?: unknown[]; connections?: unknown[]; edges?: unknown[] }): string =>
@@ -58,20 +59,61 @@ const delay = (ms: number): Promise<void> => new Promise(resolve => window.setTi
 const toCanvasNodeState = (status: RunNode['status']) => {
     if (status === 'RUNNING') return 'RUNNING';
     if (status === 'COMPLETED') return 'COMPLETED';
-    if (status === 'FAILED') return 'ERROR';
+    if (status === 'FAILED' || status === 'CANCELLED' || status === 'SKIPPED') return 'ERROR';
     return undefined;
 };
 
 const toVisibleRunError = (message?: string | null): string | null => {
     if (!message) return null;
+    if (/PAID_OPENAI_DISABLED|Paid OpenAI calls are disabled/i.test(message)) {
+        return '현재 OpenAI 실제 호출이 꺼져 있습니다. 비용이 나가는 테스트를 할 때만 백엔드에서 ALLOW_PAID_OPENAI=1로 켜주세요.';
+    }
+    if (/MISSING_API_KEYS|Required API keys not configured|OPENAI_API_KEY/i.test(message)) {
+        return 'OpenAI API 키가 설정되어 있지 않습니다. 백엔드 환경변수 또는 Settings API에 키를 넣은 뒤 다시 시도해주세요.';
+    }
+    if (/RUN_COST_LIMIT_EXCEEDED|exceeds the per-run cap/i.test(message)) {
+        return '예상 실행 비용이 1회 한도 $2.00를 넘어 실행을 차단했습니다. 장면 수나 이미지 품질을 낮추거나 한도를 조정해주세요.';
+    }
     const rawIndex = message.indexOf(' Raw:');
     const trimmed = (rawIndex === -1 ? message : message.slice(0, rawIndex)).trim();
     return trimmed.length > 260 ? `${trimmed.slice(0, 257)}...` : trimmed;
 };
 
+const toVisibleHttpError = (error: unknown): string =>
+    toVisibleRunError(extractErrorMessage(error)) ?? '요청 처리 중 문제가 발생했습니다.';
+
+const toVisibleRunNodeError = (runNode: RunNode): string | undefined => {
+    if (runNode.status === 'CANCELLED') return '실행이 취소되었습니다.';
+    if (runNode.status === 'SKIPPED') return '상위 노드 실패로 실행을 건너뛰었습니다.';
+    return toVisibleRunError(runNode.errorMessage) ?? undefined;
+};
+
 const getFinalSummaryValue = (run: RunGetResponse, key: string): string | null => {
     const value = run.finalOutputSummary?.[key];
     return typeof value === 'string' ? value : null;
+};
+
+const inferRunOutputType = (runNode: RunNode, payload: Record<string, unknown>): DataPacket['type'] => {
+    if (runNode.blockType === 'media-video') return 'video';
+    if (runNode.blockType === 'media-tts') return 'audio';
+    if (runNode.blockType === 'media-image' && typeof payload['url'] === 'string') return 'image';
+    if (typeof payload['text'] === 'string' || typeof payload['content'] === 'string') return 'text';
+    return 'json';
+};
+
+const runOutputToDataPacket = (runNode: RunNode): Record<string, DataPacket> | undefined => {
+    const payload = runNode.outputPayload;
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload) || Object.keys(payload).length === 0) {
+        return undefined;
+    }
+
+    return {
+        out: {
+            value: payload,
+            type: inferRunOutputType(runNode, payload),
+            timestamp: runNode.completedAt ? new Date(runNode.completedAt).getTime() : Date.now(),
+        },
+    };
 };
 
 export const FlowEditorPage = () => {
@@ -406,13 +448,14 @@ export const FlowEditorPage = () => {
             }, 4000);
         },
         onRunFailed: msg => {
+            const errorMessage = msg.errorMessage ?? msg.error ?? null;
             setRunStatus('failed');
-            setRunFailedError(msg.error ?? null);
+            setRunFailedError(errorMessage);
             setRunActivity({
                 nodeId: msg.failedNodeId,
                 nodeLabel: msg.failedNodeId ? `노드 ${msg.failedNodeId}` : '실행 실패',
                 state: 'failed',
-                error: msg.error ?? null,
+                error: errorMessage,
             });
             if (msg.failedNodeId) {
                 canvasRef.current?.updateNodeFromServer(msg.failedNodeId, { status: 'ERROR' });
@@ -680,10 +723,12 @@ export const FlowEditorPage = () => {
         for (const runNode of runNodes) {
             const canvasState = toCanvasNodeState(runNode.status);
             if (canvasState) {
+                const outputData = runOutputToDataPacket(runNode);
                 canvasRef.current?.updateNodeFromServer(runNode.nodeId, {
                     state: canvasState,
                     status: canvasState,
-                    errorMessage: toVisibleRunError(runNode.errorMessage) ?? undefined,
+                    errorMessage: toVisibleRunNodeError(runNode),
+                    ...(outputData ? { outputData } : {}),
                     executionStats: {
                         progress: runNode.progress,
                     },
@@ -841,7 +886,7 @@ export const FlowEditorPage = () => {
                 state: 'running',
             });
         } catch (error) {
-            const message = extractErrorMessage(error);
+            const message = toVisibleHttpError(error);
             setRunStatus('failed');
             setRunFailedError(message);
             setRunActivity({ nodeLabel: '실행 시작 실패', state: 'failed', error: message });
@@ -853,7 +898,9 @@ export const FlowEditorPage = () => {
         (error: 'cycle' | 'invalid_type') => {
             if (error === 'cycle') {
                 showNotification(t('flowEditor.circularConnectionError'), 'error');
+                return;
             }
+            showNotification('포트 타입이 맞지 않아 연결할 수 없습니다.', 'error');
         },
         [t]
     );
@@ -1128,7 +1175,7 @@ export const FlowEditorPage = () => {
                         setIsAgentOpen(true);
                     }}
                     style={agentBtnPos ? { left: agentBtnPos.x, top: agentBtnPos.y } : undefined}
-                    className={`z-30 w-12 h-12 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center hover:bg-primary/90 cursor-grab active:cursor-grabbing select-none ${agentBtnPos ? 'fixed' : 'absolute bottom-6 right-6'}`}
+                    className={`z-30 w-12 h-12 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center hover:bg-primary/90 cursor-grab active:cursor-grabbing select-none ${agentBtnPos ? 'fixed' : 'absolute bottom-24 right-6'}`}
                     title="Flow Agent"
                 >
                     {/* 말풍선 아이콘 (lucide-react에 없어서 SVG 직접 사용) */}
@@ -1151,7 +1198,7 @@ export const FlowEditorPage = () => {
                 <button
                     onClick={() => void handleStartFlowRun()}
                     disabled={runStatus === 'running'}
-                    className="absolute bottom-8 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-primary/35 bg-background/85 px-5 py-2.5 text-sm font-semibold text-foreground shadow-floating backdrop-blur-xl transition-colors hover:border-primary/60 hover:bg-primary/15 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="absolute bottom-20 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-primary/35 bg-background/85 px-5 py-2.5 text-sm font-semibold text-foreground shadow-floating backdrop-blur-xl transition-colors hover:border-primary/60 hover:bg-primary/15 disabled:cursor-not-allowed disabled:opacity-60"
                     title="워크플로우 실행"
                     aria-label="워크플로우 실행"
                 >
@@ -1165,7 +1212,17 @@ export const FlowEditorPage = () => {
             {/* Run status banner */}
             {runStatus && (
                 <div
-                    className={`absolute top-16 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-full shadow-lg text-sm font-medium animate-in slide-in-from-top-2 fade-in z-50 backdrop-blur-sm ${
+                    style={
+                        isAgentOpen
+                            ? {
+                                  left: '1rem',
+                                  right: '21rem',
+                                  maxWidth: 'none',
+                                  transform: 'none',
+                              }
+                            : undefined
+                    }
+                    className={`absolute top-16 left-1/2 -translate-x-1/2 flex items-center justify-center gap-2 px-4 py-2 rounded-full shadow-lg text-sm font-medium text-center animate-in slide-in-from-top-2 fade-in z-50 backdrop-blur-sm ${
                         runStatus === 'running'
                             ? 'bg-status-running/20 text-status-running border border-status-running/30'
                             : runStatus === 'completed'
@@ -1196,7 +1253,17 @@ export const FlowEditorPage = () => {
             {/* Notification Toast */}
             {notification && (
                 <div
-                    className={`absolute top-20 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full shadow-lg text-sm font-medium animate-in slide-in-from-top-2 fade-in z-50 backdrop-blur-sm ${
+                    style={
+                        isAgentOpen
+                            ? {
+                                  left: '1rem',
+                                  right: '21rem',
+                                  maxWidth: 'none',
+                                  transform: 'none',
+                              }
+                            : undefined
+                    }
+                    className={`absolute top-20 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full shadow-lg text-sm font-medium text-center animate-in slide-in-from-top-2 fade-in z-50 backdrop-blur-sm ${
                         notification.type === 'success'
                             ? 'bg-success/90 text-success-foreground'
                             : 'bg-destructive/90 text-destructive-foreground'

@@ -98,7 +98,9 @@ export const WsRunFailedSchema = z.object({
     flowId: z.string(),
     status: z.literal('FAILED'),
     failedNodeId: z.string().optional(),
+    errorCode: z.string().nullable().optional(),
     errorMessage: z.string().optional(),
+    error: z.string().optional(),
     timestamp: z.number(),
 });
 

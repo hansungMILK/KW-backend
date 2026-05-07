@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Send, X } from 'lucide-react';
 
 import { approveProposal, sendFlowMessage } from '@flows/flows';
+import { MarkdownViewer } from '@flows/ui-kit';
 import { extractErrorMessage } from '@flows/web-core';
 
 import type { MessageProposal } from '@flows/flows';
@@ -42,6 +43,27 @@ const formatEstimatedCost = (cost: ProposalCreatedMessage['estimatedCost']): str
         return `${currency}${cost.total.toFixed(2)}`;
     }
     return undefined;
+};
+
+const toUserVisibleAgentError = (error: unknown): string => {
+    const message = extractErrorMessage(error);
+    if (/PAID_OPENAI_DISABLED|Paid OpenAI calls are disabled/i.test(message)) {
+        return '현재 OpenAI 실제 호출이 꺼져 있습니다. 비용이 나가는 테스트를 할 때만 백엔드에서 ALLOW_PAID_OPENAI=1로 켜주세요.';
+    }
+    if (/MISSING_API_KEYS|Required API keys not configured|OPENAI_API_KEY/i.test(message)) {
+        return 'OpenAI API 키가 설정되어 있지 않습니다. 백엔드 환경변수 또는 Settings API에 키를 넣은 뒤 다시 시도해주세요.';
+    }
+    if (/RUN_COST_LIMIT_EXCEEDED|exceeds the per-run cap/i.test(message)) {
+        return '예상 실행 비용이 1회 한도 $2.00를 넘어 실행을 차단했습니다. 장면 수나 이미지 품질을 낮추거나 한도를 조정해주세요.';
+    }
+    return message;
+};
+
+const normalizeAgentMarkdown = (text: string): string => {
+    return text
+        .replace(/\s+-\s+/g, '\n- ')
+        .replace(/([.!?。！？])\s+(예를 들어|원하시면|지금 저는|원하는 경우)/g, '$1\n\n$2')
+        .trim();
 };
 
 export const FlowAgentPanel = ({
@@ -115,7 +137,7 @@ export const FlowAgentPanel = ({
         } catch (error) {
             setMessages(prev => [
                 ...prev.filter(m => !m.thinking),
-                { id: crypto.randomUUID(), role: 'agent', text: extractErrorMessage(error) },
+                { id: crypto.randomUUID(), role: 'agent', text: toUserVisibleAgentError(error) },
             ]);
         } finally {
             setIsThinking(false);
@@ -203,6 +225,17 @@ export const FlowAgentPanel = ({
 
             {/* Messages */}
             <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-3">
+                {messages.length === 0 && (
+                    <div className="rounded-xl border border-border bg-muted/30 px-3 py-3 text-[12px] text-muted-foreground leading-relaxed">
+                        <div className="mb-2 font-semibold text-foreground">무엇을 만들까요?</div>
+                        <div>자연어로 요청하면 필요한 블록을 제안하고, 승인 후 캔버스에 배치합니다.</div>
+                        <div className="mt-2 space-y-1">
+                            <div>예: 입시정보 쇼츠 제작해줘</div>
+                            <div>예: 바나나가 춤추는 이미지 생성해줘</div>
+                            <div>예: 리뷰 요약 자동화 만들어줘</div>
+                        </div>
+                    </div>
+                )}
                 {messages.map(msg => {
                     if (msg.thinking) {
                         return (
@@ -243,6 +276,8 @@ export const FlowAgentPanel = ({
                                         <div className="text-muted-foreground">
                                             예상 비용 : {estimatedCost}
                                             <br />
+                                            1회 실행 한도 : $2.00
+                                            <br />
                                             생성 하시겠습니까?
                                         </div>
                                     )}
@@ -280,8 +315,11 @@ export const FlowAgentPanel = ({
                             <div className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center shrink-0 mt-0.5">
                                 <div className="w-2 h-2 rounded-full bg-primary" />
                             </div>
-                            <div className="bg-muted rounded-lg px-3 py-2 text-[12px] text-foreground max-w-[80%]">
-                                {msg.text}
+                            <div className="bg-muted rounded-lg px-3 py-2 text-foreground max-w-[86%]">
+                                <MarkdownViewer
+                                    content={normalizeAgentMarkdown(msg.text ?? '')}
+                                    className="text-[12px] leading-relaxed overflow-visible [&_p]:mb-2 [&_p:last-child]:mb-0 [&_ul]:my-1.5 [&_ul]:space-y-1 [&_ol]:my-1.5 [&_ol]:space-y-1 [&_li]:leading-relaxed [&_strong]:font-semibold [&_strong]:text-foreground"
+                                />
                             </div>
                         </div>
                     );

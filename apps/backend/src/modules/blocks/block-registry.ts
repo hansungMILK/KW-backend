@@ -7,11 +7,15 @@ import { mediaTtsBlock } from './media-tts-block';
 import { mediaVideoBlock } from './media-video-block';
 import { searchBlock } from './search-block';
 import { BLOCK_TYPES } from './types';
+import { inputImageBlock, inputTextBlock, outputPreviewBlock } from './utility-blocks';
 
 import type { BlockExecutor, BlockType } from './types';
 
 const registry = new Map<BlockType, BlockExecutor>();
 
+registry.set('input-text', inputTextBlock);
+registry.set('input-image', inputImageBlock);
+registry.set('output-preview', outputPreviewBlock);
 registry.set('search', searchBlock);
 registry.set('content', contentBlock);
 registry.set('data', dataBlock);

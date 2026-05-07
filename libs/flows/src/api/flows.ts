@@ -12,14 +12,76 @@ import type {
 
 const _log = console.log.bind(console, '[flows-api]');
 
-// NOTE: The backend only supports these APIs:
-// - POST /flows/:id/save (create with id='0', or update with existing id)
-// - GET /flows/:id/load (load flow snapshot)
-// - POST /nodes/:id/run (execute node)
+interface SpecFlowSummary {
+    flowId: string;
+    title: string;
+    description?: string;
+    status: FlowView['state'];
+    createdAt: string;
+    updatedAt: string;
+    channelId?: string;
+}
+
+interface SpecFlowDetail extends SpecFlowSummary {
+    nodes: SaveFlowBody['nodes'];
+    edges: SaveFlowBody['edges'];
+    latestProposalId?: string | null;
+    lastRunId?: string | null;
+}
+
+const toLoadFlowResult = (flow: SpecFlowDetail): LoadFlowResult => ({
+    id: flow.flowId,
+    name: flow.title,
+    state: flow.status,
+    description: flow.description,
+    nodes: flow.nodes ?? [],
+    edges: flow.edges ?? [],
+    ports: [],
+    // Execution events are broadcast by flowId, so subscribe to flowId even if
+    // old records still carry a separate channelId.
+    channelId: flow.flowId,
+    createdAt: flow.createdAt,
+    updatedAt: flow.updatedAt,
+});
+
+const toSaveFlowView = (flow: SpecFlowDetail): SaveFlowView => ({
+    id: flow.flowId,
+    name: flow.title,
+    state: flow.status,
+    description: flow.description,
+    nodes: flow.nodes ?? [],
+    edges: flow.edges ?? [],
+    ports: [],
+    channelId: flow.flowId,
+    createdAt: flow.createdAt,
+    updatedAt: flow.updatedAt,
+});
+
+const toCreatedFlowView = (flow: SpecFlowSummary): SaveFlowView => ({
+    id: flow.flowId,
+    name: flow.title,
+    state: flow.status,
+    description: flow.description,
+    nodes: [],
+    edges: [],
+    ports: [],
+    channelId: flow.flowId,
+    createdAt: flow.createdAt,
+    updatedAt: flow.updatedAt,
+});
+
+const putFlow = async (id: string, body: SaveFlowBody, title?: string): Promise<SaveFlowView> => {
+    const response = await api.put<SpecFlowDetail>(`/flows/${id}`, {
+        title,
+        nodes: body.nodes,
+        edges: body.edges ?? body.connections ?? [],
+    });
+    return toSaveFlowView(response.data);
+};
 
 /**
  * Load flow snapshot (complete state with nodes and edges)
- * GET /flows/:id/load
+ * GET /flows/{flowId}
  *
  * @see eureka-flows-api #0.26.111
  * @param id - Flow ID to load
@@ -30,13 +92,13 @@ export const loadFlow = async (id: string): Promise<LoadFlowResult> => {
         throw new Error('Flow ID is required');
     }
     _log(`> loadFlow(${id})`);
-    const response = await withRetry(() => api.get<LoadFlowResult>(`/flows/${id}/load`), 3, 'loadFlow');
-    return response.data;
+    const response = await withRetry(() => api.get<SpecFlowDetail>(`/flows/${id}`), 3, 'loadFlow');
+    return toLoadFlowResult(response.data);
 };
 
 /**
  * Save flow snapshot (complete state with nodes and edges)
- * POST /flows/:id/save
+ * PUT /flows/{flowId}
  *
  * @see eureka-flows-api #0.26.111
  * @param id - Flow ID ('0' for create new)
@@ -45,29 +107,39 @@ export const loadFlow = async (id: string): Promise<LoadFlowResult> => {
  */
 export const saveFlow = async (id: string, body: SaveFlowBody): Promise<SaveFlowView> => {
     _log(`> saveFlow(${id})`, { nodeCount: body.nodes.length, edgeCount: body.edges?.length ?? 0 });
-    const response = await api.post<SaveFlowView>(`/flows/${id}/save`, body);
-    return response.data;
+    if (id === '0') {
+        const created = await createFlow();
+        if (!created.id) throw new Error('Failed to create flow before save');
+        return putFlow(created.id, body, created.name);
+    }
+    return putFlow(id, body);
 };
 
 /**
- * Create new flow via POST /flows/0/save
- * This is the only way to create a new flow in the backend.
+ * Create new flow via POST /flows
  *
  * @param body - Initial flow state (nodes, edges)
  * @returns SaveFlowView with the new flow ID from server
  */
 export const createFlow = async (body?: Partial<SaveFlowBody>): Promise<SaveFlowView> => {
-    _log('> createFlow() via POST /flows/0/save');
+    _log('> createFlow() via POST /flows');
+    const createResponse = await api.post<SpecFlowSummary>('/flows', { title: 'Untitled Workflow' });
+    const created = toCreatedFlowView(createResponse.data);
+    if (!created.id) {
+        throw new Error('Failed to create flow: no ID returned');
+    }
     const saveBody: SaveFlowBody = {
         nodes: body?.nodes ?? [],
         edges: body?.edges ?? [],
     };
-    return saveFlow('0', saveBody);
+    return saveBody.nodes.length > 0 || saveBody.edges.length > 0
+        ? putFlow(created.id, saveBody, created.name)
+        : created;
 };
 
 /**
  * Upsert flow (batch update nodes and edges)
- * POST /flows/:id/upsert
+ * PUT /flows/{flowId}
  *
  * Use this for batch operations like:
  * - Moving multiple nodes at once
@@ -83,13 +155,12 @@ export const upsertFlow = async (id: string, body: SaveFlowBody): Promise<SaveFl
         throw new Error('Flow ID is required');
     }
     _log(`> upsertFlow(${id})`, { nodeCount: body.nodes?.length ?? 0, edgeCount: body.edges?.length ?? 0 });
-    const response = await api.post<SaveFlowView>(`/flows/${id}/upsert`, body);
-    return response.data;
+    return putFlow(id, body);
 };
 
 /**
  * Update flow metadata (name, etc.)
- * POST /flows/:id
+ * PUT /flows/{flowId}
  *
  * @see eureka-flows-api v0.26.126
  * @param id - Flow ID to update
@@ -101,8 +172,9 @@ export const updateFlowMetadata = async (id: string, body: UpdateFlowBody): Prom
         throw new Error('Flow ID is required');
     }
     _log(`> updateFlowMetadata(${id})`, body);
-    const response = await api.post<FlowView>(`/flows/${id}`, body);
-    return response.data;
+    const current = await loadFlow(id);
+    const saved = await putFlow(id, { nodes: current.nodes, edges: current.edges }, body.name ?? current.name);
+    return saved;
 };
 
 /**

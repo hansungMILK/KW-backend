@@ -1,5 +1,6 @@
 import { API_KEY_PROVIDERS } from '@flows/contracts';
 
+import { PAID_OPENAI_DISABLED, isPaidOpenAIAllowed } from '../adapters/ai/paid-openai-guard';
 import { env } from '../config/env';
 import { settingsRepo } from '../repositories/settings-repository';
 import { log } from '../utils/logger';
@@ -106,6 +107,13 @@ const verifyNanobanana = async (key: string): Promise<{ valid: boolean; message?
 };
 
 const verifyOpenAI = async (key: string): Promise<{ valid: boolean; message?: string }> => {
+    if (!isPaidOpenAIAllowed()) {
+        return {
+            valid: false,
+            message: `${PAID_OPENAI_DISABLED}: set ALLOW_PAID_OPENAI=1 only when you intentionally want to call OpenAI.`,
+        };
+    }
+
     try {
         const signal = withTimeout(5000);
         const res = await fetch('https://api.openai.com/v1/models', {

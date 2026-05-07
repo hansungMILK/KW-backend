@@ -122,7 +122,7 @@ const findClosestInputPort = (
 
         // Calculate input port positions (left side of node)
         const portX = node.position.x + TOUCH_PORT_LAYOUT.INPUT_X_OFFSET;
-        def.inputs.forEach((input, index) => {
+        for (const [index, input] of def.inputs.entries()) {
             const portY =
                 node.position.y +
                 TOUCH_PORT_LAYOUT.FIRST_PORT_Y +
@@ -140,7 +140,7 @@ const findClosestInputPort = (
                     };
                 }
             }
-        });
+        }
     }
 
     return closestPort;
@@ -899,7 +899,8 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                         const tmp = { ...inDeg };
                         const bfsQ = [...q];
                         while (bfsQ.length > 0) {
-                            const cur = bfsQ.shift()!;
+                            const cur = bfsQ.shift();
+                            if (cur === undefined) break;
                             (adj[cur] || []).forEach(next => {
                                 lvls[next] = Math.max(lvls[next] || 0, (lvls[cur] || 0) + 1);
                                 tmp[next]--;
@@ -2269,6 +2270,8 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                         };
                         createEdgeAfterNodeIds();
                     }
+                } else {
+                    onConnectionError?.('invalid_type');
                 }
             }
             setConnectionDraft(null);

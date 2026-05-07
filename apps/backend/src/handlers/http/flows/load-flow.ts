@@ -30,7 +30,7 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
         nodes: flow.nodes,
         edges: flow.edges,
         ports: [], // TODO: port data from node sub-documents
-        channelId: flow.channelId,
+        channelId: flow.id,
         createdAt: flow.createdAt,
         updatedAt: flow.updatedAt,
     });

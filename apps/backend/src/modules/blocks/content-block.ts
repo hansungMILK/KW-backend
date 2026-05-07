@@ -4,6 +4,8 @@ import { openaiAdapter } from '../../adapters/ai/openai-adapter';
 import { env } from '../../config/env';
 import { log } from '../../utils/logger';
 import { buildCombinedPrompt } from '../shorts/rulepacks/base-shorts-rulepack';
+import { SCRIPT_OUTPUT_RULES, SCRIPT_WRITER_RULES } from '../shorts/rulepacks/script-writer-rulepack';
+import { DIRECTOR_OUTPUT_RULES, SHORTS_DIRECTOR_RULES } from '../shorts/rulepacks/shorts-director-rulepack';
 import { selectShortsRulepack } from '../shorts/topic-router';
 
 import type { BlockExecutor, BlockExecutorResult } from './types';
@@ -11,18 +13,24 @@ import type { BlockExecutor, BlockExecutorResult } from './types';
 // ── Prompts ──────────────────────────────────────────────────────────────────
 
 const CONTENT_SYSTEM_PROMPT = `You are a Korean YouTube Shorts scriptwriter.
-Given keywords and/or article summaries, generate a complete 10–15 scene, one-minute short-form video script in Korean.
+Given keywords and/or article summaries, generate a complete 10–15 scene, one-minute vertical comic Shorts plan in Korean.
 
 Requirements:
 - title: a short high-impact Korean title that can stay at the top of every frame
 - hook: a punchy opening question or statement (one short sentence, max 32 Korean characters)
+- script: structured script metadata with hook, angle, and cta
+- style: structured visual style metadata for vertical-comic-shorts
 - scenes: 10–15 scenes, each with:
   - sceneNumber
   - imageSlot: "[Image #1]" through "[Image #12]" or "[Image #15]"
+  - storyBeat: hook|setup|escalation|reveal|takeaway|cta or another compact beat label
+  - topTitle: the same persistent Korean top title for every scene
   - caption: a short bold Korean on-screen subtitle (8–22 Korean characters)
   - narration: Korean voice-over text (one short spoken sentence, 18–42 Korean characters)
   - imagePrompt: English AI image generation prompt for a complete 9:16 YouTube Shorts frame using GPT-image-2. Short Korean title/caption text is allowed.
-  - visualText: the exact short Korean text intended for the image frame
+  - visualText: backward-compatible short Korean main caption string
+  - visual: { topTitle, mainCaption, sourceLabel? }
+  - claimType: fact|hypothetical|opinion|joke
   - sourceRefs: source ids or compact source objects used by the scene
   - durationSec: 4–6 seconds per scene
 - cta: call-to-action closing line (max 32 Korean characters)
@@ -34,8 +42,10 @@ Respond with JSON only — no markdown fences, no extra text:
 {
   "title": "...",
   "hook": "...",
+  "script": { "hook": "...", "angle": "...", "cta": "..." },
+  "style": { "format": "vertical-comic-shorts", "aspectRatio": "9:16", "sceneCount": 12, "visualGrammar": {} },
   "scenes": [
-    { "sceneNumber": 1, "imageSlot": "[Image #1]", "caption": "...", "narration": "...", "imagePrompt": "...", "visualText": "...", "sourceRefs": ["source-1"], "durationSec": 5 },
+    { "sceneNumber": 1, "imageSlot": "[Image #1]", "storyBeat": "hook", "topTitle": "...", "caption": "...", "narration": "...", "imagePrompt": "...", "visualText": "...", "visual": { "topTitle": "...", "mainCaption": "...", "sourceLabel": "..." }, "claimType": "fact", "sourceRefs": ["source-1"], "durationSec": 5 },
     ...
   ],
   "cta": "...",
@@ -44,6 +54,34 @@ Respond with JSON only — no markdown fences, no extra text:
     { "id": "source-1", "title": "...", "url": "...", "source": "...", "publishedAt": "YYYY-MM-DD or null", "sourceType": "official|news|blog|other", "confidence": 0.9, "summary": "..." }
   ]
 }`;
+
+const SINGLE_IMAGE_SYSTEM_PROMPT = `You are an AI image prompt planner.
+Given a user's image request, produce exactly one scene that can be passed to GPT-image-2.
+
+Requirements:
+- title: a compact Korean title for the image, max 16 Korean characters
+- hook: one short Korean phrase describing the image intent
+- script: { hook, angle, cta }
+- style: { format: "single-image", aspectRatio: "9:16", sceneCount: 1 }
+- scenes: exactly 1 scene with:
+  - sceneNumber: 1
+  - imageSlot: "[Image #1]"
+  - storyBeat: "single-image"
+  - topTitle: compact Korean title
+  - caption: a short bold Korean caption, max 18 Korean characters
+  - narration: one short Korean description of the image, max 42 Korean characters
+  - imagePrompt: English AI image generation prompt for one complete image. Preserve the user's subject and action.
+  - visualText: exact short Korean text intended for the image frame when useful; otherwise same as caption
+  - visual: { topTitle, mainCaption, sourceLabel? }
+  - claimType: opinion|joke|hypothetical|fact
+  - sourceRefs: []
+  - durationSec: 5
+- cta: empty string
+- totalDurationSec: 5
+- sources: []
+
+Do not create a Shorts/video plan. Do not add TTS, video, SEO, or distribution steps.
+Respond with JSON only — no markdown fences, no extra text.`;
 
 // ── Dummy (mock mode) ─────────────────────────────────────────────────────────
 
@@ -208,22 +246,27 @@ function buildUserMessage(input: unknown): string {
 export const contentBlock: BlockExecutor = {
     blockType: 'content',
 
-    async execute(input: unknown, _config?: Record<string, unknown>): Promise<BlockExecutorResult> {
+    async execute(input: unknown, config?: Record<string, unknown>): Promise<BlockExecutorResult> {
         const mode = env.orchestratorMode;
         if (mode === 'mock') return dummyContent();
 
         const start = Date.now();
         const userMessage = buildUserMessage(input);
         const rulepack = selectShortsRulepack(input);
+        const singleImageMode = isSingleImageMode(input, config);
 
         log.info('[content-block] Starting AI script generation', {
             messageLength: userMessage.length,
             presetId: rulepack.id,
+            mode: singleImageMode ? 'single-image' : 'shorts',
         });
 
+        const directorPrompt = `${SCRIPT_WRITER_RULES}\n\n${SCRIPT_OUTPUT_RULES}\n\n${SHORTS_DIRECTOR_RULES}\n\n${DIRECTOR_OUTPUT_RULES}`;
         const response = await openaiAdapter.chatJson({
             model: env.openaiModel,
-            systemPrompt: `${CONTENT_SYSTEM_PROMPT}\n\n${buildCombinedPrompt(rulepack, 'contentPrompt')}\n\n${rulepack.sourcePolicy}`,
+            systemPrompt: singleImageMode
+                ? `${SINGLE_IMAGE_SYSTEM_PROMPT}\n\n${directorPrompt}\n\n${rulepack.imagePrompt}`
+                : `${CONTENT_SYSTEM_PROMPT}\n\n${buildCombinedPrompt(rulepack, 'contentPrompt')}\n\n${directorPrompt}\n\n${rulepack.sourcePolicy}`,
             userMessage,
             maxTokens: 4096,
         });
@@ -241,7 +284,13 @@ export const contentBlock: BlockExecutor = {
             throw new Error(`[content-block] Output schema validation failed: ${validated.error.message}`);
         }
 
-        if (validated.data.scenes.length < 10 || validated.data.scenes.length > 15) {
+        if (singleImageMode && validated.data.scenes.length !== 1) {
+            throw new Error(
+                `[content-block] Expected exactly 1 scene for single-image mode, got ${validated.data.scenes.length}`
+            );
+        }
+
+        if (!singleImageMode && (validated.data.scenes.length < 10 || validated.data.scenes.length > 15)) {
             throw new Error(`[content-block] Expected 10-15 scenes, got ${validated.data.scenes.length}`);
         }
 
@@ -255,38 +304,135 @@ export const contentBlock: BlockExecutor = {
     },
 };
 
+function isSingleImageMode(input: unknown, config?: Record<string, unknown>): boolean {
+    const values: unknown[] = [config?.['mode'], config?.['type'], config?.['format'], config?.['scenario']];
+    if (input && typeof input === 'object' && !Array.isArray(input)) {
+        const obj = input as Record<string, unknown>;
+        values.push(obj['mode'], obj['type'], obj['format'], obj['scenario']);
+    }
+
+    const modeText = values
+        .filter((value): value is string => typeof value === 'string')
+        .join(' ')
+        .toLowerCase();
+
+    const inputScenes =
+        input && typeof input === 'object' && !Array.isArray(input)
+            ? (input as Record<string, unknown>)['scenes']
+            : undefined;
+    const sceneCount = Number(config?.['scenes'] ?? inputScenes);
+
+    return modeText.includes('single-image') || modeText.includes('image-only') || sceneCount === 1;
+}
+
 function normalizeContentOutput(parsed: unknown, input: unknown, presetId: string): unknown {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return parsed;
     const obj = parsed as Record<string, unknown>;
     const sources = extractSources(input);
-    const fallbackSourceRefs = sources.length > 0 ? [sources[0]?.id ?? sources[0]?.source ?? 'source-1'] : [];
+    const script = isRecord(obj['script']) ? obj['script'] : {};
+    const title = typeof obj['title'] === 'string' ? obj['title'] : '쇼츠 핵심 정리';
+    const hook =
+        typeof obj['hook'] === 'string' ? obj['hook'] : typeof script['hook'] === 'string' ? script['hook'] : title;
+    const cta =
+        typeof obj['cta'] === 'string'
+            ? obj['cta']
+            : typeof script['cta'] === 'string'
+              ? script['cta']
+              : '저장하고 다음에 다시 확인하세요.';
     const scenes = Array.isArray(obj['scenes'])
         ? (obj['scenes'] as Record<string, unknown>[]).map((scene, index) => ({
-              ...scene,
-              sceneNumber: typeof scene['sceneNumber'] === 'number' ? scene['sceneNumber'] : index + 1,
-              imageSlot: typeof scene['imageSlot'] === 'string' ? scene['imageSlot'] : `[Image #${index + 1}]`,
-              narration:
-                  typeof scene['narration'] === 'string'
-                      ? compactSpokenLine(scene['narration'], 42)
-                      : scene['narration'],
-              visualText:
-                  typeof scene['visualText'] === 'string'
-                      ? scene['visualText']
-                      : typeof scene['caption'] === 'string'
-                        ? scene['caption']
-                        : undefined,
-              sourceRefs: Array.isArray(scene['sourceRefs']) ? scene['sourceRefs'] : fallbackSourceRefs,
+              ...normalizeScene(scene, index, title),
           }))
         : obj['scenes'];
 
     return {
         ...obj,
-        hook: typeof obj['hook'] === 'string' ? compactSpokenLine(obj['hook'], 32) : obj['hook'],
-        cta: typeof obj['cta'] === 'string' ? compactSpokenLine(obj['cta'], 32) : obj['cta'],
+        title,
+        hook: compactSpokenLine(hook, 32),
+        script: {
+            ...script,
+            hook: compactSpokenLine(hook, 32),
+            cta: compactSpokenLine(cta, 32),
+        },
+        style: normalizeStyle(obj['style'], Array.isArray(scenes) ? scenes.length : undefined),
         scenes,
+        cta: compactSpokenLine(cta, 32),
         sources: Array.isArray(obj['sources']) && obj['sources'].length > 0 ? obj['sources'] : sources,
         presetId,
     };
+}
+
+function normalizeScene(scene: Record<string, unknown>, index: number, title: string): Record<string, unknown> {
+    const sceneNumber = typeof scene['sceneNumber'] === 'number' ? scene['sceneNumber'] : index + 1;
+    const imageSlot = typeof scene['imageSlot'] === 'string' ? scene['imageSlot'] : `[Image #${sceneNumber}]`;
+    const caption = typeof scene['caption'] === 'string' ? compactPromptText(scene['caption'], 22) : '';
+    const visual = isRecord(scene['visual']) ? scene['visual'] : {};
+    const topTitle =
+        typeof scene['topTitle'] === 'string'
+            ? compactPromptText(scene['topTitle'], 18)
+            : typeof visual['topTitle'] === 'string'
+              ? compactPromptText(visual['topTitle'], 18)
+              : compactPromptText(title, 18);
+    const mainCaption =
+        typeof visual['mainCaption'] === 'string'
+            ? compactPromptText(visual['mainCaption'], 18)
+            : typeof scene['visualText'] === 'string'
+              ? compactPromptText(scene['visualText'], 18)
+              : compactPromptText(caption, 18);
+    const sourceRefs = Array.isArray(scene['sourceRefs']) ? scene['sourceRefs'] : [];
+    const claimType = normalizeClaimType(scene['claimType'], scene, sourceRefs);
+
+    return {
+        ...scene,
+        sceneNumber,
+        imageSlot,
+        storyBeat: typeof scene['storyBeat'] === 'string' ? scene['storyBeat'] : storyBeatForIndex(index),
+        topTitle,
+        caption,
+        narration:
+            typeof scene['narration'] === 'string' ? compactSpokenLine(scene['narration'], 42) : scene['narration'],
+        visualText: mainCaption || caption || undefined,
+        visual: {
+            ...visual,
+            topTitle,
+            mainCaption: mainCaption || caption || undefined,
+            sourceLabel:
+                typeof visual['sourceLabel'] === 'string' ? compactPromptText(visual['sourceLabel'], 24) : undefined,
+        },
+        claimType,
+        sourceRefs,
+    };
+}
+
+function normalizeStyle(input: unknown, sceneCount?: number): Record<string, unknown> {
+    const style = isRecord(input) ? input : {};
+    return {
+        ...style,
+        format: typeof style['format'] === 'string' ? style['format'] : 'vertical-comic-shorts',
+        aspectRatio: typeof style['aspectRatio'] === 'string' ? style['aspectRatio'] : '9:16',
+        sceneCount: typeof style['sceneCount'] === 'number' ? style['sceneCount'] : sceneCount,
+    };
+}
+
+function storyBeatForIndex(index: number): string {
+    const beats = ['hook', 'setup', 'escalation', 'reveal', 'takeaway', 'cta'];
+    if (index === 0) return 'hook';
+    return beats[Math.min(beats.length - 1, Math.floor((index / 12) * beats.length))] ?? 'takeaway';
+}
+
+function normalizeClaimType(input: unknown, scene: Record<string, unknown>, sourceRefs: unknown[]): string {
+    if (input === 'fact' || input === 'hypothetical' || input === 'opinion' || input === 'joke') return input;
+    if (sourceRefs.length > 0) return 'fact';
+
+    const text = [scene['caption'], scene['visualText'], scene['narration']]
+        .filter((value): value is string => typeof value === 'string')
+        .join(' ');
+    if (/\d{4}|\d+월|\d+일|\d+%|\d+등급|\d+점/.test(text)) return 'fact';
+    return 'opinion';
+}
+
+function isRecord(input: unknown): input is Record<string, unknown> {
+    return input != null && typeof input === 'object' && !Array.isArray(input);
 }
 
 function compactSpokenLine(value: string, maxChars: number): string {
@@ -298,6 +444,12 @@ function compactSpokenLine(value: string, maxChars: number): string {
 
     const sliced = cleaned.slice(0, Math.max(1, maxChars - 1)).replace(/[,\s.]+$/g, '');
     return `${sliced}.`;
+}
+
+function compactPromptText(value: string, maxChars: number): string {
+    const compact = value.replace(/\s+/g, ' ').trim();
+    if (compact.length <= maxChars) return compact;
+    return `${compact.slice(0, Math.max(1, maxChars - 1)).trim()}...`;
 }
 
 function extractSources(input: unknown): Array<Record<string, unknown>> {

@@ -198,7 +198,7 @@ export type FlowStereo = '' | '#' | '#template';
 /**
  * FlowState - lifecycle state of flow
  */
-export type FlowState = 'draft' | 'active' | 'archived';
+export type FlowState = 'draft' | 'active' | 'archived' | 'DRAFT' | 'READY' | 'ARCHIVED';
 
 /**
  * FlowModel - flow model for CRUD operations
@@ -213,6 +213,7 @@ export interface FlowModel {
     name?: string;
     state?: FlowState;
     description?: string;
+    channelId?: string;
     seq?: number;
     meta?: unknown;
     createdAt?: string;

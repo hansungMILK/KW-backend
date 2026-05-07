@@ -103,9 +103,9 @@ export const executionEngine = {
     /**
      * Handle EXECUTE_RUN queue message.
      *
-     * Idempotency: if run is already RUNNING/COMPLETED/FAILED/CANCELLED, skip.
+     * Idempotency: if run is already COMPLETED/FAILED/CANCELLED, skip.
      * Flow:
-     *   1. QUEUED → RUNNING (conditional; bail if fails)
+     *   1. QUEUED → RUNNING, or continue a retry that is already RUNNING
      *   2. Compute waves from topological sort
      *   3. Execute wave by wave — check cancel between each wave
      *   4. If any node FAILED: mark remaining PENDING as SKIPPED, run → FAILED
@@ -118,21 +118,22 @@ export const executionEngine = {
             return;
         }
 
-        // Idempotency: only start from QUEUED
-        if (run.status !== 'QUEUED') {
+        // Idempotency: only start from QUEUED or continue an explicit retry from RUNNING.
+        if (run.status !== 'QUEUED' && run.status !== 'RUNNING') {
             console.info(
                 `[execution-engine] handleRunExecution: run ${runId} already ${run.status} — skipping (idempotent)`
             );
             return;
         }
 
-        // QUEUED → RUNNING
-        const startResult = await runRepo.updateRunStatus(runId, 'RUNNING', {
-            startedAt: new Date().toISOString(),
-        });
-        if (!startResult.ok) {
-            console.warn(`[execution-engine] handleRunExecution: transition failed — ${startResult.error}`);
-            return;
+        if (run.status === 'QUEUED') {
+            const startResult = await runRepo.updateRunStatus(runId, 'RUNNING', {
+                startedAt: new Date().toISOString(),
+            });
+            if (!startResult.ok) {
+                console.warn(`[execution-engine] handleRunExecution: transition failed — ${startResult.error}`);
+                return;
+            }
         }
 
         // Broadcast run.started + record trace
@@ -167,18 +168,22 @@ export const executionEngine = {
                 return;
             }
 
-            // Execute all nodes in this wave (serially in local mode; parallel in prod via separate messages)
-            for (const nodeId of wave) {
-                const nodeCheck = await runRepo.getRunNode(runId, nodeId);
-                if (!nodeCheck || nodeCheck.status === 'CANCELLED') continue;
+            // Execute all nodes in this wave concurrently. Nodes in the same
+            // wave have no dependencies on each other, so image/TTS branches
+            // should run at the same time after analysis completes.
+            const waveResults = await Promise.all(
+                wave.map(async nodeId => {
+                    const nodeCheck = await runRepo.getRunNode(runId, nodeId);
+                    if (!nodeCheck || nodeCheck.status === 'CANCELLED') return null;
 
-                await this.handleNodeExecution(runId, nodeId, _executionId);
+                    await this.handleNodeExecution(runId, nodeId, _executionId);
 
-                // Check if this node failed
-                const nodeAfter = await runRepo.getRunNode(runId, nodeId);
-                if (nodeAfter?.status === 'FAILED') {
-                    hasFailed = true;
-                }
+                    return runRepo.getRunNode(runId, nodeId);
+                })
+            );
+
+            if (waveResults.some(nodeAfter => nodeAfter?.status === 'FAILED')) {
+                hasFailed = true;
             }
 
             if (hasFailed) break;
@@ -225,6 +230,7 @@ export const executionEngine = {
                     status: 'FAILED',
                     failedNodeId,
                     errorCode: failedErrorCode,
+                    errorMessage: failedErrorMessage,
                     error: failedErrorMessage,
                     timestamp: Date.now(),
                 });
@@ -342,47 +348,95 @@ export const executionEngine = {
             /* non-fatal */
         }
 
+        const persistedAssetKeys = new Set<string>();
+        let lastProgress = 0;
+
+        const broadcastProgress = async (progress: number, message?: string): Promise<void> => {
+            if (!runForNode) return;
+            const boundedProgress = Math.max(lastProgress, Math.max(0, Math.min(99, Math.round(progress))));
+            const progressResult = await runRepo.updateRunNodeStatus(runId, nodeId, 'RUNNING', {
+                progress: boundedProgress,
+            });
+            if (!progressResult.ok) {
+                throw new Error(progressResult.error);
+            }
+            lastProgress = boundedProgress;
+
+            try {
+                await wsService.broadcastToFlow(runForNode.flowId, {
+                    type: 'node.progress',
+                    id: nodeId,
+                    runId,
+                    flowId: runForNode.flowId,
+                    nodeId,
+                    progress: boundedProgress,
+                    message: message ?? `${node.blockType} 실행 중...`,
+                    timestamp: Date.now(),
+                });
+            } catch {
+                /* non-fatal */
+            }
+        };
+
+        const persistAsset = async (asset: NonNullable<BlockExecutorResult['assets']>[number]): Promise<void> => {
+            if (!runForNode) return;
+
+            const metadataKey = typeof asset.metadata?.['s3Key'] === 'string' ? asset.metadata['s3Key'] : undefined;
+            const dataKey = typeof asset.data === 'string' ? asset.data : undefined;
+            const dedupeKey = metadataKey ?? dataKey;
+            if (dedupeKey && persistedAssetKeys.has(dedupeKey)) return;
+
+            const assetId = generateNumericId();
+            const publicUrl = await resolveAssetPublicUrl(asset, runId, nodeId);
+
+            await assetRepo.put({
+                assetId,
+                runId,
+                runNodeId: nodeId,
+                flowId: runForNode.flowId,
+                assetType: asset.assetType,
+                mimeType: asset.mimeType,
+                publicUrl,
+                metadata: asset.metadata ?? {},
+                createdAt: new Date().toISOString(),
+            });
+
+            if (dedupeKey) persistedAssetKeys.add(dedupeKey);
+
+            try {
+                await wsService.broadcastToFlow(runForNode.flowId, {
+                    type: 'asset.created',
+                    id: assetId,
+                    runId,
+                    flowId: runForNode.flowId,
+                    nodeId,
+                    assetId,
+                    assetType: asset.assetType.toLowerCase(),
+                    url: publicUrl,
+                    publicUrl,
+                    timestamp: Date.now(),
+                });
+            } catch {
+                /* non-fatal — websocket delivery is best-effort */
+            }
+        };
+
         try {
             // Broadcast node.progress at 25% before execution
-            if (runForNode) {
-                try {
-                    await wsService.broadcastToFlow(runForNode.flowId, {
-                        type: 'node.progress',
-                        id: nodeId,
-                        runId,
-                        flowId: runForNode.flowId,
-                        nodeId,
-                        progress: 25,
-                        message: `${node.blockType} 실행 준비 중...`,
-                        timestamp: Date.now(),
-                    });
-                    await runRepo.updateRunNodeStatus(runId, nodeId, 'RUNNING', { progress: 25 });
-                } catch {
-                    /* non-fatal */
-                }
-            }
+            await broadcastProgress(25, `${node.blockType} 실행 준비 중...`);
 
             const resolvedInput = await resolveNodeInput(runId, node);
-            const result = await blockExecutor.execute(node.blockType, resolvedInput, node.inputPayload ?? undefined);
+            const result = await blockExecutor.execute(node.blockType, resolvedInput, node.inputPayload ?? undefined, {
+                runId,
+                nodeId,
+                flowId: runForNode?.flowId,
+                onProgress: broadcastProgress,
+                onAsset: persistAsset,
+            });
             const { output, durationMs, assets } = result;
 
             // Broadcast node.progress at 75% after execution, before save
-            if (runForNode) {
-                try {
-                    await wsService.broadcastToFlow(runForNode.flowId, {
-                        type: 'node.progress',
-                        id: nodeId,
-                        runId,
-                        flowId: runForNode.flowId,
-                        nodeId,
-                        progress: 75,
-                        message: `${node.blockType} 결과 저장 중...`,
-                        timestamp: Date.now(),
-                    });
-                } catch {
-                    /* non-fatal */
-                }
-            }
+            await broadcastProgress(75, `${node.blockType} 결과 저장 중...`);
 
             if (node.blockType === 'analysis' && output['approved'] === false) {
                 const issueSummary = Array.isArray(output['issues'])
@@ -428,49 +482,20 @@ export const executionEngine = {
                 return;
             }
 
+            // Save assets produced by this node before reporting completion.
+            // If persistence fails, the node must fail instead of emitting a
+            // completed event with missing downloadable outputs.
+            if (assets && assets.length > 0 && runForNode) {
+                for (const asset of assets) {
+                    await persistAsset(asset);
+                }
+            }
+
             await runRepo.updateRunNodeStatus(runId, nodeId, 'COMPLETED', {
                 completedAt: new Date().toISOString(),
                 progress: 100,
                 outputPayload: { ...output, durationMs },
             });
-
-            // Save assets produced by this node (media blocks)
-            if (assets && assets.length > 0 && runForNode) {
-                for (const asset of assets) {
-                    const assetId = generateNumericId();
-                    const publicUrl = await resolveAssetPublicUrl(asset, runId, nodeId);
-
-                    try {
-                        await assetRepo.put({
-                            assetId,
-                            runId,
-                            runNodeId: nodeId,
-                            flowId: runForNode.flowId,
-                            assetType: asset.assetType,
-                            mimeType: asset.mimeType,
-                            publicUrl,
-                            metadata: asset.metadata ?? {},
-                            createdAt: new Date().toISOString(),
-                        });
-
-                        // Broadcast asset.created WS event
-                        await wsService.broadcastToFlow(runForNode.flowId, {
-                            type: 'asset.created',
-                            id: assetId,
-                            runId,
-                            flowId: runForNode.flowId,
-                            nodeId,
-                            assetId,
-                            assetType: asset.assetType.toLowerCase(),
-                            url: publicUrl,
-                            publicUrl,
-                            timestamp: Date.now(),
-                        });
-                    } catch {
-                        /* non-fatal — asset persistence failure should not break node completion */
-                    }
-                }
-            }
 
             // Broadcast node.completed + record trace
             if (runForNode) {

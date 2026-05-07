@@ -48,6 +48,9 @@ interface NormalizedScene {
     narration?: unknown;
     imagePrompt?: unknown;
     visualText?: unknown;
+    visual?: unknown;
+    topTitle?: unknown;
+    claimType?: unknown;
     sourceRefs?: unknown;
     keywords?: unknown;
 }
@@ -90,12 +93,52 @@ function runRuleChecks(
     }
 
     // 2. Per-scene checks
+    const topTitles: Array<{ sceneNumber?: number; value: string }> = [];
     for (const scene of scenes) {
         const sceneNum = typeof scene.sceneNumber === 'number' ? scene.sceneNumber : undefined;
         const narration = typeof scene.narration === 'string' ? scene.narration : '';
-        const caption = typeof scene.caption === 'string' ? scene.caption : '';
-        const visualText = typeof scene.visualText === 'string' ? scene.visualText : caption;
+        const visual = isRecord(scene.visual) ? scene.visual : {};
+        const caption =
+            typeof visual['mainCaption'] === 'string'
+                ? visual['mainCaption']
+                : typeof scene.caption === 'string'
+                  ? scene.caption
+                  : '';
+        const visualText =
+            typeof scene.visualText === 'string'
+                ? scene.visualText
+                : typeof visual['mainCaption'] === 'string'
+                  ? visual['mainCaption']
+                  : caption;
+        const topTitle =
+            typeof scene.topTitle === 'string'
+                ? scene.topTitle
+                : typeof visual['topTitle'] === 'string'
+                  ? visual['topTitle']
+                  : '';
+        const sourceLabel = typeof visual['sourceLabel'] === 'string' ? visual['sourceLabel'] : '';
+        const claimType = typeof scene.claimType === 'string' ? scene.claimType : undefined;
         const sourceRefs = Array.isArray(scene.sourceRefs) ? scene.sourceRefs : [];
+
+        if (topTitle) {
+            topTitles.push({ sceneNumber: sceneNum, value: topTitle });
+        }
+
+        if (!topTitle) {
+            issues.push({
+                severity: 'medium',
+                message: '상단 고정 제목(topTitle)이 없습니다.',
+                sceneNumber: sceneNum,
+            });
+            qualityDeductions += 4;
+        } else if (topTitle.length > 18) {
+            issues.push({
+                severity: 'medium',
+                message: `상단 제목이 너무 깁니다 (${topTitle.length}자). 18자 이하 권장.`,
+                sceneNumber: sceneNum,
+            });
+            qualityDeductions += 4;
+        }
 
         // Narration length
         if (narration.length < MIN_NARRATION_CHARS) {
@@ -131,6 +174,15 @@ function runRuleChecks(
             }
         }
 
+        if (claimType === 'fact' && sourceRefs.length === 0) {
+            issues.push({
+                severity: 'high',
+                message: 'fact 장면인데 sourceRefs가 없습니다.',
+                sceneNumber: sceneNum,
+            });
+            qualityDeductions += 8;
+        }
+
         if (presetId === 'education-admission') {
             const factualText = [caption, visualText, narration].join(' ');
             const hasExactClaim = hasAdmissionExactClaim(factualText);
@@ -153,6 +205,15 @@ function runRuleChecks(
             }
         }
 
+        if (caption.length > 18) {
+            issues.push({
+                severity: 'medium',
+                message: `중앙 자막이 너무 깁니다 (${caption.length}자). 18자 이하 권장.`,
+                sceneNumber: sceneNum,
+            });
+            qualityDeductions += 4;
+        }
+
         if (visualText.length > 24) {
             issues.push({
                 severity: 'medium',
@@ -160,6 +221,36 @@ function runRuleChecks(
                 sceneNumber: sceneNum,
             });
             qualityDeductions += 4;
+        }
+
+        if (/https?:\/\//i.test(sourceLabel) || sourceLabel.length > 36) {
+            issues.push({
+                severity: 'medium',
+                message: 'sourceLabel에는 긴 URL이나 긴 출처 문구를 넣지 마세요.',
+                sceneNumber: sceneNum,
+            });
+            qualityDeductions += 4;
+        }
+
+        if (/출처\s*확인\s*필요/.test(sourceLabel)) {
+            issues.push({
+                severity: 'medium',
+                message: '출처 없음은 화면 문구로 대체하지 말고 sourceRefs 누락 이슈로 처리해야 합니다.',
+                sceneNumber: sceneNum,
+            });
+            qualityDeductions += 4;
+        }
+    }
+
+    const firstTopTitle = topTitles[0]?.value;
+    if (firstTopTitle) {
+        const changed = topTitles.filter(item => item.value !== firstTopTitle);
+        if (changed.length > 0) {
+            issues.push({
+                severity: 'high',
+                message: `모든 씬의 topTitle이 같아야 합니다. ${changed.length}개 씬에서 제목이 바뀌었습니다.`,
+            });
+            qualityDeductions += 12;
         }
     }
 
@@ -205,6 +296,10 @@ function hasAdmissionExactClaim(text: string): boolean {
         /\d{4}|\d+월|\d+일|\d+%|\d+등급|\d+점/.test(text) ||
         /정시|수시|모집|마감|원서|전형|수능|내신|등급|컷|경쟁률|반영/.test(text)
     );
+}
+
+function isRecord(input: unknown): input is Record<string, unknown> {
+    return input != null && typeof input === 'object' && !Array.isArray(input);
 }
 
 // ── AI enhancement ────────────────────────────────────────────────────────────
@@ -305,7 +400,9 @@ export const analysisBlock: BlockExecutor = {
         // AI enhancement in real provider mode; non-fatal if it fails.
         const allIssues = await runAIReview(scenes, ruleIssues, rulepack.analysisPrompt);
 
-        const approved = safetyScore >= SAFETY_THRESHOLD && qualityScore >= QUALITY_THRESHOLD;
+        const blockingIssues = allIssues.filter(issue => issue.severity === 'high' || issue.severity === 'critical');
+        const approved =
+            safetyScore >= SAFETY_THRESHOLD && qualityScore >= QUALITY_THRESHOLD && blockingIssues.length === 0;
 
         const output = {
             safetyScore,
@@ -323,6 +420,7 @@ export const analysisBlock: BlockExecutor = {
             safetyScore,
             qualityScore,
             issueCount: allIssues.length,
+            blockingIssueCount: blockingIssues.length,
             approved,
         });
 

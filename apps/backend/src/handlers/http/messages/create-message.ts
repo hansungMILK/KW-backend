@@ -1,5 +1,6 @@
 import { MessageCreateParamsSchema, MessageCreateRequestSchema } from '@flows/contracts';
 
+import { PAID_OPENAI_DISABLED, isPaidOpenAIAllowed } from '../../../adapters/ai/paid-openai-guard';
 import { env } from '../../../config/env';
 import { getOrchestrator } from '../../../modules/orchestrator';
 import { classifyMessageIntent, generateChatReply } from '../../../modules/orchestrator/chat-assistant';
@@ -23,6 +24,14 @@ const ORCHESTRATOR_PROVIDER_BY_MODE: Record<string, ApiKeyProvider | undefined> 
 const ensureOrchestratorProviderKey = async (): Promise<APIGatewayProxyResult | null> => {
     const provider = ORCHESTRATOR_PROVIDER_BY_MODE[env.orchestratorMode];
     if (!provider) return null;
+
+    if (provider === 'openai' && !isPaidOpenAIAllowed()) {
+        return unprocessableJson({
+            error: PAID_OPENAI_DISABLED,
+            message:
+                'Paid OpenAI calls are disabled. Set ALLOW_PAID_OPENAI=1 only when you intentionally want to spend API credits.',
+        });
+    }
 
     const apiKey = await settingsService.getKeyForProviderAsync(provider);
     if (apiKey) return null;

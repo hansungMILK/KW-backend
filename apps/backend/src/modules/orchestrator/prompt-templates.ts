@@ -13,27 +13,28 @@ The product is a general Shorts workflow engine. Education/admission Shorts are 
 
 | Type         | Role                              | Input port types   | Output port types  |
 |--------------|-----------------------------------|--------------------|--------------------|
-| search       | 트렌드/뉴스 수집                   | text (query)       | text (articles)    |
-| content      | AI 스크립트 생성 (10-15 scenes)    | text (topic)       | text (script)      |
-| data         | 데이터 정규화/구조화                | text (raw)         | text (structured)  |
-| analysis     | 안전성·품질 검수                    | text (structured)  | text (reviewed)    |
-| media-image  | 씬별 이미지 생성                    | text (scene desc)  | image              |
-| media-tts    | 씬별 TTS 나레이션 생성              | text (script)      | audio              |
-| media-video  | 이미지+오디오 → 영상 합성           | image + audio      | video              |
-| integration  | SEO 메타데이터 + 최종 배포 URL      | video              | text (delivery)    |
+| search       | 트렌드/뉴스 수집                   | text (query, optional) | json (articles) |
+| content      | AI 스크립트/이미지 프롬프트 생성     | json (research)    | json (script)      |
+| data         | 데이터 정규화/구조화                | json (script)      | json (structured)  |
+| analysis     | 안전성·품질 검수                    | json (structured)  | json (reviewed)    |
+| media-image  | 씬별 이미지 생성                    | json (scene desc)  | json (images)      |
+| media-tts    | 씬별 TTS 나레이션 생성              | json (script)      | json (audio)       |
+| media-video  | 이미지+오디오 → 영상 합성           | json (assets)      | json (video)       |
+| integration  | SEO 메타데이터 + 최종 배포 URL      | json (video)       | json (delivery)    |
 
 ## Port Connection Rules
-- text → text: 항상 유효
-- text → image: media-image 블록만 수신 가능 (씬 설명)
-- text → audio: media-tts 블록만 수신 가능 (스크립트)
-- image + audio → video: media-video 블록만 수신 (두 포트 모두 연결 필수)
-- video → text: integration 블록만 수신 가능
+- text → search: 사용자가 수동 입력 노드로 주제를 넣을 때만 유효
+- search 이후 쇼츠 파이프라인은 json → json으로 연결
+- media-image와 media-tts 결과는 media-video가 json assets로 병합해 받음
 
 ## DAG Rules
 - media-image와 media-tts는 analysis 이후 병렬로 실행 가능
-- media-video는 반드시 media-image와 media-tts 양쪽 모두에서 엣지를 받아야 함
+- media-video가 포함되면 반드시 media-image와 media-tts 양쪽 모두에서 엣지를 받아야 함
 - 쇼츠 영상 요청이면 8개 블록 전부 포함 필수
 - 1분 쇼츠는 Sora 같은 원샷 비디오가 아니라 10~15개 세로 이미지 프레임 + 자막 + OpenAI TTS + BGM + FFmpeg MP4 합성으로 만든다
+- 단일 이미지 생성 요청이면 쇼츠/영상 파이프라인을 만들지 말고 최소 content -> media-image 2개 블록만 사용한다
+- 단일 이미지 생성의 content config는 { "mode": "single-image", "scenes": 1, "topic": "사용자 이미지 요청" } 형태로 둔다
+- 단일 이미지 생성에는 사용자가 요청하지 않은 search, data, analysis, media-tts, media-video, integration을 넣지 않는다
 - 입시/교육 요청은 education-admission preset으로 처리하고, 그 외 주제는 general-shorts preset으로 처리한다
 - edges는 blocks 배열의 0-based 인덱스를 사용
 
@@ -81,6 +82,21 @@ Assistant:
   ],
   "estimatedCostUsd": 0.9,
   "summary": "입시 트렌드를 수집하고 10~15장 이미지용 스크립트를 만든 뒤, 이미지와 TTS를 병렬 생성하고 BGM을 더해 1분 세로형 쇼츠 MP4를 완성합니다."
+}
+
+### Example 2
+User: "바나나가 춤추는 이미지 생성해줘"
+Assistant:
+{
+  "blocks": [
+    { "type": "content",     "label": "이미지 프롬프트 구성", "config": { "mode": "single-image", "scenes": 1, "topic": "바나나가 춤추는 이미지" } },
+    { "type": "media-image", "label": "이미지 생성",          "config": { "count": 1, "style": "single-image" } }
+  ],
+  "edges": [
+    { "from": 0, "to": 1 }
+  ],
+  "estimatedCostUsd": 0.14,
+  "summary": "요청한 이미지를 만들기 위해 이미지 프롬프트를 1개 장면으로 정리하고, media-image 블록에서 실제 이미지를 생성합니다."
 }
 `;
 

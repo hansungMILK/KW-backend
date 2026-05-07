@@ -201,7 +201,10 @@ export const useCanvasEngine = ({ readOnly, onNodeSelect, onChange }: UseCanvasE
                                   status: 'ERROR', // Deprecated: kept for backward compatibility
                                   errorMessage: !nodeDef
                                       ? t('nodes:errors.unknownBlockType')
-                                      : t('nodes:errors.backendExecutionRequired', 'This block must run on the backend.'),
+                                      : t(
+                                            'nodes:errors.backendExecutionRequired',
+                                            'This block must run on the backend.'
+                                        ),
                               }
                             : n
                     )

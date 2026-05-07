@@ -3,11 +3,12 @@
     "version": "0.1.0",
     "private": true,
     "scripts": {
-        "start": "npx serverless offline --httpPort 8800 --websocketPort 8801 --noPrependStageInUrl",
+        "start": "rm -rf .esbuild && bash scripts/with-local-env.sh npx serverless offline --httpPort 8800 --websocketPort 8801 --noPrependStageInUrl",
         "prepare:ffmpeg-layer": "bash scripts/prepare-ffmpeg-layer.sh",
-        "package:dev": "yarn prepare:ffmpeg-layer && npx serverless package --stage dev",
-        "deploy:dev": "yarn prepare:ffmpeg-layer && npx serverless deploy --stage dev",
-        "deploy:prod": "yarn prepare:ffmpeg-layer && npx serverless deploy --stage prod"
+        "smoke:local": "bash scripts/with-local-env.sh node scripts/smoke-local-flow.mjs",
+        "package:dev": "yarn prepare:ffmpeg-layer && bash scripts/with-local-env.sh npx serverless package --stage dev",
+        "deploy:dev": "yarn prepare:ffmpeg-layer && bash scripts/with-local-env.sh npx serverless deploy --stage dev",
+        "deploy:prod": "yarn prepare:ffmpeg-layer && bash scripts/with-local-env.sh npx serverless deploy --stage prod"
     },
     "dependencies": {
         "@anthropic-ai/sdk": "^0.39.0",

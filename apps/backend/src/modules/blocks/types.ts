@@ -6,6 +6,9 @@ import { z } from 'zod';
  * proposal generation, block registry, execution engine.
  */
 export const BLOCK_TYPES = [
+    'input-text',
+    'input-image',
+    'output-preview',
     'search',
     'content',
     'data',
@@ -31,6 +34,14 @@ const SourceRefSchema = z.object({
     summary: z.string().optional(),
 });
 
+const VisualSchema = z.object({
+    topTitle: z.string().optional(),
+    mainCaption: z.string().optional(),
+    sourceLabel: z.string().optional(),
+});
+
+const ClaimTypeSchema = z.enum(['fact', 'hypothetical', 'opinion', 'joke']);
+
 /**
  * Common block executor interface.
  * Every block implements this contract.
@@ -47,9 +58,21 @@ export interface BlockExecutorResult {
     }>;
 }
 
+export interface BlockExecutorContext {
+    runId: string;
+    nodeId: string;
+    flowId?: string;
+    onProgress?: (progress: number, message?: string) => Promise<void>;
+    onAsset?: (asset: NonNullable<BlockExecutorResult['assets']>[number]) => Promise<void>;
+}
+
 export interface BlockExecutor {
     readonly blockType: BlockType;
-    execute(input: unknown, config?: Record<string, unknown>): Promise<BlockExecutorResult>;
+    execute(
+        input: unknown,
+        config?: Record<string, unknown>,
+        context?: BlockExecutorContext
+    ): Promise<BlockExecutorResult>;
 }
 
 // ============================================================================
@@ -80,15 +103,34 @@ export const SearchOutputSchema = z.object({
 export const ContentOutputSchema = z.object({
     title: z.string().optional(),
     hook: z.string(),
+    script: z
+        .object({
+            hook: z.string().optional(),
+            angle: z.string().optional(),
+            cta: z.string().optional(),
+        })
+        .optional(),
+    style: z
+        .object({
+            format: z.string().optional(),
+            aspectRatio: z.string().optional(),
+            sceneCount: z.number().optional(),
+            visualGrammar: z.record(z.unknown()).optional(),
+        })
+        .optional(),
     scenes: z.array(
         z.object({
             sceneNumber: z.number(),
             imageSlot: z.string().optional(),
+            storyBeat: z.string().optional(),
+            topTitle: z.string().optional(),
             caption: z.string().optional(),
             narration: z.string(),
             imagePrompt: z.string(),
             visualText: z.string().optional(),
-            sourceRefs: z.array(SourceRefSchema.or(z.string())).optional(),
+            visual: VisualSchema,
+            claimType: ClaimTypeSchema,
+            sourceRefs: z.array(SourceRefSchema.or(z.string())),
             durationSec: z.number().optional(),
         })
     ),
@@ -104,11 +146,15 @@ export const DataOutputSchema = z.object({
         z.object({
             sceneNumber: z.number(),
             imageSlot: z.string().optional(),
+            storyBeat: z.string().optional(),
+            topTitle: z.string().optional(),
             caption: z.string().optional(),
             narration: z.string(),
             imagePrompt: z.string(),
             visualText: z.string().optional(),
-            sourceRefs: z.array(SourceRefSchema.or(z.string())).optional(),
+            visual: VisualSchema.optional(),
+            claimType: ClaimTypeSchema,
+            sourceRefs: z.array(SourceRefSchema.or(z.string())),
             durationSec: z.number().optional(),
             keywords: z.array(z.string()).optional(),
         })

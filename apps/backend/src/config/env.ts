@@ -4,6 +4,24 @@ const readEnv = (name: string, fallback = ''): string => {
     return value;
 };
 
+const readBoolEnv = (name: string, fallback = false): boolean => {
+    const value = readEnv(name).trim();
+    if (!value) return fallback;
+    return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());
+};
+
+const readIntEnv = (name: string, fallback: number, min = 0): number => {
+    const value = Number(readEnv(name, String(fallback)));
+    if (!Number.isFinite(value)) return fallback;
+    return Math.max(min, Math.floor(value));
+};
+
+const readNumberEnv = (name: string, fallback: number, min = 0): number => {
+    const value = Number(readEnv(name, String(fallback)));
+    if (!Number.isFinite(value)) return fallback;
+    return Math.max(min, value);
+};
+
 /**
  * Keep backend runtime configuration in one place.
  * Add new environment variables here first.
@@ -34,8 +52,13 @@ export const env = {
     openaiVisionModel: readEnv('OPENAI_VISION_MODEL', 'gpt-5.4-nano'),
     openaiSearchModel: readEnv('OPENAI_SEARCH_MODEL', readEnv('OPENAI_MODEL', 'gpt-5.4-nano')),
     openaiBaseUrl: readEnv('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
+    allowPaidOpenAI: readBoolEnv('ALLOW_PAID_OPENAI', false),
+    maxRunEstimatedCostUsd: readNumberEnv('MAX_RUN_ESTIMATED_COST_USD', 2, 0),
     openaiImageModel: readEnv('OPENAI_IMAGE_MODEL', 'gpt-image-2'),
     openaiImageQuality: readEnv('OPENAI_IMAGE_QUALITY', 'medium'),
+    openaiImageSceneTimeoutMs: readIntEnv('OPENAI_IMAGE_SCENE_TIMEOUT_MS', 120000, 1),
+    openaiImageSceneMaxAttempts: readIntEnv('OPENAI_IMAGE_SCENE_MAX_ATTEMPTS', 1, 1),
+    openaiImageSceneConcurrency: readIntEnv('OPENAI_IMAGE_SCENE_CONCURRENCY', 12, 1),
     openaiTtsModel: readEnv('OPENAI_TTS_MODEL', 'gpt-4o-mini-tts'),
     openaiTtsVoice: readEnv('OPENAI_TTS_VOICE', 'nova'),
     nanobananaBaseUrl: readEnv('NANOBANANA_BASE_URL', 'https://www.nananobanana.com/api/v1'),

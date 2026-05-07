@@ -146,10 +146,14 @@ function dummyData(): BlockExecutorResult {
 interface RawScene {
     sceneNumber?: unknown;
     imageSlot?: unknown;
+    storyBeat?: unknown;
+    topTitle?: unknown;
     caption?: unknown;
     narration?: unknown;
     imagePrompt?: unknown;
     visualText?: unknown;
+    visual?: unknown;
+    claimType?: unknown;
     sourceRefs?: unknown;
     durationSec?: unknown;
 }
@@ -182,6 +186,8 @@ function normalizeContent(input: unknown): BlockExecutorResult {
     let title = '';
     let hook = '';
     let cta = '';
+    let script: unknown;
+    let style: unknown;
     let sources: unknown[] = [];
     let presetId = '';
 
@@ -191,6 +197,8 @@ function normalizeContent(input: unknown): BlockExecutorResult {
         if (typeof obj['title'] === 'string') title = obj['title'];
         if (typeof obj['hook'] === 'string') hook = obj['hook'];
         if (typeof obj['cta'] === 'string') cta = obj['cta'];
+        script = obj['script'];
+        style = obj['style'];
         if (typeof obj['totalDurationSec'] === 'number') totalDurationSec = obj['totalDurationSec'];
         if (Array.isArray(obj['sources'])) sources = obj['sources'];
         if (typeof obj['presetId'] === 'string') presetId = obj['presetId'];
@@ -203,12 +211,27 @@ function normalizeContent(input: unknown): BlockExecutorResult {
     const normalizedScenes = rawScenes.map((scene, idx) => {
         const sceneNumber = typeof scene.sceneNumber === 'number' ? scene.sceneNumber : idx + 1;
         const imageSlot = typeof scene.imageSlot === 'string' ? scene.imageSlot : `[Image #${sceneNumber}]`;
+        const storyBeat = typeof scene.storyBeat === 'string' ? scene.storyBeat : undefined;
+        const visual = isRecord(scene.visual) ? scene.visual : undefined;
+        const topTitle =
+            typeof scene.topTitle === 'string'
+                ? scene.topTitle
+                : typeof visual?.['topTitle'] === 'string'
+                  ? visual['topTitle']
+                  : undefined;
         const caption = typeof scene.caption === 'string' ? scene.caption : '';
         const narration = typeof scene.narration === 'string' ? scene.narration : '';
         const imagePrompt = typeof scene.imagePrompt === 'string' ? scene.imagePrompt : '';
         const visualText =
-            typeof scene.visualText === 'string' ? scene.visualText : caption.length > 0 ? caption : undefined;
+            typeof scene.visualText === 'string'
+                ? scene.visualText
+                : typeof visual?.['mainCaption'] === 'string'
+                  ? visual['mainCaption']
+                  : caption.length > 0
+                    ? caption
+                    : undefined;
         const sourceRefs = Array.isArray(scene.sourceRefs) ? scene.sourceRefs : [];
+        const claimType = isClaimType(scene.claimType) ? scene.claimType : inferClaimType(scene, sourceRefs);
         const durationSec = typeof scene.durationSec === 'number' ? scene.durationSec : 5;
 
         // Derive per-scene keywords: prefer upstream list sliced per scene,
@@ -219,33 +242,25 @@ function normalizeContent(input: unknown): BlockExecutorResult {
         return {
             sceneNumber,
             imageSlot,
+            storyBeat,
+            topTitle,
             caption,
             narration,
             imagePrompt,
             visualText,
+            visual,
+            claimType,
             sourceRefs,
             durationSec,
             keywords: sceneKeywords,
         };
     });
 
-    // If no scenes were extracted (edge case: empty content), produce placeholder
-    const finalScenes =
-        normalizedScenes.length > 0
-            ? normalizedScenes
-            : [
-                  {
-                      sceneNumber: 1,
-                      imageSlot: '[Image #1]',
-                      caption: '',
-                      narration: '',
-                      imagePrompt: '',
-                      visualText: '',
-                      sourceRefs: [],
-                      durationSec: 5,
-                      keywords: upstreamKeywords.slice(0, 3),
-                  },
-              ];
+    if (normalizedScenes.length === 0) {
+        throw new Error('[data-block] content output has no scenes to normalize');
+    }
+
+    const finalScenes = normalizedScenes;
 
     const output = {
         normalizedScenes: finalScenes,
@@ -258,6 +273,8 @@ function normalizeContent(input: unknown): BlockExecutorResult {
             title: title || undefined,
             hook: hook || undefined,
             cta: cta || undefined,
+            script,
+            style,
             sources,
             presetId: presetId || undefined,
         },
@@ -290,3 +307,20 @@ export const dataBlock: BlockExecutor = {
         return normalizeContent(input);
     },
 };
+
+function isRecord(input: unknown): input is Record<string, unknown> {
+    return input != null && typeof input === 'object' && !Array.isArray(input);
+}
+
+function isClaimType(input: unknown): input is 'fact' | 'hypothetical' | 'opinion' | 'joke' {
+    return input === 'fact' || input === 'hypothetical' || input === 'opinion' || input === 'joke';
+}
+
+function inferClaimType(scene: RawScene, sourceRefs: unknown[]): 'fact' | 'opinion' {
+    if (sourceRefs.length > 0) return 'fact';
+    const text = [scene.caption, scene.visualText, scene.narration]
+        .filter((value): value is string => typeof value === 'string')
+        .join(' ');
+    if (/\d{4}|\d+월|\d+일|\d+%|\d+등급|\d+점/.test(text)) return 'fact';
+    return 'opinion';
+}

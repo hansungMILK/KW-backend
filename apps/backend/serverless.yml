@@ -1,7 +1,5 @@
 service: eureka-flows-backend
 
-useDotenv: true
-
 provider:
     name: aws
     runtime: nodejs20.x
@@ -39,14 +37,23 @@ provider:
         SHORTS_FFMPEG_OVERLAY: ${env:SHORTS_FFMPEG_OVERLAY, 'source'}
         ORCHESTRATOR_MODE: ${env:ORCHESTRATOR_MODE, 'openai'}
         AI_PROVIDER: ${env:AI_PROVIDER, 'openai'}
+        ALLOW_PAID_OPENAI: ${env:ALLOW_PAID_OPENAI, 'false'}
+        MAX_RUN_ESTIMATED_COST_USD: ${env:MAX_RUN_ESTIMATED_COST_USD, '2'}
         OPENAI_MODEL: ${env:OPENAI_MODEL, 'gpt-5.4-nano'}
         OPENAI_ORCHESTRATOR_MODEL: ${env:OPENAI_ORCHESTRATOR_MODEL, 'gpt-5.4-nano'}
         OPENAI_VISION_MODEL: ${env:OPENAI_VISION_MODEL, 'gpt-5.4-nano'}
         OPENAI_SEARCH_MODEL: ${env:OPENAI_SEARCH_MODEL, 'gpt-5.4-nano'}
         OPENAI_IMAGE_MODEL: ${env:OPENAI_IMAGE_MODEL, 'gpt-image-2'}
         OPENAI_IMAGE_QUALITY: ${env:OPENAI_IMAGE_QUALITY, 'medium'}
+        OPENAI_IMAGE_TIMEOUT_MS: ${env:OPENAI_IMAGE_TIMEOUT_MS, '120000'}
+        OPENAI_IMAGE_MAX_ATTEMPTS: ${env:OPENAI_IMAGE_MAX_ATTEMPTS, '1'}
+        OPENAI_IMAGE_SCENE_TIMEOUT_MS: ${env:OPENAI_IMAGE_SCENE_TIMEOUT_MS, '120000'}
+        OPENAI_IMAGE_SCENE_MAX_ATTEMPTS: ${env:OPENAI_IMAGE_SCENE_MAX_ATTEMPTS, '1'}
+        OPENAI_IMAGE_SCENE_CONCURRENCY: ${env:OPENAI_IMAGE_SCENE_CONCURRENCY, '12'}
         OPENAI_TTS_MODEL: ${env:OPENAI_TTS_MODEL, 'gpt-4o-mini-tts'}
         OPENAI_TTS_VOICE: ${env:OPENAI_TTS_VOICE, 'nova'}
+        OPENAI_TTS_TIMEOUT_MS: ${env:OPENAI_TTS_TIMEOUT_MS, '120000'}
+        OPENAI_TTS_MAX_ATTEMPTS: ${env:OPENAI_TTS_MAX_ATTEMPTS, '1'}
         LOCAL_ASSET_BASE_URL: ${env:LOCAL_ASSET_BASE_URL, 'http://localhost:8800/_local-assets'}
         CORS_ALLOWED_ORIGINS: ${self:custom.corsAllowedOriginsCsv.${self:provider.stage}, self:custom.corsAllowedOriginsCsv.local}
         APP_API_KEY: ${env:APP_API_KEY, ''}
@@ -904,56 +911,6 @@ functions:
             - sqs:
                   arn: !GetAtt ExecutionQueue.Arn
                   batchSize: 1
-
-    # ── Workflows (#5 #6 #7) ──
-    workflowGenerate:
-        handler: src/handlers/http/workflows/generate.main
-        events:
-            - httpApi:
-                  path: '/workflows/{workflowId}/generate'
-                  method: post
-            - httpApi:
-                  path: '/_apis/workflows/{workflowId}/generate'
-                  method: post
-            - httpApi:
-                  path: '/_api_/workflows/{workflowId}/generate'
-                  method: post
-
-    workflowExecute:
-        handler: src/handlers/http/workflows/execute.main
-        timeout: 60
-        events:
-            - httpApi:
-                  path: '/workflows/{workflowId}/execute'
-                  method: post
-            - httpApi:
-                  path: '/_apis/workflows/{workflowId}/execute'
-                  method: post
-            - httpApi:
-                  path: '/_api_/workflows/{workflowId}/execute'
-                  method: post
-            - httpApi:
-                  path: '/workflows/{workflowId}/execute'
-                  method: get
-            - httpApi:
-                  path: '/_apis/workflows/{workflowId}/execute'
-                  method: get
-            - httpApi:
-                  path: '/_api_/workflows/{workflowId}/execute'
-                  method: get
-
-    workflowResults:
-        handler: src/handlers/http/workflows/results.main
-        events:
-            - httpApi:
-                  path: '/workflows/{workflowId}/executions/{executionId}/results'
-                  method: get
-            - httpApi:
-                  path: '/_apis/workflows/{workflowId}/executions/{executionId}/results'
-                  method: get
-            - httpApi:
-                  path: '/_api_/workflows/{workflowId}/executions/{executionId}/results'
-                  method: get
 
     # ── WebSocket ──
     wsConnect:

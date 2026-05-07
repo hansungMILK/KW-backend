@@ -113,7 +113,7 @@ export const BLOCK_CATALOG: BlockDef[] = [
             type: 'search',
             label: '트렌드 수집',
             description: '입시 트렌드/키워드 수집 (Search Agent)',
-            inputs: [],
+            inputs: [{ id: 'in', label: 'Topic', type: 'text' }],
             outputs: [{ id: 'out', label: 'Keywords', type: 'json' }],
             configSchema: [],
         },

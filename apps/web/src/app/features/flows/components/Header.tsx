@@ -272,9 +272,9 @@ export const Header: React.FC<HeaderProps> = ({
     editActions,
     saveState,
     socketState,
-    onShare,
-    onApiKeySettings,
-    onHelp,
+    onShare: _onShare,
+    onApiKeySettings: _onApiKeySettings,
+    onHelp: _onHelp,
 }) => {
     const { t } = useTranslation(['flows']);
 

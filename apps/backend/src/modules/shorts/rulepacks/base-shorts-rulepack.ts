@@ -22,6 +22,9 @@ export const BASE_SHORTS_RULES = `Base Shorts Engine Rules:
 - Produce a vertical ${BASE_SHORTS_DEFAULTS.aspectRatio} short-form video plan.
 - Default to ${BASE_SHORTS_DEFAULTS.defaultSceneCount} scenes and about ${BASE_SHORTS_DEFAULTS.durationSec} seconds unless the user asks otherwise.
 - Keep each scene visually simple: one strong idea, one short caption, one clear image prompt.
+- Keep one persistent topTitle across all scenes.
+- Use the same visual grammar across topics: black top title band, bold yellow/white Korean title, comic/meme main scene, and one short central caption.
+- Use [Image #1] through [Image #12] or [Image #15] slots in order.
 - Use a fast opening hook, dense but accurate narration, and a short CTA.
 - Preserve source references from search through content, image, analysis, and final integration output.
 - Do not invent URLs, source names, publication dates, statistics, or official claims.
@@ -40,7 +43,7 @@ export function buildCombinedPrompt(rulepack: ShortsRulepack, section: keyof Sho
 }
 
 export function sourceRefsToLabel(sourceRefs: unknown, sources?: unknown): string {
-    if (!Array.isArray(sourceRefs) || sourceRefs.length === 0) return '출처 확인 필요';
+    if (!Array.isArray(sourceRefs) || sourceRefs.length === 0) return '';
     const first = sourceRefs[0];
     if (typeof first === 'string') {
         const source = findSource(first, sources);
@@ -55,9 +58,10 @@ export function sourceRefsToLabel(sourceRefs: unknown, sources?: unknown): strin
         const obj = first as Record<string, unknown>;
         const source = typeof obj['source'] === 'string' ? obj['source'] : undefined;
         const date = typeof obj['publishedAt'] === 'string' ? obj['publishedAt'] : undefined;
-        return `기준: ${[source, date].filter(Boolean).join(' ') || '출처 확인 필요'}`.slice(0, 36);
+        const label = [source, date].filter(Boolean).join(' ');
+        return label ? `기준: ${label}`.slice(0, 36) : '';
     }
-    return '출처 확인 필요';
+    return '';
 }
 
 function findSource(id: string, sources: unknown): Record<string, unknown> | undefined {

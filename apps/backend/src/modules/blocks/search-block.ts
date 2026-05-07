@@ -57,6 +57,12 @@ export function extractTopic(input: unknown): string {
         if (typeof obj['text'] === 'string') return obj['text'].slice(0, 200);
         if (typeof obj['topic'] === 'string') return obj['topic'].slice(0, 200);
         if (typeof obj['query'] === 'string') return obj['query'].slice(0, 200);
+
+        const out = obj['out'];
+        if (out && typeof out === 'object' && !Array.isArray(out)) {
+            const value = (out as Record<string, unknown>)['value'];
+            if (typeof value === 'string') return value.slice(0, 200);
+        }
     }
 
     return String(JSON.stringify(input)).slice(0, 200);

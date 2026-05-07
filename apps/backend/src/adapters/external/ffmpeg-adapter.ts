@@ -1,4 +1,4 @@
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import { existsSync } from 'fs';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
@@ -22,6 +22,8 @@ export interface VideoCompositionResult {
 const FFMPEG_PATH = process.env.FFMPEG_PATH || '/opt/bin/ffmpeg';
 const FFMPEG_TIMEOUT_MS = Number(process.env.FFMPEG_TIMEOUT_MS || 840000);
 const FFMPEG_OVERLAY_MODE = process.env.SHORTS_FFMPEG_OVERLAY || 'source';
+
+let cachedDrawtextSupport: boolean | undefined;
 
 export const ffmpegAdapter = {
     async compose(request: VideoCompositionRequest): Promise<VideoCompositionResult> {
@@ -115,8 +117,14 @@ function buildArgs(
     const width = String(request.outputWidth);
     const height = String(request.outputHeight);
     const fontFile = resolveOverlayFontFile();
+    const canApplyTextOverlay = FFMPEG_OVERLAY_MODE !== 'off' && Boolean(fontFile) && ffmpegSupportsDrawtext();
+    if (FFMPEG_OVERLAY_MODE !== 'off' && !canApplyTextOverlay) {
+        console.warn(
+            `[ffmpeg-adapter] text overlay disabled: ${fontFile ? 'ffmpeg drawtext filter is unavailable' : 'Korean font file not found'}`
+        );
+    }
     const filterParts = imageFiles.map((image, i) => {
-        const overlay = buildOverlayFilter(image, fontFile);
+        const overlay = canApplyTextOverlay ? buildOverlayFilter(image, fontFile) : '';
         return `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1${overlay}[v${i}]`;
     });
     const concatInputs = imageFiles.map((_, i) => `[v${i}]`).join('');
@@ -154,6 +162,15 @@ function resolveOverlayFontFile(): string | undefined {
     ].filter((candidate): candidate is string => Boolean(candidate));
 
     return candidates.find(candidate => existsSync(candidate));
+}
+
+function ffmpegSupportsDrawtext(): boolean {
+    if (cachedDrawtextSupport !== undefined) return cachedDrawtextSupport;
+
+    const result = spawnSync(FFMPEG_PATH, ['-hide_banner', '-filters'], { encoding: 'utf8', timeout: 5000 });
+    const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+    cachedDrawtextSupport = !result.error && result.status === 0 && /\bdrawtext\b/.test(output);
+    return cachedDrawtextSupport;
 }
 
 function buildOverlayFilter(

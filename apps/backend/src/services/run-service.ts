@@ -1,4 +1,5 @@
 import { settingsService } from './settings-service';
+import { PAID_OPENAI_DISABLED, isPaidOpenAIAllowed } from '../adapters/ai/paid-openai-guard';
 import { queue } from '../adapters/aws/queue';
 import { env } from '../config/env';
 import { flowRepo } from '../repositories/flow-repository';
@@ -31,9 +32,43 @@ function buildParentMap(nodeIds: string[], edges: Array<Record<string, unknown>>
     return parentMap;
 }
 
+function buildChildMap(nodeIds: string[], edges: Array<Record<string, unknown>>): Map<string, string[]> {
+    const childMap = new Map<string, string[]>(nodeIds.map(id => [id, []]));
+
+    for (const edge of edges) {
+        const source = (edge['source'] ?? edge['sourceNodeId']) as string | undefined;
+        const target = (edge['target'] ?? edge['targetNodeId']) as string | undefined;
+        if (source && target && childMap.has(source)) {
+            const children = childMap.get(source);
+            if (children) children.push(target);
+        }
+    }
+
+    return childMap;
+}
+
+function collectDescendantNodeIds(
+    startNodeId: string,
+    nodeIds: string[],
+    edges: Array<Record<string, unknown>>
+): string[] {
+    const childMap = buildChildMap(nodeIds, edges);
+    const descendants = new Set<string>();
+    const stack = [...(childMap.get(startNodeId) ?? [])];
+
+    while (stack.length > 0) {
+        const current = stack.pop();
+        if (!current || descendants.has(current)) continue;
+        descendants.add(current);
+        stack.push(...(childMap.get(current) ?? []));
+    }
+
+    return [...descendants];
+}
+
 function buildInitialInputPayload(node: Record<string, unknown>): Record<string, unknown> | null {
-    const config = node['config'] as Record<string, unknown> | undefined;
     const data = node['data'] as Record<string, unknown> | undefined;
+    const config = (node['config'] ?? data?.['config']) as Record<string, unknown> | undefined;
     const label =
         (node['name'] as string | undefined) ??
         (node['label'] as string | undefined) ??
@@ -71,8 +106,112 @@ const OPENAI_BLOCK_PROVIDER_MAP: Record<string, ApiKeyProvider> = {
     integration: 'openai',
 };
 
+type RunServiceFailure = {
+    ok: false;
+    error: string;
+    status: number;
+    missingProviders?: string[];
+    estimatedCostUsd?: number;
+    maxCostUsd?: number;
+};
+
 const getProviderForBlock = (blockType: string): ApiKeyProvider | undefined => {
     return env.aiProvider === 'legacy' ? LEGACY_BLOCK_PROVIDER_MAP[blockType] : OPENAI_BLOCK_PROVIDER_MAP[blockType];
+};
+
+const getBlockType = (node: Record<string, unknown>): string => {
+    const data = node['data'] as Record<string, unknown> | undefined;
+    return String(node['blockType'] ?? data?.['blockType'] ?? node['type'] ?? '');
+};
+
+const getNodeConfig = (node: Record<string, unknown>): Record<string, unknown> => {
+    const data = node['data'] as Record<string, unknown> | undefined;
+    const config = (node['config'] ?? data?.['config']) as Record<string, unknown> | undefined;
+    return config ?? {};
+};
+
+const readPositiveNumber = (value: unknown): number | null => {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? number : null;
+};
+
+const getImageSceneCostUsd = (): number => {
+    const quality = env.openaiImageQuality.toLowerCase();
+    if (quality === 'high') return 0.25;
+    if (quality === 'low') return 0.02;
+    return 0.063;
+};
+
+const getMediaImageSceneCount = (node: Record<string, unknown>): number => {
+    const config = getNodeConfig(node);
+    const count =
+        readPositiveNumber(config['count']) ??
+        readPositiveNumber(config['scenes']) ??
+        readPositiveNumber(config['sceneCount']) ??
+        readPositiveNumber(config['frameCount']) ??
+        12;
+    return Math.max(1, Math.floor(count));
+};
+
+const estimateRunCostUsd = (nodes: Array<Record<string, unknown>>): number => {
+    let total = 0;
+
+    for (const node of nodes) {
+        const blockType = getBlockType(node);
+        switch (blockType) {
+            case 'search':
+                total += 0.02;
+                break;
+            case 'content':
+                total += 0.08;
+                break;
+            case 'data':
+                total += 0.01;
+                break;
+            case 'analysis':
+                total += 0.03;
+                break;
+            case 'media-image':
+                total += getMediaImageSceneCount(node) * getImageSceneCostUsd();
+                break;
+            case 'media-tts':
+                total += 0.02;
+                break;
+            case 'media-video':
+                total += 0.02;
+                break;
+            case 'integration':
+                total += 0.01;
+                break;
+            default:
+                break;
+        }
+    }
+
+    return Math.round(total * 100) / 100;
+};
+
+const checkRunCostLimit = (nodes: Array<Record<string, unknown>>): RunServiceFailure | null => {
+    const maxCostUsd = env.maxRunEstimatedCostUsd;
+    if (maxCostUsd <= 0) return null;
+
+    const estimatedCostUsd = estimateRunCostUsd(nodes);
+    if (estimatedCostUsd <= maxCostUsd) return null;
+
+    return {
+        ok: false,
+        error: 'RUN_COST_LIMIT_EXCEEDED',
+        status: 422,
+        estimatedCostUsd,
+        maxCostUsd,
+    };
+};
+
+const requiresPaidOpenAI = (nodes: Array<Record<string, unknown>>): boolean => {
+    return nodes.some(node => {
+        const blockType = getBlockType(node);
+        return getProviderForBlock(blockType) === 'openai';
+    });
 };
 
 /**
@@ -86,15 +225,14 @@ async function checkMissingApiKeys(nodes: Array<Record<string, unknown>>): Promi
     const checked = new Set<string>();
 
     for (const node of nodes) {
-        const blockType = (node['type'] ?? node['blockType'] ?? '') as string;
+        const blockType = getBlockType(node);
         const provider = getProviderForBlock(blockType);
         if (!provider) continue;
         if (checked.has(provider)) continue;
         checked.add(provider);
 
         // Check block-level override first
-        const data = node['data'] as Record<string, unknown> | undefined;
-        const config = (node['config'] ?? data?.['config']) as Record<string, unknown> | undefined;
+        const config = getNodeConfig(node);
         const override = config?.['apiKeyOverride'] as string | undefined;
         if (override && override.trim().length > 0) continue;
 
@@ -126,12 +264,19 @@ export const runService = {
         flowId: string,
         triggerSource = 'MANUAL',
         options?: { executionMode?: string; notifyWebhook?: string }
-    ): Promise<{ ok: true; run: Run } | { ok: false; error: string; status: number }> {
+    ): Promise<{ ok: true; run: Run } | RunServiceFailure> {
         const flow = await flowRepo.get(flowId);
         if (!flow) return { ok: false, error: `Flow ${flowId} not found`, status: 404 };
 
         const snapshotNodes = (flow.nodes ?? []) as Array<Record<string, unknown>>;
         const snapshotEdges = (flow.edges ?? []) as Array<Record<string, unknown>>;
+
+        const costLimitResult = checkRunCostLimit(snapshotNodes);
+        if (costLimitResult) return costLimitResult;
+
+        if (requiresPaidOpenAI(snapshotNodes) && !isPaidOpenAIAllowed()) {
+            return { ok: false, error: PAID_OPENAI_DISABLED, status: 422 };
+        }
 
         // F-34: API key pre-flight check
         const missingProviders = await checkMissingApiKeys(snapshotNodes);
@@ -141,7 +286,7 @@ export const runService = {
                 error: `MISSING_API_KEYS`,
                 status: 422,
                 missingProviders,
-            } as { ok: false; error: string; status: number; missingProviders?: string[] };
+            };
         }
 
         const now = new Date().toISOString();
@@ -173,7 +318,7 @@ export const runService = {
             const runNode: RunNode = {
                 runId,
                 nodeId,
-                blockType: (node['type'] ?? node['blockType'] ?? 'unknown') as string,
+                blockType: getBlockType(node) || 'unknown',
                 label:
                     ((node['data'] as Record<string, unknown>)?.['label'] as string | undefined) ??
                     (node['name'] as string | undefined) ??
@@ -209,13 +354,20 @@ export const runService = {
         flowId: string,
         nodeId: string,
         triggerSource = 'MANUAL'
-    ): Promise<{ ok: true; run: Run } | { ok: false; error: string; status: number; missingProviders?: string[] }> {
+    ): Promise<{ ok: true; run: Run } | RunServiceFailure> {
         const flow = await flowRepo.get(flowId);
         if (!flow) return { ok: false, error: `Flow ${flowId} not found`, status: 404 };
 
         const snapshotNodes = (flow.nodes ?? []) as Array<Record<string, unknown>>;
         const targetNode = snapshotNodes.find(n => (n['id'] ?? n['nodeId']) === nodeId);
         if (!targetNode) return { ok: false, error: `Node ${nodeId} not found in flow ${flowId}`, status: 404 };
+
+        const costLimitResult = checkRunCostLimit([targetNode]);
+        if (costLimitResult) return costLimitResult;
+
+        if (requiresPaidOpenAI([targetNode]) && !isPaidOpenAIAllowed()) {
+            return { ok: false, error: PAID_OPENAI_DISABLED, status: 422 };
+        }
 
         // F-34: API key check for single node
         const missingProviders = await checkMissingApiKeys([targetNode]);
@@ -243,7 +395,7 @@ export const runService = {
         const runNode: RunNode = {
             runId,
             nodeId,
-            blockType: (targetNode['type'] ?? targetNode['blockType'] ?? 'unknown') as string,
+            blockType: getBlockType(targetNode) || 'unknown',
             label:
                 ((targetNode['data'] as Record<string, unknown>)?.['label'] as string | undefined) ??
                 (targetNode['name'] as string | undefined) ??
@@ -298,9 +450,9 @@ export const runService = {
     /**
      * Retry a failed node:
      * 1. FAILED → PENDING (retryCount incremented in repo)
-     * 2. If run was FAILED, transition back to RUNNING
-     * 3. Send EXECUTE_NODE queue message
-     * 4. Return latest state
+     * 2. Reset downstream SKIPPED nodes to PENDING
+     * 3. If run was FAILED, transition back to RUNNING
+     * 4. Resume DAG execution so downstream nodes run with fresh parent output
      */
     async retryNode(
         runId: string,
@@ -314,49 +466,45 @@ export const runService = {
             return { ok: false, error: `Node is ${node.status}, only FAILED nodes can be retried`, status: 409 };
         }
 
+        const run = await runRepo.getRun(runId);
+        if (!run) return { ok: false, error: `Run ${runId} not found`, status: 404 };
+        const allNodes = await runRepo.listRunNodes(runId);
+        const nodeIds = allNodes.map(n => n.nodeId);
+        const edges = run.flowSnapshot.edges as Array<Record<string, unknown>>;
+        const descendantNodeIds = collectDescendantNodeIds(nodeId, nodeIds, edges);
+
         // FAILED → PENDING (retryCount incremented inside updateRunNodeStatus)
         const result = await runRepo.updateRunNodeStatus(runId, nodeId, 'PENDING');
         if (!result.ok) return { ok: false, error: result.error, status: 409 };
 
+        for (const descendantNodeId of descendantNodeIds) {
+            const descendant = allNodes.find(n => n.nodeId === descendantNodeId);
+            if (descendant?.status === 'SKIPPED' || descendant?.status === 'FAILED') {
+                const descendantResult = await runRepo.updateRunNodeStatus(runId, descendantNodeId, 'PENDING');
+                if (!descendantResult.ok) return { ok: false, error: descendantResult.error, status: 409 };
+            }
+        }
+
         // If run is FAILED, bring it back to RUNNING so execution can continue
-        const run = await runRepo.getRun(runId);
         if (run?.status === 'FAILED') {
             const runResult = await runRepo.updateRunStatus(runId, 'RUNNING', {
                 startedAt: run.startedAt ?? new Date().toISOString(),
+                completedAt: null,
+                finalOutputSummary: null,
             });
             if (!runResult.ok) {
-                console.warn(`[run-service] retryNode: could not set run back to RUNNING — ${runResult.error}`);
+                return { ok: false, error: runResult.error, status: 409 };
             }
         }
 
-        // Enqueue single-node execution
+        // Resume the DAG instead of only the failed node, so downstream skipped
+        // nodes can run with the retried node output.
         await queue.send({
-            type: 'EXECUTE_NODE',
+            type: 'EXECUTE_RUN',
             runId,
-            nodeId,
             executionId: generateNumericId(),
             timestamp: new Date().toISOString(),
         });
-
-        // After inline execution (local mode), check if all nodes are now done
-        const allNodes = await runRepo.listRunNodes(runId);
-        const allDone = allNodes.every(
-            n => n.status === 'COMPLETED' || n.status === 'SKIPPED' || n.status === 'CANCELLED'
-        );
-        const anyFailed = allNodes.some(n => n.status === 'FAILED');
-
-        const latestRun = await runRepo.getRun(runId);
-        if (latestRun?.status === 'RUNNING') {
-            if (anyFailed) {
-                await runRepo.updateRunStatus(runId, 'FAILED', {
-                    finalOutputSummary: { retriedNodeId: nodeId, outcome: 'still-failed' },
-                });
-            } else if (allDone) {
-                await runRepo.updateRunStatus(runId, 'COMPLETED', {
-                    completedAt: new Date().toISOString(),
-                });
-            }
-        }
 
         return { ok: true };
     },

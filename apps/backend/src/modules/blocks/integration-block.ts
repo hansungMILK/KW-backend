@@ -77,8 +77,7 @@ function extractUpstream(input: unknown): UpstreamData {
     };
 }
 
-function buildPublicUrl(videoUrl: string | undefined): string {
-    if (!videoUrl) return 'unavailable://no-video';
+function buildPublicUrl(videoUrl: string): string {
     // Mock/local: pass through fake URL
     if (videoUrl.startsWith('fake://')) return videoUrl;
     // S3: construct CloudFront URL
@@ -152,9 +151,8 @@ export const integrationBlock: BlockExecutor = {
         const upstream = extractUpstream(input);
         const warnings: string[] = [];
 
-        // Check required upstream outputs
         if (!upstream.mediaVideo?.video) {
-            warnings.push('video asset missing — deliverable is incomplete');
+            throw new Error('integration requires media-video output in real execution mode');
         }
         if (!upstream.mediaTts?.audio) {
             warnings.push('audio asset missing');
@@ -163,10 +161,10 @@ export const integrationBlock: BlockExecutor = {
             warnings.push('no scene images available');
         }
 
-        const videoUrl = upstream.mediaVideo?.video?.url;
+        const videoUrl = upstream.mediaVideo.video.url;
         const publicUrl = buildPublicUrl(videoUrl);
         const durationSec =
-            upstream.mediaVideo?.video?.durationSec ||
+            upstream.mediaVideo.video.durationSec ||
             upstream.content?.totalDurationSec ||
             upstream.metadata?.totalDurationSec ||
             60;
@@ -231,15 +229,13 @@ export const integrationBlock: BlockExecutor = {
             description,
             hashtags,
             publicUrl,
-            video: upstream.mediaVideo?.video
-                ? {
-                      url: upstream.mediaVideo.video.url,
-                      durationSec: upstream.mediaVideo.video.durationSec,
-                      width: upstream.mediaVideo.video.width,
-                      height: upstream.mediaVideo.video.height,
-                      format: upstream.mediaVideo.video.format,
-                  }
-                : undefined,
+            video: {
+                url: upstream.mediaVideo.video.url,
+                durationSec: upstream.mediaVideo.video.durationSec,
+                width: upstream.mediaVideo.video.width,
+                height: upstream.mediaVideo.video.height,
+                format: upstream.mediaVideo.video.format,
+            },
             audio: upstream.mediaTts?.audio
                 ? {
                       url: upstream.mediaTts.audio.url,

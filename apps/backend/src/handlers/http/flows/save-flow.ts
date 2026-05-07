@@ -2,7 +2,7 @@ import { FlowSaveRequestSchema } from '@flows/contracts';
 
 import { flowRepo } from '../../../repositories/flow-repository';
 import { getBody, getPathParam, withMiddleware } from '../../../utils/middleware';
-import { badRequest, ok } from '../../../utils/response';
+import { badRequest, notFound, ok } from '../../../utils/response';
 
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 
@@ -22,15 +22,28 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
     const parsed = FlowSaveRequestSchema.safeParse(body);
     if (!parsed.success) return badRequest(`Invalid body: ${parsed.error.message}`);
 
-    const flow = await flowRepo.save(id, parsed.data.nodes, parsed.data.edges);
+    const flow =
+        id === '0'
+            ? await flowRepo.create({ title: 'Untitled Flow' })
+            : await flowRepo.updateCanvas(id, { nodes: parsed.data.nodes, edges: parsed.data.edges });
+
+    if (!flow) return notFound(`Flow ${id} not found`);
+
+    const saved =
+        id === '0' && (parsed.data.nodes.length > 0 || parsed.data.edges.length > 0)
+            ? await flowRepo.updateCanvas(flow.id, { nodes: parsed.data.nodes, edges: parsed.data.edges })
+            : flow;
+
+    if (!saved) return notFound(`Flow ${flow.id} not found after create`);
 
     return ok({
-        id: flow.id,
-        name: flow.name,
-        state: flow.state,
-        nodes: flow.nodes,
-        edges: flow.edges,
+        id: saved.id,
+        name: saved.name,
+        state: saved.state,
+        nodes: saved.nodes,
+        edges: saved.edges,
         ports: [],
+        channelId: saved.id,
     });
 };
 
