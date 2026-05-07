@@ -1,5 +1,6 @@
 {
     "name": "@flows/theme",
+    "description": "다크/라이트 테마 프로바이더 및 테마 전환 훅",
     "version": "0.0.1",
     "private": true,
     "type": "module",

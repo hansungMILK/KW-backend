@@ -5,18 +5,15 @@ import { upsertEdge, upsertFlow } from '../../api';
 import type { EdgeData, NodeData, NodeView } from '../../types';
 import type { UseMutationResult } from '@tanstack/react-query';
 
+const createClientNodeId = (): string => `node_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
 interface UpsertNodeVariables {
     id: string;
     flowId: string;
     body: Partial<NodeView>;
 }
 
-/**
- * Mutation hook for upserting a node via Flow PUT
- * POST /flows/:id/upsert (transitioning to PUT /flows/{flowId} in P3)
- *
- * @deprecated individual /nodes/:id/upsert path removed — now routes through upsertFlow
- */
+/** Mutation hook for upserting a node via PUT /flows/{flowId} */
 export const useUpsertNodeMutation = () => {
     return useMutation({
         mutationFn: ({ id, flowId, body }: UpsertNodeVariables) =>
@@ -32,18 +29,14 @@ interface CreateNodeVariables {
     body: Partial<NodeView>;
 }
 
-/**
- * Mutation hook for creating a new node via Flow upsert
- * POST /flows/:id/upsert (transitioning to PUT /flows/{flowId} in P3)
- *
- * Server assigns the node ID and returns it in response.nodes[0].
- *
- * @deprecated individual /nodes/0/upsert path removed — now routes through upsertFlow
- */
+/** Mutation hook for creating a new node via PUT /flows/{flowId} */
 export const useCreateNodeMutation = () => {
     return useMutation({
         mutationFn: ({ flowId, body }: CreateNodeVariables) =>
-            upsertFlow(flowId, { nodes: [body as NodeData], edges: [] }),
+            upsertFlow(flowId, {
+                nodes: [{ id: createClientNodeId(), ...(body as Partial<NodeData>) } as NodeData],
+                edges: [],
+            }),
         onError: (error: Error) => {
             console.error('[useCreateNodeMutation] Failed to create node:', error);
         },
@@ -57,9 +50,6 @@ interface CreateEdgeVariables {
 
 /**
  * @deprecated Use useEdgeSync hook instead for edge creation
- * Edge creation should use POST /flows/:id/upsert with { nodes: [], edges: [...] }
- *
- * This hook incorrectly uses upsertEdge() which calls the wrong API endpoint.
  */
 export const useCreateEdgeMutation = (): UseMutationResult<
     Awaited<ReturnType<typeof upsertEdge>>,

@@ -65,7 +65,8 @@ interface UseEdgeSyncReturn {
  * ```
  */
 export const useEdgeSync = ({ flowId }: UseEdgeSyncOptions): UseEdgeSyncReturn => {
-    // Use upsertFlow mutation for POST /flows/:id/upsert
+    // Use spec PUT through the compatibility upsert helper so partial edge
+    // updates do not replace the entire canvas.
     const createMutation = useMutation({
         mutationFn: ({ flowId, edge, nodes }: { flowId: string; edge: EdgeData; nodes?: NodeData[] }) =>
             upsertFlow(flowId, { nodes: nodes ?? [], edges: [edge] }),

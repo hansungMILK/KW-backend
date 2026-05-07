@@ -1,5 +1,6 @@
 {
     "name": "@flows/contracts",
+    "description": "Zod 기반 API 요청/응답 스키마 및 WebSocket 이벤트 타입 정의",
     "version": "0.1.0",
     "private": true,
     "type": "module",

@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 
 import { X } from 'lucide-react';
 
-import { type WorkflowState, loadFlow } from '@flows/flows';
+import { type WorkflowState, getFlow } from '@flows/flows';
 
 // Note: WorkflowCanvas is imported as a lazy dependency to avoid circular imports
 interface ComponentViewerModalProps {
@@ -22,7 +22,7 @@ export const ComponentViewerModal: React.FC<ComponentViewerModalProps> = ({
 
     useEffect(() => {
         if (flowId) {
-            loadFlow(flowId)
+            getFlow(flowId)
                 .then(setFlowData)
                 .catch(() => setFlowData(null));
         } else {

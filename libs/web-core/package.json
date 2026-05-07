@@ -1,5 +1,6 @@
 {
     "name": "@flows/web-core",
+    "description": "axios 기반 API 클라이언트, 인증 처리, 전역 스토어 및 유틸리티",
     "version": "0.0.1",
     "private": true,
     "type": "module",

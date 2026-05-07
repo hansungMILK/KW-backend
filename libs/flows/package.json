@@ -1,5 +1,6 @@
 {
     "name": "@flows/flows",
+    "description": "플로우 캔버스 핵심 라이브러리 — 노드/엣지 상태 관리, API 연동, 레이아웃 훅",
     "version": "0.0.1",
     "private": true,
     "type": "module",

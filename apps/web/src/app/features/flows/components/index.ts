@@ -8,6 +8,7 @@ export * from './FrontendBadge';
 export * from './Header';
 export * from './HelpDialog';
 export * from './NodeBlock';
+export * from './NodeConfigPanel';
 export * from './Sidebar';
 export * from './WorkflowCanvas';
 export * from './help';
