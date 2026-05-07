@@ -162,17 +162,41 @@ Frontend
 
 ### 준비
 
+**Mac / Linux**
+
 ```bash
 yarn install
 cp .env.example .env.local
+```
+
+**Windows (PowerShell)**
+
+```powershell
+yarn install
+Copy-Item .env.example .env.local
+```
+
+**Windows (명령 프롬프트 / CMD)**
+
+```cmd
+yarn install
+copy .env.example .env.local
 ```
 
 `.env.local`은 프론트가 백엔드 주소를 알기 위해 씁니다.
 
 ### 백엔드 실행
 
+**Mac / Linux**
+
 ```bash
 yarn workspace @flows/backend start
+```
+
+**Windows**
+
+```powershell
+yarn workspace @flows/backend start:win
 ```
 
 로컬에서 뜨는 기본 포트:
@@ -182,8 +206,16 @@ yarn workspace @flows/backend start
 
 ### 프론트 실행
 
+**Mac / Linux**
+
 ```bash
 yarn web:start
+```
+
+**Windows**
+
+```powershell
+yarn web:start:win
 ```
 
 프론트 주소:
@@ -342,6 +374,8 @@ Claude, OpenAI, AWS, 이미지 API 같은 것은 adapter로 보냅니다.
 
 ## 12. 자주 쓰는 명령어
 
+아래 명령어는 **Mac / Linux / Windows(PowerShell · CMD)** 모두 동일하게 동작합니다.
+
 ```bash
 # backend 실행
 yarn workspace @flows/backend start
@@ -364,6 +398,8 @@ yarn graph
 # backend 타입 확인
 npx tsc -p apps/backend/tsconfig.json --noEmit
 ```
+
+> **Windows 참고** — `#` 주석은 PowerShell에서 그대로 사용 가능합니다. CMD에서는 `rem` 또는 `::` 을 사용하세요. `yarn` 명령어 자체는 변경 없이 동일합니다.
 
 ---
 
