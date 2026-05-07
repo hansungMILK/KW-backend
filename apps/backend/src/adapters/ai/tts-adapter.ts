@@ -39,7 +39,7 @@ export const ttsAdapter = {
 
         const buffer = await requestOpenAITts(apiKey, model, voice, input);
         // Estimate: OpenAI Korean narration is roughly 7.5 chars/sec with the current default voice.
-        const estimatedDurationSec = Math.ceil(request.text.length / 7.5);
+        const estimatedDurationSec = Math.ceil(input.length / 7.5);
 
         log.info('OpenAI TTS generation complete', {
             model,

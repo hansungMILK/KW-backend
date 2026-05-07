@@ -4,6 +4,8 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
+import { getLocalAssetPath } from '../aws/s3';
+
 export interface VideoCompositionRequest {
     images: Array<{ url: string; durationSec: number; title?: string; caption?: string; sourceLabel?: string }>;
     audioUrl?: string;
@@ -21,9 +23,13 @@ export interface VideoCompositionResult {
 
 const FFMPEG_PATH = process.env.FFMPEG_PATH || '/opt/bin/ffmpeg';
 const FFMPEG_TIMEOUT_MS = Number(process.env.FFMPEG_TIMEOUT_MS || 840000);
-const FFMPEG_OVERLAY_MODE = process.env.SHORTS_FFMPEG_OVERLAY || 'source';
+const FFMPEG_OVERLAY_MODE = process.env.SHORTS_FFMPEG_OVERLAY || 'all';
+const LOCAL_ASSET_BASE_URL = process.env.LOCAL_ASSET_BASE_URL || 'http://localhost:8800/_local-assets';
 
 let cachedDrawtextSupport: boolean | undefined;
+let cachedSipsSupport: boolean | undefined;
+
+type OverlayStrategy = 'none' | 'drawtext' | 'image';
 
 export const ffmpegAdapter = {
     async compose(request: VideoCompositionRequest): Promise<VideoCompositionResult> {
@@ -41,6 +47,7 @@ export const ffmpegAdapter = {
                 title?: string;
                 caption?: string;
                 sourceLabel?: string;
+                overlayPath?: string;
             }> = [];
 
             for (let i = 0; i < request.images.length; i++) {
@@ -55,6 +62,13 @@ export const ffmpegAdapter = {
                     caption: image.caption,
                     sourceLabel: image.sourceLabel,
                 });
+            }
+
+            const overlayStrategy = resolveOverlayStrategy();
+            if (overlayStrategy === 'image') {
+                for (let i = 0; i < imageFiles.length; i += 1) {
+                    imageFiles[i].overlayPath = await createOverlayPng(imageFiles[i], i, workDir);
+                }
             }
 
             let audioPath: string | null = null;
@@ -81,7 +95,14 @@ export const ffmpegAdapter = {
 };
 
 function buildArgs(
-    imageFiles: Array<{ path: string; durationSec: number; title?: string; caption?: string; sourceLabel?: string }>,
+    imageFiles: Array<{
+        path: string;
+        durationSec: number;
+        title?: string;
+        caption?: string;
+        sourceLabel?: string;
+        overlayPath?: string;
+    }>,
     audioPath: string | null,
     request: VideoCompositionRequest,
     outputPath: string
@@ -94,6 +115,14 @@ function buildArgs(
     }
 
     let nextInputIndex = imageFiles.length;
+    const overlayInputIndices = new Map<number, number>();
+    imageFiles.forEach((image, index) => {
+        if (!image.overlayPath) return;
+        overlayInputIndices.set(index, nextInputIndex);
+        nextInputIndex += 1;
+        args.push('-framerate', '30', '-loop', '1', '-t', String(image.durationSec), '-i', image.overlayPath);
+    });
+
     let narrationInputIndex: number | null = null;
     if (audioPath) {
         narrationInputIndex = nextInputIndex;
@@ -116,16 +145,23 @@ function buildArgs(
 
     const width = String(request.outputWidth);
     const height = String(request.outputHeight);
-    const fontFile = resolveOverlayFontFile();
-    const canApplyTextOverlay = FFMPEG_OVERLAY_MODE !== 'off' && Boolean(fontFile) && ffmpegSupportsDrawtext();
-    if (FFMPEG_OVERLAY_MODE !== 'off' && !canApplyTextOverlay) {
-        console.warn(
-            `[ffmpeg-adapter] text overlay disabled: ${fontFile ? 'ffmpeg drawtext filter is unavailable' : 'Korean font file not found'}`
+    const overlayStrategy = resolveOverlayStrategy();
+    const fontFile = overlayStrategy === 'drawtext' ? resolveOverlayFontFile() : undefined;
+    const filterParts: string[] = [];
+    imageFiles.forEach((image, i) => {
+        const overlayInputIndex = overlayInputIndices.get(i);
+        if (overlayInputIndex !== undefined) {
+            filterParts.push(
+                `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1[base${i}]`
+            );
+            filterParts.push(`[base${i}][${overlayInputIndex}:v]overlay=0:0:format=auto[v${i}]`);
+            return;
+        }
+
+        const overlay = overlayStrategy === 'drawtext' ? buildDrawtextOverlayFilter(image, fontFile) : '';
+        filterParts.push(
+            `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1${overlay}[v${i}]`
         );
-    }
-    const filterParts = imageFiles.map((image, i) => {
-        const overlay = canApplyTextOverlay ? buildOverlayFilter(image, fontFile) : '';
-        return `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1${overlay}[v${i}]`;
     });
     const concatInputs = imageFiles.map((_, i) => `[v${i}]`).join('');
     filterParts.push(`${concatInputs}concat=n=${imageFiles.length}:v=1:a=0,format=yuv420p[v]`);
@@ -173,7 +209,101 @@ function ffmpegSupportsDrawtext(): boolean {
     return cachedDrawtextSupport;
 }
 
-function buildOverlayFilter(
+function canRenderSvgOverlayWithSips(): boolean {
+    if (cachedSipsSupport !== undefined) return cachedSipsSupport;
+    cachedSipsSupport = existsSync('/usr/bin/sips');
+    return cachedSipsSupport;
+}
+
+function resolveOverlayStrategy(): OverlayStrategy {
+    if (FFMPEG_OVERLAY_MODE === 'off') return 'none';
+
+    const fontFile = resolveOverlayFontFile();
+    if (fontFile && ffmpegSupportsDrawtext()) return 'drawtext';
+    if (canRenderSvgOverlayWithSips()) return 'image';
+
+    throw new Error(
+        'Shorts text overlay requires an ffmpeg build with drawtext support or macOS /usr/bin/sips for local overlay PNG rendering. Set SHORTS_FFMPEG_OVERLAY=off only if text overlay is intentionally disabled.'
+    );
+}
+
+async function createOverlayPng(
+    image: { title?: string; caption?: string; sourceLabel?: string },
+    index: number,
+    workDir: string
+): Promise<string> {
+    const svgPath = join(workDir, `overlay-${String(index).padStart(2, '0')}.svg`);
+    const pngPath = join(workDir, `overlay-${String(index).padStart(2, '0')}.png`);
+    await writeFile(svgPath, buildOverlaySvg(image), 'utf8');
+
+    const result = spawnSync('/usr/bin/sips', ['-s', 'format', 'png', svgPath, '--out', pngPath], {
+        encoding: 'utf8',
+        timeout: 10000,
+    });
+    if (result.error || result.status !== 0) {
+        throw new Error(
+            `Failed to render overlay PNG with sips: ${result.error?.message ?? result.stderr ?? result.stdout}`
+        );
+    }
+    return pngPath;
+}
+
+function buildOverlaySvg(image: { title?: string; caption?: string; sourceLabel?: string }): string {
+    const titleLines =
+        FFMPEG_OVERLAY_MODE === 'all' ? splitOverlayLines(compactOverlayText(image.title, 24), 12, 2) : [];
+    const captionLines =
+        FFMPEG_OVERLAY_MODE === 'all' ? splitOverlayLines(compactOverlayText(image.caption, 36), 15, 2) : [];
+    const sourceLabel = compactOverlayText(image.sourceLabel, 36);
+    const titleText = titleLines
+        .map((line, index) => {
+            const y = titleLines.length === 1 ? 198 : 148 + index * 112;
+            const color = index === 0 ? '#fff200' : '#ffffff';
+            return svgText(line, 540, y, 96, color, 8);
+        })
+        .join('\n');
+    const captionText = captionLines
+        .map((line, index) => svgText(line, 540, 1728 + index * 78, 66, '#ffffff', 7))
+        .join('\n');
+    const sourceText = sourceLabel ? svgText(sourceLabel, 540, 1888, 30, 'rgba(255,255,255,0.78)', 2) : '';
+
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920">
+  ${FFMPEG_OVERLAY_MODE === 'all' ? '<rect x="0" y="0" width="1080" height="360" fill="black"/>' : ''}
+  ${
+      FFMPEG_OVERLAY_MODE === 'all'
+          ? '<rect x="0" y="1660" width="1080" height="260" fill="black"/>'
+          : sourceLabel
+            ? '<rect x="0" y="1828" width="1080" height="92" fill="rgba(0,0,0,0.34)"/>'
+            : ''
+  }
+  ${titleText}
+  ${captionText}
+  ${sourceText}
+</svg>`;
+}
+
+function svgText(text: string, x: number, y: number, fontSize: number, fill: string, strokeWidth: number): string {
+    if (!text) return '';
+    const escaped = escapeXml(text);
+    const family = 'Apple SD Gothic Neo, AppleGothic, Arial Unicode MS, sans-serif';
+    const shadow = `<text x="${x}" y="${y}" text-anchor="middle" font-family="${family}" font-size="${fontSize}" font-weight="900" fill="${fill}" stroke="black" stroke-width="${strokeWidth}" paint-order="stroke" dominant-baseline="middle">${escaped}</text>`;
+    const fills = [
+        [0, 0],
+        [-1.8, 0],
+        [1.8, 0],
+        [0, -1.8],
+        [0, 1.8],
+        [-1.2, -1.2],
+        [1.2, 1.2],
+    ]
+        .map(
+            ([dx, dy]) =>
+                `<text x="${x + dx}" y="${y + dy}" text-anchor="middle" font-family="${family}" font-size="${fontSize}" font-weight="900" fill="${fill}" dominant-baseline="middle">${escaped}</text>`
+        )
+        .join('\n');
+    return `${shadow}\n${fills}`;
+}
+
+function buildDrawtextOverlayFilter(
     image: { title?: string; caption?: string; sourceLabel?: string },
     fontFile: string | undefined
 ): string {
@@ -181,27 +311,36 @@ function buildOverlayFilter(
 
     const filters: string[] = [];
     const sourceLabel = compactOverlayText(image.sourceLabel, 36);
-    const caption = compactOverlayText(image.caption, 24);
-    const title = compactOverlayText(image.title, 20);
+    const captionLines = splitOverlayLines(compactOverlayText(image.caption, 36), 15, 2);
+    const titleLines = splitOverlayLines(compactOverlayText(image.title, 24), 12, 2);
     const font = escapeDrawtext(fontFile);
 
-    if (FFMPEG_OVERLAY_MODE === 'all' && title) {
-        filters.push('drawbox=x=0:y=0:w=w:h=230:color=black@0.88:t=fill');
-        filters.push(
-            `drawtext=fontfile='${font}':text='${escapeDrawtext(title)}':x=(w-text_w)/2:y=52:fontsize=86:fontcolor=yellow:borderw=4:bordercolor=black`
-        );
+    if (FFMPEG_OVERLAY_MODE === 'all' && titleLines.length > 0) {
+        filters.push('drawbox=x=0:y=0:w=w:h=360:color=black:t=fill');
+        titleLines.forEach((line, index) => {
+            const y = titleLines.length === 1 ? 144 : 92 + index * 112;
+            const color = index === 0 ? 'yellow' : 'white';
+            filters.push(
+                `drawtext=fontfile='${font}':text='${escapeDrawtext(line)}':x=(w-text_w)/2:y=${y}:fontsize=96:fontcolor=${color}:borderw=5:bordercolor=black`
+            );
+        });
     }
 
-    if (FFMPEG_OVERLAY_MODE === 'all' && caption) {
-        filters.push(
-            `drawtext=fontfile='${font}':text='${escapeDrawtext(caption)}':x=(w-text_w)/2:y=(h-text_h)/2:fontsize=66:fontcolor=white:borderw=5:bordercolor=black`
-        );
+    if (FFMPEG_OVERLAY_MODE === 'all' && captionLines.length > 0) {
+        filters.push('drawbox=x=0:y=h-260:w=w:h=260:color=black:t=fill');
+        captionLines.forEach((line, index) => {
+            filters.push(
+                `drawtext=fontfile='${font}':text='${escapeDrawtext(line)}':x=(w-text_w)/2:y=h-${208 - index * 78}:fontsize=66:fontcolor=white:borderw=5:bordercolor=black`
+            );
+        });
     }
 
     if ((FFMPEG_OVERLAY_MODE === 'source' || FFMPEG_OVERLAY_MODE === 'all') && sourceLabel) {
-        filters.push('drawbox=x=0:y=h-92:w=w:h=92:color=black@0.34:t=fill');
+        if (FFMPEG_OVERLAY_MODE === 'source') {
+            filters.push('drawbox=x=0:y=h-92:w=w:h=92:color=black@0.34:t=fill');
+        }
         filters.push(
-            `drawtext=fontfile='${font}':text='${escapeDrawtext(sourceLabel)}':x=(w-text_w)/2:y=h-62:fontsize=30:fontcolor=white@0.86:borderw=2:bordercolor=black@0.7`
+            `drawtext=fontfile='${font}':text='${escapeDrawtext(sourceLabel)}':x=(w-text_w)/2:y=h-54:fontsize=30:fontcolor=white@0.86:borderw=2:bordercolor=black@0.7`
         );
     }
 
@@ -215,8 +354,38 @@ function compactOverlayText(value: string | undefined, maxLength: number): strin
     return `${compact.slice(0, maxLength - 1)}...`;
 }
 
+function splitOverlayLines(value: string, maxCharsPerLine: number, maxLines: number): string[] {
+    if (!value) return [];
+    if (value.length <= maxCharsPerLine) return [value];
+
+    const words = value.split(/\s+/).filter(Boolean);
+    const lines: string[] = [];
+    let current = '';
+    for (const word of words.length > 1 ? words : value.split('')) {
+        const next = current ? `${current}${words.length > 1 ? ' ' : ''}${word}` : word;
+        if (next.length <= maxCharsPerLine) {
+            current = next;
+            continue;
+        }
+        if (current) lines.push(current);
+        current = word;
+        if (lines.length >= maxLines - 1) break;
+    }
+    if (current && lines.length < maxLines) lines.push(current);
+    return lines.slice(0, maxLines);
+}
+
 function escapeDrawtext(value: string): string {
     return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/:/g, '\\:').replace(/%/g, '\\%');
+}
+
+function escapeXml(value: string): string {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
 }
 
 async function loadImageBinary(url: string): Promise<Buffer> {
@@ -227,6 +396,9 @@ async function loadImageBinary(url: string): Promise<Buffer> {
     if (url.startsWith('s3://')) {
         throw new Error(`FFmpeg input must be a public URL, got ${url}`);
     }
+
+    const localAssetKey = localAssetKeyFromUrl(url);
+    if (localAssetKey) return readFile(getLocalAssetPath(localAssetKey));
 
     const response = await fetch(url);
     if (!response.ok) throw new Error(`Failed to fetch image input ${url}: HTTP ${response.status}`);
@@ -241,9 +413,18 @@ async function loadAudioBinary(url: string): Promise<Buffer> {
     if (url.startsWith('s3://')) {
         throw new Error(`FFmpeg input must be a public URL, got ${url}`);
     }
+    const localAssetKey = localAssetKeyFromUrl(url);
+    if (localAssetKey) return readFile(getLocalAssetPath(localAssetKey));
+
     const response = await fetch(url);
     if (!response.ok) throw new Error(`Failed to fetch audio input ${url}: HTTP ${response.status}`);
     return Buffer.from(await response.arrayBuffer());
+}
+
+function localAssetKeyFromUrl(url: string): string | undefined {
+    const base = LOCAL_ASSET_BASE_URL.replace(/\/+$/, '');
+    if (!url.startsWith(`${base}/`)) return undefined;
+    return decodeURIComponent(url.slice(base.length + 1));
 }
 
 function runFfmpeg(args: string[]): Promise<void> {

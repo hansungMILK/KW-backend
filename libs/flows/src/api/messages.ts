@@ -20,6 +20,8 @@ export interface MessageProposal {
     blocks: ProposalBlock[];
     edges?: Array<{ source: string; target: string }>;
     estimatedCost?: string;
+    estimatedCostUsd?: number;
+    maxRunEstimatedCostUsd?: number;
     description?: string;
 }
 
@@ -73,6 +75,8 @@ const toMessageProposal = (response: MessageCreateResponse): MessageProposal | u
             .map(toProposalEdge)
             .filter((edge): edge is { source: string; target: string } => Boolean(edge)),
         estimatedCost: formatEstimatedCost(response.proposal.estimatedCost),
+        estimatedCostUsd: response.proposal.estimatedCostUsd ?? response.proposal.estimatedCost?.total,
+        maxRunEstimatedCostUsd: response.proposal.maxRunEstimatedCostUsd,
         description: response.assistantMessage?.content,
     };
 };

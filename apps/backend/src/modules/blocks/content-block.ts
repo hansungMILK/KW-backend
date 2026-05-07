@@ -27,7 +27,7 @@ Requirements:
   - topTitle: the same persistent Korean top title for every scene
   - caption: a short bold Korean on-screen subtitle (8–22 Korean characters)
   - narration: Korean voice-over text (one short spoken sentence, 18–42 Korean characters)
-  - imagePrompt: English AI image generation prompt for a complete 9:16 YouTube Shorts frame using GPT-image-2. Short Korean title/caption text is allowed.
+  - imagePrompt: English AI image generation prompt for the central illustration only. Do not ask the image model to draw titles, subtitles, black bands, lower thirds, source labels, logos, or readable Korean/English text.
   - visualText: backward-compatible short Korean main caption string
   - visual: { topTitle, mainCaption, sourceLabel? }
   - claimType: fact|hypothetical|opinion|joke
@@ -71,7 +71,7 @@ Requirements:
   - caption: a short bold Korean caption, max 18 Korean characters
   - narration: one short Korean description of the image, max 42 Korean characters
   - imagePrompt: English AI image generation prompt for one complete image. Preserve the user's subject and action.
-  - visualText: exact short Korean text intended for the image frame when useful; otherwise same as caption
+  - visualText: exact short Korean text intended for the video overlay; otherwise same as caption
   - visual: { topTitle, mainCaption, sourceLabel? }
   - claimType: opinion|joke|hypothetical|fact
   - sourceRefs: []

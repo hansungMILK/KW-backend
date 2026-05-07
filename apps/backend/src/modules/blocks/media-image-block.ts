@@ -428,18 +428,21 @@ function buildShortsFramePrompt(
     presetImageRules?: string
 ): string {
     const compactRules = compactPromptText(presetImageRules, 180);
+    void title;
+    void caption;
+    void sourceLabel;
+
     const scene = compactPromptText(
         visualPrompt || 'Korean university admission and student study scene, clean educational illustration.',
         260
     );
 
     return [
-        'Create one vertical 9:16 Korean YouTube Shorts frame.',
-        'Use clean viral Korean Shorts style, high contrast, safe mobile margins.',
-        `Top title text: "${compactPromptText(title, 16)}".`,
-        `Main caption text: "${compactPromptText(caption, 18)}".`,
-        sourceLabel ? `Small bottom source text: "${compactPromptText(sourceLabel, 24)}".` : '',
-        'Text must be short, bold, legible, with black stroke/shadow.',
+        'Create one vertical 9:16 central illustration for a Korean YouTube Shorts video.',
+        'Generate only the main comic/meme/situation artwork. Do not draw any Korean or English text.',
+        'Do not include black title bands, subtitles, captions, lower thirds, source labels, logos, URLs, or readable UI/document text.',
+        'Leave safe negative space near the top and bottom because the video compositor will add title/caption/source overlays.',
+        'Use clean viral Korean Shorts visual style, high contrast, simple background, expressive characters, and mobile-safe framing.',
         compactRules,
         `Scene: ${scene}`,
     ]

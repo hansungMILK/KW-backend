@@ -16,8 +16,8 @@ export const GENERAL_SHORTS_RULEPACK: ShortsRulepack = {
 - Avoid misleading certainty, fabricated statistics, or invented source references.
 - Each scene should include sourceRefs when it contains factual claims.`,
     imagePrompt: `General visual rules:
-- Korean title/caption inside GPT-image-2 frames is allowed, but keep it short and bold.
-- Avoid dense tables, long paragraphs, and small exact numbers inside the image.
+- Do not put Korean/English text, title bands, subtitles, lower thirds, logos, URLs, or readable UI text inside GPT-image frames.
+- The FFmpeg video compositor is responsible for title/caption/source overlays.
 - Prefer one clear visual metaphor per scene.`,
     analysisPrompt: `General quality rules:
 - Flag unsourced factual claims, overconfident wording, and captions too long for mobile.

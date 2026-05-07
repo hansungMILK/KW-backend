@@ -33,9 +33,8 @@ export const EDUCATION_ADMISSION_RULEPACK: ShortsRulepack = {
 - Use short captions similar to viral Korean educational Shorts, but keep factual claims grounded.`,
     imagePrompt: `Admission visual rules:
 - Use Korean school, classroom, calendar, score report, counseling, application checklist, university campus, and graph metaphors.
-- Korean title/caption inside GPT-image-2 frames is allowed, but keep it short.
-- Do not put detailed deadlines, exact scores, long tables, or URL text inside the image.
-- If using a source label, keep it short like "기준: 대입정보포털".`,
+- Do not put Korean/English text, title bands, subtitles, source labels, logos, detailed deadlines, exact scores, long tables, or URL text inside GPT-image frames.
+- The FFmpeg video compositor is responsible for title/caption/source overlays.`,
     analysisPrompt: `Admission fact-check rules:
 - Flag definitive dates, scores, ratios, admission schedules, or official policy claims without official sourceRefs.
 - Flag fearmongering or guaranteed-outcome phrasing.

@@ -14,19 +14,42 @@ let isManualDisconnect = false;
 let currentConfig = null;
 let reconnectAttempts = 0;
 let pingInterval = null;
+let pongTimeout = null;
 let lastPongTime = null;
 
 const PING_INTERVAL = 60000; // 60s - keep connection alive
 const PONG_TIMEOUT = 10000; // 10s - timeout for pong response
 const MAX_RECONNECT_ATTEMPTS = 10;
 
+const redactUrlToken = (url, authQueryParam) => {
+    const marker = encodeURIComponent(authQueryParam) + '=';
+    const start = url.indexOf(marker);
+    if (start === -1) return url;
+    const valueStart = start + marker.length;
+    const valueEnd = url.indexOf('&', valueStart);
+    return url.slice(0, valueStart) + '[redacted]' + (valueEnd === -1 ? '' : url.slice(valueEnd));
+};
+
+const redactConfig = config => ({
+    ...config,
+    token: config?.token ? '[redacted]' : config?.token,
+});
+
 const startPingHeartbeat = () => {
     if (pingInterval) clearInterval(pingInterval);
 
     pingInterval = setInterval(() => {
         if (ws?.readyState === 1) {
-            ws.send(JSON.stringify({ type: 'system', action: 'ping', data: { timestamp: Date.now() } }));
+            const sentAt = Date.now();
+            ws.send(JSON.stringify({ type: 'system', action: 'ping', data: { timestamp: sentAt } }));
             self.postMessage({ type: 'log', message: 'Sent ping heartbeat' });
+            if (pongTimeout) clearTimeout(pongTimeout);
+            pongTimeout = setTimeout(() => {
+                if (ws?.readyState === 1 && (!lastPongTime || lastPongTime < sentAt)) {
+                    self.postMessage({ type: 'log', message: 'Pong timeout, reconnecting...' });
+                    ws.close(4000, 'pong timeout');
+                }
+            }, PONG_TIMEOUT);
         }
     }, PING_INTERVAL);
 };
@@ -35,6 +58,10 @@ const stopPingHeartbeat = () => {
     if (pingInterval) {
         clearInterval(pingInterval);
         pingInterval = null;
+    }
+    if (pongTimeout) {
+        clearTimeout(pongTimeout);
+        pongTimeout = null;
     }
 };
 
@@ -96,7 +123,7 @@ const connectWebSocket = config => {
     }
 
     self.postMessage({ type: 'status', status: 'connecting' });
-    self.postMessage({ type: 'log', message: 'Connecting to: ' + wsUrl });
+    self.postMessage({ type: 'log', message: 'Connecting to: ' + redactUrlToken(wsUrl, authQueryParam) });
 
     try {
         ws = new WebSocket(wsUrl);
@@ -148,8 +175,12 @@ const connectWebSocket = config => {
             }
 
             // Handle pong response (for our ping heartbeat)
-            if (data.action === 'pong') {
+            if (data.action === 'pong' || data.type === 'pong') {
                 lastPongTime = Date.now();
+                if (pongTimeout) {
+                    clearTimeout(pongTimeout);
+                    pongTimeout = null;
+                }
                 self.postMessage({ type: 'log', message: 'Received pong' });
                 return;
             }
@@ -185,7 +216,7 @@ self.onmessage = e => {
 
     switch (type) {
         case 'connect':
-            self.postMessage({ type: 'log', message: 'Connect config: ' + JSON.stringify(config) });
+            self.postMessage({ type: 'log', message: 'Connect config: ' + JSON.stringify(redactConfig(config)) });
             isManualDisconnect = false;
             reconnectAttempts = 0;
             currentConfig = config;

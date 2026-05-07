@@ -34,7 +34,7 @@ provider:
         FFMPEG_PATH: ${self:custom.ffmpegPath.${self:provider.stage}, '/opt/bin/ffmpeg'}
         FFMPEG_TIMEOUT_MS: ${env:FFMPEG_TIMEOUT_MS, '840000'}
         FFMPEG_FONT_FILE: ${env:FFMPEG_FONT_FILE, '/opt/fonts/NotoSansCJKkr-Regular.otf'}
-        SHORTS_FFMPEG_OVERLAY: ${env:SHORTS_FFMPEG_OVERLAY, 'source'}
+        SHORTS_FFMPEG_OVERLAY: ${env:SHORTS_FFMPEG_OVERLAY, 'all'}
         ORCHESTRATOR_MODE: ${env:ORCHESTRATOR_MODE, 'openai'}
         AI_PROVIDER: ${env:AI_PROVIDER, 'openai'}
         ALLOW_PAID_OPENAI: ${env:ALLOW_PAID_OPENAI, 'false'}

@@ -31,16 +31,36 @@ export const main = async (event: {
         parsed = {};
     }
 
-    const action = (parsed as Record<string, unknown>)?.action;
+    const message =
+        parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+    const action = message.action;
 
     if (action === 'ping') {
         log.info(`WS ping from ${connectionId}`);
+        const data = message.data && typeof message.data === 'object' ? (message.data as Record<string, unknown>) : {};
+        const timestamp = typeof data.timestamp === 'number' ? data.timestamp : Date.now();
         try {
             await postToConnection(connectionId, {
-                type: 'pong',
+                type: 'system',
+                action: 'pong',
+                data: { timestamp },
+                ts: new Date().toISOString(),
             });
         } catch (err) {
             log.warn(`WS pong failed for ${connectionId}`, err);
+        }
+    }
+
+    if (action === 'info') {
+        try {
+            await postToConnection(connectionId, {
+                type: 'system',
+                action: 'info',
+                data: { id: connectionId, connectionId },
+                ts: new Date().toISOString(),
+            });
+        } catch (err) {
+            log.warn(`WS info response failed for ${connectionId}`, err);
         }
     }
 
