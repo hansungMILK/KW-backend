@@ -1,9 +1,9 @@
 import { blockExecutor } from './block-executor';
 import { traceService } from './trace-service';
 import { wsService } from './websocket-service';
+import { broadcastNodePortUpdated } from './ws-flow-events-service';
 import { getPublicUrl, publicUrlFromS3Uri, putObject } from '../adapters/aws/s3';
 import { assetRepo } from '../repositories/asset-repository';
-import { flowRepo } from '../repositories/flow-repository';
 import { runRepo } from '../repositories/run-repository';
 import { generateNumericId } from '../utils/id-generator';
 
@@ -519,41 +519,8 @@ export const executionEngine = {
             } catch {
                 /* non-fatal */
             }
-
-            // Update output port data in flow.nodes[] and broadcast node/port events.
-            // This allows other tabs to re-fetch updated port data via GET /nodes/{portId}/port.
-            if (runForNode && Object.keys(output).length > 0) {
-                try {
-                    const flow = await flowRepo.get(runForNode.flowId);
-                    if (flow) {
-                        const now = Date.now();
-                        const updatedPortNames: string[] = [];
-                        const updatedNodes = (flow.nodes as Array<Record<string, unknown>>).map(node => {
-                            if (
-                                node['stereo'] === 'port' &&
-                                node['parentId'] === nodeId &&
-                                node['direction'] === 'out'
-                            ) {
-                                updatedPortNames.push((node['name'] as string) || 'out');
-                                return { ...node, data$: { value: output, type: 'object', timestamp: now } };
-                            }
-                            return node;
-                        });
-                        if (updatedPortNames.length > 0) {
-                            await flowRepo.updateCanvas(runForNode.flowId, { nodes: updatedNodes, edges: flow.edges });
-                            for (const portName of updatedPortNames) {
-                                await wsService.broadcastToFlow(runForNode.flowId, {
-                                    type: 'node/port',
-                                    id: `${nodeId}:${portName}@out`,
-                                    flowId: runForNode.flowId,
-                                    timestamp: now,
-                                });
-                            }
-                        }
-                    }
-                } catch {
-                    /* non-fatal */
-                }
+            if (runForNode) {
+                await broadcastNodePortUpdated(runForNode.flowId, nodeId, output);
             }
         } catch (err: unknown) {
             const errorMessage = err instanceof Error ? err.message : String(err);
