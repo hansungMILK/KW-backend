@@ -27,6 +27,8 @@ export interface ResolvedShortsBgmTrack extends ShortsBgmTrack {
 }
 
 const ASSET_DIR = env.shortsBgmAssetsDir;
+const GENERATED_SOURCE = 'project-generated procedural instrumental loop';
+const GENERATED_LICENSE = 'Project-owned generated asset; safe to replace with a licensed commercial track';
 
 export const SHORTS_BGM_CATALOG: ShortsBgmTrack[] = [
     {
@@ -35,8 +37,8 @@ export const SHORTS_BGM_CATALOG: ShortsBgmTrack[] = [
         filename: 'warm-storytelling-loop.mp3',
         mood: 'warm-storytelling',
         tags: ['education', 'admission', 'school', 'information', 'storytelling'],
-        source: 'user-provided licensed asset',
-        license: 'Must be royalty-free or directly licensed before use',
+        source: GENERATED_SOURCE,
+        license: GENERATED_LICENSE,
     },
     {
         id: 'cinematic-tension-01',
@@ -44,8 +46,8 @@ export const SHORTS_BGM_CATALOG: ShortsBgmTrack[] = [
         filename: 'cinematic-tension-loop.mp3',
         mood: 'cinematic-tension',
         tags: ['news', 'history', 'war', 'incident', 'mystery', 'documentary'],
-        source: 'user-provided licensed asset',
-        license: 'Must be royalty-free or directly licensed before use',
+        source: GENERATED_SOURCE,
+        license: GENERATED_LICENSE,
     },
     {
         id: 'fast-explainer-01',
@@ -53,8 +55,8 @@ export const SHORTS_BGM_CATALOG: ShortsBgmTrack[] = [
         filename: 'fast-explainer-loop.mp3',
         mood: 'fast-explainer',
         tags: ['tips', 'how-to', 'product', 'shorts', 'explainer'],
-        source: 'user-provided licensed asset',
-        license: 'Must be royalty-free or directly licensed before use',
+        source: GENERATED_SOURCE,
+        license: GENERATED_LICENSE,
     },
     {
         id: 'quirky-office-01',
@@ -62,8 +64,8 @@ export const SHORTS_BGM_CATALOG: ShortsBgmTrack[] = [
         filename: 'quirky-office-loop.mp3',
         mood: 'quirky-office',
         tags: ['office', 'psychology', 'relationship', 'work', 'humor'],
-        source: 'user-provided licensed asset',
-        license: 'Must be royalty-free or directly licensed before use',
+        source: GENERATED_SOURCE,
+        license: GENERATED_LICENSE,
     },
     {
         id: 'futuristic-tech-01',
@@ -71,8 +73,8 @@ export const SHORTS_BGM_CATALOG: ShortsBgmTrack[] = [
         filename: 'futuristic-tech-loop.mp3',
         mood: 'futuristic-tech',
         tags: ['ai', 'developer', 'automation', 'tool', 'tech'],
-        source: 'user-provided licensed asset',
-        license: 'Must be royalty-free or directly licensed before use',
+        source: GENERATED_SOURCE,
+        license: GENERATED_LICENSE,
     },
     {
         id: 'neutral-documentary-01',
@@ -80,8 +82,8 @@ export const SHORTS_BGM_CATALOG: ShortsBgmTrack[] = [
         filename: 'neutral-documentary-loop.mp3',
         mood: 'neutral-documentary',
         tags: ['default', 'documentary', 'information'],
-        source: 'user-provided licensed asset',
-        license: 'Must be royalty-free or directly licensed before use',
+        source: GENERATED_SOURCE,
+        license: GENERATED_LICENSE,
     },
 ];
 

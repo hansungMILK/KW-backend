@@ -2,6 +2,10 @@
 
 Put only licensed or royalty-free BGM files in this directory.
 
+The current checked-in MP3 files are project-generated procedural instrumental loops.
+They are intentionally simple and copyright-safe. Replace them later with
+commercially licensed tracks if the channel needs stronger music quality.
+
 The backend currently looks for these filenames:
 
 - `warm-storytelling-loop.mp3`
