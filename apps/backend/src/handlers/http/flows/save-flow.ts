@@ -39,7 +39,7 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
 
     // Broadcast only for updates — new flows have no subscribers yet
     if (id !== '0') {
-        void wsService.broadcastToFlow(saved.id, {
+        await wsService.broadcastToFlow(saved.id, {
             type: 'flow',
             id: saved.id,
             timestamp: Date.now(),

@@ -103,7 +103,7 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
     const flow = await flowRepo.updateCanvas(id, { nodes, edges });
     if (!flow) return notFound(`Flow ${id} not found`);
 
-    void wsService.broadcastToFlow(id, {
+    await wsService.broadcastToFlow(id, {
         type: 'flow',
         id,
         timestamp: Date.now(),

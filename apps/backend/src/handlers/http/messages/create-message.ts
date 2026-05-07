@@ -136,8 +136,8 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
     };
     await proposalRepo.put(proposal);
 
-    // 3-1. Broadcast proposal.created via WebSocket (non-blocking)
-    void wsService.broadcastToFlow(fid, {
+    // 3-1. Broadcast proposal.created via WebSocket.
+    await wsService.broadcastToFlow(fid, {
         type: 'proposal.created',
         id: proposalId,
         proposalId,

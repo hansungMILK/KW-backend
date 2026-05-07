@@ -540,7 +540,7 @@ export const executionEngine = {
                             return node;
                         });
                         if (updatedPortNames.length > 0) {
-                            await flowRepo.save(runForNode.flowId, updatedNodes, flow.edges);
+                            await flowRepo.updateCanvas(runForNode.flowId, { nodes: updatedNodes, edges: flow.edges });
                             for (const portName of updatedPortNames) {
                                 await wsService.broadcastToFlow(runForNode.flowId, {
                                     type: 'node/port',
