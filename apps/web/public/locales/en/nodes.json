@@ -94,8 +94,7 @@
             "result-preview": "Preview final results",
             "echo": "Output the input value as-is",
             "schema-extractor": "Extract schema from JSON",
-            "html-upload": "Upload HTML via eureka codes",
-            "input-html": "Upload HTML via eureka codes"
+            "upload-html": "Upload HTML via eureka codes"
         }
     }
 }

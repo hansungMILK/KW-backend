@@ -94,8 +94,7 @@
             "result-preview": "최종 결과 미리보기",
             "echo": "입력값 그대로 출력",
             "schema-extractor": "JSON에서 스키마 추출",
-            "html-upload": "HTML을 eureka 코드로 업로드",
-            "input-html": "HTML을 eureka 코드로 업로드"
+            "upload-html": "HTML을 eureka 코드로 업로드"
         }
     }
 }
