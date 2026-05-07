@@ -1,6 +1,7 @@
 import { FlowSaveRequestSchema } from '@flows/contracts';
 
 import { flowRepo } from '../../../repositories/flow-repository';
+import { broadcastFlowUpdated } from '../../../services/ws-flow-events-service';
 import { getBody, getPathParam, withMiddleware } from '../../../utils/middleware';
 import { badRequest, notFound, ok } from '../../../utils/response';
 
@@ -35,6 +36,8 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
             : flow;
 
     if (!saved) return notFound(`Flow ${flow.id} not found after create`);
+
+    if (id !== '0') broadcastFlowUpdated(saved.id);
 
     return ok({
         id: saved.id,

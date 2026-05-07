@@ -1,6 +1,7 @@
 import { blockExecutor } from './block-executor';
 import { traceService } from './trace-service';
 import { wsService } from './websocket-service';
+import { broadcastNodePortUpdated } from './ws-flow-events-service';
 import { getPublicUrl, publicUrlFromS3Uri, putObject } from '../adapters/aws/s3';
 import { assetRepo } from '../repositories/asset-repository';
 import { runRepo } from '../repositories/run-repository';
@@ -517,6 +518,9 @@ export const executionEngine = {
                 await traceService.record(runId, nodeId, 'STATUS', `Node ${nodeId} completed`);
             } catch {
                 /* non-fatal */
+            }
+            if (runForNode) {
+                void broadcastNodePortUpdated(runForNode.flowId, nodeId, output);
             }
         } catch (err: unknown) {
             const errorMessage = err instanceof Error ? err.message : String(err);

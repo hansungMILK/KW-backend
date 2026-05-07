@@ -1,6 +1,7 @@
 import { FlowPutRequestSchema } from '@flows/contracts';
 
 import { flowRepo } from '../../../repositories/flow-repository';
+import { broadcastFlowUpdated } from '../../../services/ws-flow-events-service';
 import { getBody, getPathParam, withMiddleware } from '../../../utils/middleware';
 import { badRequest, notFound, ok } from '../../../utils/response';
 
@@ -23,6 +24,8 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
 
     const flow = await flowRepo.updateCanvas(flowId, parsed.data);
     if (!flow) return notFound(`Flow ${flowId} not found`);
+
+    broadcastFlowUpdated(flowId);
 
     return ok({
         flowId: flow.id,
