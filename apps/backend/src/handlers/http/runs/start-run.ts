@@ -20,9 +20,9 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
 
     const body = getBody<Record<string, unknown>>(event) ?? {};
     const bodyParsed = RunCreateRequestSchema.safeParse(body);
-    const triggerSource = bodyParsed.success ? bodyParsed.data.triggerSource : 'MANUAL';
-    const executionMode = bodyParsed.success ? bodyParsed.data.executionMode : undefined;
-    const notifyWebhook = bodyParsed.success ? bodyParsed.data.notifyWebhook : undefined;
+    if (!bodyParsed.success) return badRequest('Invalid run request body');
+
+    const { triggerSource, executionMode, notifyWebhook } = bodyParsed.data;
 
     const result = await runService.createRun(paramsParsed.data.flowId, triggerSource, {
         executionMode,

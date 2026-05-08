@@ -40,7 +40,9 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
 
     const body = getBody<Record<string, unknown>>(event) ?? {};
     const bodyParsed = RequestSchema.safeParse(body);
-    const triggerSource = bodyParsed.success ? (bodyParsed.data.triggerSource ?? 'MANUAL') : 'MANUAL';
+    if (!bodyParsed.success) return badRequest('Invalid single-node run request body');
+
+    const triggerSource = bodyParsed.data.triggerSource ?? 'MANUAL';
 
     const { flowId, nodeId } = paramsParsed.data;
 
