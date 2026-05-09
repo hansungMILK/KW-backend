@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { EXECUTE_FUNCTIONS, getNode, getPortData, useBlocks, useCanvasStore, useFlows } from '@flows/flows';
+import { EXECUTE_FUNCTIONS, getPortData, useBlocks, useCanvasStore, useFlows } from '@flows/flows';
 import { ApiKeyDialog } from '@flows/shared';
 import { useInitFlowSocket } from '@flows/socket';
 import { useWebCoreStore } from '@flows/web-core';
@@ -72,7 +72,7 @@ export const FlowEditorPage = () => {
 
     const handleNodeUpdate = useCallback(
         async (info: NodeUpdateInfo) => {
-            const { nodeId, flowId, isPort, parentNodeId, state, progress, no } = info;
+            const { nodeId, flowId, isPort, parentNodeId, state, progress, no, errorCode, errorMessage } = info;
 
             // Skip if flowId is missing or doesn't match current flow (socket channel is shared)
             if (!flowId || flowId !== currentFlowId) return;
@@ -102,22 +102,13 @@ export const FlowEditorPage = () => {
                 return;
             }
 
-            // ERROR state: still need API fetch for errorMessage (not sent via WebSocket)
+            // ERROR state: socket node.failed includes the failure details after P3.
             if (state === 'ERROR') {
-                try {
-                    const nodeData = await getNode(nodeId);
-                    canvasRef.current.updateNodeFromServer(nodeId, {
-                        state,
-                        status: state,
-                        errorMessage: nodeData.errorMessage,
-                    });
-                } catch {
-                    // Fallback: update state without errorMessage if API fails
-                    canvasRef.current.updateNodeFromServer(nodeId, {
-                        state,
-                        status: state,
-                    });
-                }
+                canvasRef.current.updateNodeFromServer(nodeId, {
+                    state,
+                    status: state,
+                    errorMessage: errorMessage ?? errorCode,
+                });
                 return;
             }
 
@@ -179,7 +170,7 @@ export const FlowEditorPage = () => {
      */
     const handlePortUpdate = useCallback(
         async (info: PortUpdateInfo) => {
-            const { portId, nodeId, flowId, portName, no } = info;
+            const { portId, nodeId, flowId, portName, direction, no } = info;
 
             // Skip if flowId is missing or doesn't match current flow (socket channel is shared)
             if (!flowId || flowId !== currentFlowId) return;
@@ -209,7 +200,8 @@ export const FlowEditorPage = () => {
 
             if (!canvasRef.current) return;
 
-            const isOutputPort = portName === 'out';
+            const resolvedDirection = direction ?? (portName === 'out' ? 'out' : 'in');
+            const isOutputPort = resolvedDirection === 'out';
 
             // For input ports, check if this is a terminal node (no outputs)
             // Terminal nodes need inputData to display, others can skip (data same as upstream)
@@ -226,10 +218,8 @@ export const FlowEditorPage = () => {
                 }
             }
 
-            const direction = isOutputPort ? 'out' : 'in';
-
             try {
-                const portData = await getPortData(portId, direction);
+                const portData = await getPortData(portId, resolvedDirection, flowId);
 
                 if (portData?.data) {
                     const dataPacket = {
@@ -238,7 +228,7 @@ export const FlowEditorPage = () => {
                         timestamp: portData.data.timestamp,
                     };
 
-                    const portKey = portData.portId || portName || direction;
+                    const portKey = portData.portId || portName || resolvedDirection;
 
                     if (isOutputPort) {
                         canvasRef.current.updateNodeFromServer(nodeId, {

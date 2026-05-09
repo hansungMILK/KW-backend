@@ -14,6 +14,7 @@ import type {
 } from '../types';
 
 const _log = console.log.bind(console, '[flows-api]');
+const flowWriteQueues = new Map<string, Promise<unknown>>();
 
 interface SpecFlowSummary {
     flowId: string;
@@ -102,6 +103,17 @@ const applyUpserts = <T>(existingItems: T[], patchItems: T[]): T[] => {
     }
 
     return result;
+};
+
+const enqueueFlowWrite = <T>(id: string, task: () => Promise<T>): Promise<T> => {
+    const previous = flowWriteQueues.get(id) ?? Promise.resolve();
+    const next = previous.catch(() => undefined).then(task);
+    flowWriteQueues.set(id, next);
+    return next.finally(() => {
+        if (flowWriteQueues.get(id) === next) {
+            flowWriteQueues.delete(id);
+        }
+    });
 };
 
 const toLoadFlowResult = (flow: SpecFlowDetail): LoadFlowResult => ({
@@ -227,10 +239,12 @@ export const upsertFlow = async (id: string, body: SaveFlowBody): Promise<SaveFl
         nodeCount: body.nodes?.length ?? 0,
         edgeCount: body.edges?.length ?? 0,
     });
-    const current = await getFlow(id);
-    return updateFlow(id, {
-        nodes: applyUpserts(current.nodes ?? [], body.nodes ?? []),
-        edges: applyUpserts(current.edges ?? [], body.edges ?? body.connections ?? []),
+    return enqueueFlowWrite(id, async () => {
+        const current = await getFlow(id);
+        return updateFlow(id, {
+            nodes: applyUpserts(current.nodes ?? [], body.nodes ?? []),
+            edges: applyUpserts(current.edges ?? [], body.edges ?? body.connections ?? []),
+        });
     });
 };
 

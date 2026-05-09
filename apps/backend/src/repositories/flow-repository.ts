@@ -49,6 +49,28 @@ const normalizeRecord = (record: FlowRecord): FlowRecord => ({
     state: normalizeFlowStatus(record.state),
 });
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+    value != null && typeof value === 'object' && !Array.isArray(value);
+
+const isPortNode = (node: unknown): node is Record<string, unknown> => isRecord(node) && node['stereo'] === 'port';
+
+const getNodeId = (node: unknown): string => {
+    if (!isRecord(node)) return '';
+    return String(node['id'] ?? node['nodeId'] ?? '');
+};
+
+const preserveExistingPortNodes = (incomingNodes: unknown[], existingNodes: unknown[]): unknown[] => {
+    const visualNodes = incomingNodes.filter(node => !isPortNode(node));
+    const visualNodeIds = new Set(visualNodes.map(getNodeId).filter(Boolean));
+    const existingPorts = existingNodes.filter(node => {
+        if (!isPortNode(node)) return false;
+        const parentId = String(node['parentId'] ?? '');
+        return parentId && visualNodeIds.has(parentId);
+    });
+
+    return [...visualNodes, ...existingPorts];
+};
+
 // ============================================================================
 // Repository — auto-selects DynamoDB or in-memory based on environment
 // ============================================================================
@@ -178,7 +200,8 @@ export const flowRepo = {
 
     async updateCanvas(
         id: string,
-        data: { title?: string; description?: string; nodes: unknown[]; edges: unknown[] }
+        data: { title?: string; description?: string; nodes: unknown[]; edges: unknown[] },
+        options: { preservePortNodes?: boolean } = {}
     ): Promise<FlowRecord | null> {
         const existing = await this.get(id);
         if (!existing) return null;
@@ -191,11 +214,16 @@ export const flowRepo = {
             newState = 'READY';
         }
 
+        const nextNodes =
+            options.preservePortNodes === false
+                ? data.nodes
+                : preserveExistingPortNodes(data.nodes, existing.nodes ?? []);
+
         const updated: FlowRecord = {
             ...existing,
             name: data.title ?? existing.name,
             description: data.description ?? existing.description,
-            nodes: data.nodes,
+            nodes: nextNodes,
             edges: data.edges,
             state: newState,
             updatedAt: now,

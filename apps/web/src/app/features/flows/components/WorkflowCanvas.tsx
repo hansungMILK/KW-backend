@@ -979,10 +979,10 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     // Each port updates individually when fetched for progressive loading UX
                     const nullDataPorts = ports.filter(p => p.data === null && p.portId);
 
-                    if (nullDataPorts.length > 0) {
+                    if (nullDataPorts.length > 0 && flowId) {
                         nullDataPorts.forEach(p => {
                             const direction = p.portId === 'out' ? 'out' : 'in';
-                            getPortData(p.id, direction, flowId ?? undefined)
+                            getPortData(p.id, direction, flowId)
                                 .then(portData => {
                                     if (portData.data) {
                                         setNodes(prev => {
@@ -1468,7 +1468,12 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                             // Send frontend execution output to server
                             // Server will save outputs to ports and propagate to downstream nodes
                             // await runNode(flowId, nodeId, { output: outputs }, { force: true });
-                            await runNode(flowId, nodeId, { config: currentNode.config || {} }, { force: true });
+                            await runNode(
+                                flowId,
+                                nodeId,
+                                { config: currentNode.config || {}, output: outputs },
+                                { force: true }
+                            );
                         }
                     } else {
                         // ============================================================
@@ -1519,6 +1524,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
 
                         const result = await runNode(flowId, nodeId, {
                             config: currentNode.config || {},
+                            input: collectedInputData,
                         });
 
                         // Use state from result if available, fallback to status for backward compatibility

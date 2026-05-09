@@ -15,6 +15,9 @@ const ParamsSchema = z.object({
 const RequestSchema = z
     .object({
         triggerSource: z.string().default('MANUAL'),
+        config: z.record(z.unknown()).optional(),
+        input: z.record(z.unknown()).optional(),
+        output: z.record(z.unknown()).optional(),
     })
     .partial()
     .passthrough();
@@ -46,7 +49,11 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
 
     const { flowId, nodeId } = paramsParsed.data;
 
-    const result = await runService.createSingleNodeRun(flowId, nodeId, triggerSource);
+    const result = await runService.createSingleNodeRun(flowId, nodeId, triggerSource, {
+        config: bodyParsed.data.config,
+        input: bodyParsed.data.input,
+        output: bodyParsed.data.output,
+    });
 
     if (!result.ok) {
         if (result.status === 404) return notFound(result.error);

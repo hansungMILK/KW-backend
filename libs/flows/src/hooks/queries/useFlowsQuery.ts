@@ -12,13 +12,12 @@ import type {
     UpdateFlowBody,
 } from '../../types';
 
-// NOTE: useFlowsListQuery and useFlowQuery are removed because
-// the backend does not support GET /flows or GET /flows/:id endpoints.
-// Only POST /flows/:id/save and GET /flows/:id/load are supported.
+// Flow queries use the P3 spec API surface:
+// POST /flows, GET /flows/{flowId}, PUT /flows/{flowId}.
 
 /**
  * Query hook for loading flow (full design with nodes and edges)
- * GET /flows/:id/load
+ * GET /flows/{flowId}
  */
 export const useLoadFlowQuery = (flowId: string | null) => {
     return useQuery({
@@ -32,7 +31,7 @@ export const useLoadFlowQuery = (flowId: string | null) => {
 };
 
 /**
- * Mutation hook for creating a new flow via POST /flows/0/save
+ * Mutation hook for creating a new flow via POST /flows
  * Returns SaveFlowView which includes the server-generated flow ID
  */
 export const useCreateFlowMutation = () => {
@@ -43,7 +42,7 @@ export const useCreateFlowMutation = () => {
 
 /**
  * Mutation hook for saving flow (full workflow state)
- * POST /flows/:id/save
+ * PUT /flows/{flowId}
  *
  * Uses optimistic updates for seamless UX:
  * - Immediately updates cache on mutate

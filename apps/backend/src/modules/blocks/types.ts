@@ -9,6 +9,8 @@ export const BLOCK_TYPES = [
     'input-text',
     'input-image',
     'output-preview',
+    'buffer-delay',
+    'text-transform',
     'search',
     'content',
     'data',

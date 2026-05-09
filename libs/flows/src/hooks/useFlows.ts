@@ -21,8 +21,9 @@ import type { LoadFlowResult, NodeData, SaveFlowBody } from '../types';
  * Hook for managing workflows/flows
  *
  * Backend API support:
- * - POST /flows/:id/save (create with id='0', update with existing id)
- * - GET /flows/:id/load (load flow snapshot)
+ * - POST /flows (create)
+ * - GET /flows/{flowId} (load flow snapshot)
+ * - PUT /flows/{flowId} (save full canvas)
  *
  * Flow ID is persisted in localStorage for session continuity.
  * This hook manages flow metadata (name, save/load).
@@ -102,7 +103,7 @@ export const useFlows = () => {
         }
 
         // No saved flow or failed to load - create new flow
-        console.log('[useFlows] Creating new flow via POST /flows/0/save');
+        console.log('[useFlows] Creating new flow via POST /flows');
         const result = await createFlow({ nodes: [], edges: [] });
         const newFlowId = result.id;
 
@@ -118,7 +119,7 @@ export const useFlows = () => {
 
     /**
      * Load a specific flow by ID
-     * GET /flows/:id/load
+     * GET /flows/{flowId}
      */
     const loadFlowById = useCallback(
         async (id: string): Promise<LoadFlowResult | null> => {
@@ -179,9 +180,9 @@ export const useFlows = () => {
 
     /**
      * Save current flow
-     * POST /flows/:id/save
+     * PUT /flows/{flowId}
      *
-     * If no currentFlowId, creates new flow first via POST /flows/0/save
+     * If no currentFlowId, creates new flow first via POST /flows
      * Uses optimistic updates for seamless UX - no blocking loader shown
      */
     const saveCurrentFlow = useCallback(
@@ -236,7 +237,7 @@ export const useFlows = () => {
 
                 // If no current flow ID, create new flow
                 if (!flowId) {
-                    console.log('[useFlows] Creating new flow via POST /flows/0/save');
+                    console.log('[useFlows] Creating new flow via POST /flows');
                     const result = await createFlowMutation.mutateAsync(saveBody);
                     flowId = result.id ?? null;
 

@@ -53,6 +53,8 @@ const toDataPacket = (raw: unknown): PortDataResponse['data'] | null => {
 export interface RunNodeBody {
     /** Config to override during execution (not saved to node) */
     config?: Record<string, unknown>;
+    /** Input data collected from upstream ports for one-off execution */
+    input?: Record<string, DataPacket>;
     /** Output data from frontend execution (for isFrontend nodes) */
     output?: Record<string, DataPacket>;
 }
@@ -107,10 +109,9 @@ export const getNode = async (id: string): Promise<NodeView> => {
 export const getPortData = async (
     portId: string,
     direction: 'in' | 'out',
-    flowId?: string
+    flowId: string
 ): Promise<PortDataResponse> => {
-    _log(`> getPortData(${portId}, direction=${direction}, flowId=${flowId ?? 'n/a'})`);
-    if (!flowId) throw new Error('flowId is required to read port data after P3 legacy endpoint removal');
+    _log(`> getPortData(${portId}, direction=${direction}, flowId=${flowId})`);
 
     const { nodeId, portName } = parsePortRef(portId, direction);
     const flow = await getFlow(flowId);
@@ -299,6 +300,7 @@ export const runNode = async (
         const response = await api.post<{ runId: string; status: string }>(`/flows/${flowId}/nodes/${nodeId}/runs`, {
             triggerSource: 'MANUAL',
             config: body?.config,
+            input: body?.input,
             output: body?.output,
             async: options?.async,
         });

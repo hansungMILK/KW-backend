@@ -1,4 +1,7 @@
 import { settingsService } from './settings-service';
+import { traceService } from './trace-service';
+import { wsService } from './websocket-service';
+import { broadcastNodePortUpdated } from './ws-flow-events-service';
 import { PAID_OPENAI_DISABLED, isPaidOpenAIAllowed } from '../adapters/ai/paid-openai-guard';
 import { queue } from '../adapters/aws/queue';
 import { env } from '../config/env';
@@ -83,6 +86,101 @@ function buildInitialInputPayload(node: Record<string, unknown>): Record<string,
     return Object.keys(payload).length > 0 ? payload : null;
 }
 
+const isRecord = (input: unknown): input is Record<string, unknown> =>
+    input != null && typeof input === 'object' && !Array.isArray(input);
+
+function decodePacketValue(input: unknown): unknown {
+    if (!isRecord(input)) return input;
+
+    if ('value' in input) return input['value'];
+    if ('S' in input) return String(input['S'] ?? '');
+    if ('N' in input) return Number(input['N']);
+    if ('F' in input) return Number(input['F']);
+    if ('M' in input) {
+        const value = input['M'];
+        if (typeof value !== 'string') return value;
+        try {
+            return JSON.parse(value);
+        } catch {
+            return value;
+        }
+    }
+
+    return input;
+}
+
+function mergePortValue(payload: Record<string, unknown>, portName: string, rawValue: unknown): void {
+    const value = decodePacketValue(rawValue);
+    const key = portName || 'in';
+    payload[key] = value;
+
+    if ((key === 'in' || key === 'input') && isRecord(value)) {
+        Object.assign(payload, value);
+    }
+
+    if ((key === 'in' || key === 'input') && typeof value === 'string') {
+        payload['topic'] ??= value;
+        payload['text'] ??= value;
+        payload['content'] ??= value;
+    }
+}
+
+function buildSavedPortInputPayload(nodeId: string, nodes: Array<Record<string, unknown>>): Record<string, unknown> {
+    const payload: Record<string, unknown> = {};
+
+    for (const node of nodes) {
+        if (node['stereo'] !== 'port') continue;
+        if (node['parentId'] !== nodeId) continue;
+        if (node['direction'] !== 'in') continue;
+
+        const portName = typeof node['name'] === 'string' ? node['name'] : 'in';
+        const data = node['data$'] ?? (node['data'] as Record<string, unknown> | undefined)?.['data$'];
+        if (data !== undefined) mergePortValue(payload, portName, data);
+    }
+
+    return payload;
+}
+
+function buildRequestInputPayload(input: Record<string, unknown> | undefined): Record<string, unknown> {
+    const payload: Record<string, unknown> = {};
+    if (!input) return payload;
+
+    for (const [portName, rawValue] of Object.entries(input)) {
+        mergePortValue(payload, portName, rawValue);
+    }
+
+    return payload;
+}
+
+const hasSuppliedOutput = (
+    overrides?: SingleNodeRunOverrides
+): overrides is SingleNodeRunOverrides & {
+    output: Record<string, unknown>;
+} => !!overrides?.output && Object.keys(overrides.output).length > 0;
+
+function buildSingleNodeInputPayload(
+    targetNode: Record<string, unknown>,
+    allNodes: Array<Record<string, unknown>>,
+    overrides?: SingleNodeRunOverrides
+): Record<string, unknown> | null {
+    const targetNodeId = String(targetNode['id'] ?? targetNode['nodeId'] ?? '');
+    const payload: Record<string, unknown> = {
+        ...(buildInitialInputPayload(targetNode) ?? {}),
+        ...buildSavedPortInputPayload(targetNodeId, allNodes),
+        ...buildRequestInputPayload(overrides?.input),
+    };
+
+    if (overrides?.config && Object.keys(overrides.config).length > 0) {
+        Object.assign(payload, overrides.config);
+    }
+
+    if (overrides?.output && Object.keys(overrides.output).length > 0) {
+        payload['output'] = overrides.output;
+    }
+
+    return Object.keys(payload).length > 0 ? payload : null;
+}
+
 // ============================================================================
 // Block → Provider mapping (F-34)
 // ============================================================================
@@ -115,6 +213,12 @@ type RunServiceFailure = {
     maxCostUsd?: number;
 };
 
+type SingleNodeRunOverrides = {
+    config?: Record<string, unknown>;
+    input?: Record<string, unknown>;
+    output?: Record<string, unknown>;
+};
+
 const getProviderForBlock = (blockType: string): ApiKeyProvider | undefined => {
     return env.aiProvider === 'legacy' ? LEGACY_BLOCK_PROVIDER_MAP[blockType] : OPENAI_BLOCK_PROVIDER_MAP[blockType];
 };
@@ -123,6 +227,10 @@ const getBlockType = (node: Record<string, unknown>): string => {
     const data = node['data'] as Record<string, unknown> | undefined;
     return String(node['blockType'] ?? data?.['blockType'] ?? node['type'] ?? '');
 };
+
+const getNodeId = (node: Record<string, unknown>): string => String(node['id'] ?? node['nodeId'] ?? '');
+
+const isExecutableNode = (node: Record<string, unknown>): boolean => node['stereo'] !== 'port' && !!getNodeId(node);
 
 const getNodeConfig = (node: Record<string, unknown>): Record<string, unknown> => {
     const data = node['data'] as Record<string, unknown> | undefined;
@@ -269,17 +377,22 @@ export const runService = {
         if (!flow) return { ok: false, error: `Flow ${flowId} not found`, status: 404 };
 
         const snapshotNodes = (flow.nodes ?? []) as Array<Record<string, unknown>>;
+        const executableNodes = snapshotNodes.filter(isExecutableNode);
         const snapshotEdges = (flow.edges ?? []) as Array<Record<string, unknown>>;
 
-        const costLimitResult = checkRunCostLimit(snapshotNodes);
+        if (executableNodes.length === 0) {
+            return { ok: false, error: `Flow ${flowId} has no executable nodes`, status: 422 };
+        }
+
+        const costLimitResult = checkRunCostLimit(executableNodes);
         if (costLimitResult) return costLimitResult;
 
-        if (requiresPaidOpenAI(snapshotNodes) && !isPaidOpenAIAllowed()) {
+        if (requiresPaidOpenAI(executableNodes) && !isPaidOpenAIAllowed()) {
             return { ok: false, error: PAID_OPENAI_DISABLED, status: 422 };
         }
 
         // F-34: API key pre-flight check
-        const missingProviders = await checkMissingApiKeys(snapshotNodes);
+        const missingProviders = await checkMissingApiKeys(executableNodes);
         if (missingProviders.length > 0) {
             return {
                 ok: false,
@@ -307,12 +420,12 @@ export const runService = {
         await runRepo.putRun(run);
 
         // Build DAG
-        const nodeIds = snapshotNodes.map(n => (n['id'] ?? n['nodeId']) as string).filter(Boolean);
+        const nodeIds = executableNodes.map(getNodeId).filter(Boolean);
         const parentMap = buildParentMap(nodeIds, snapshotEdges);
 
         // Persist RunNode records (all PENDING)
-        for (const node of snapshotNodes) {
-            const nodeId = (node['id'] ?? node['nodeId']) as string;
+        for (const node of executableNodes) {
+            const nodeId = getNodeId(node);
             if (!nodeId) continue;
 
             const runNode: RunNode = {
@@ -353,13 +466,15 @@ export const runService = {
     async createSingleNodeRun(
         flowId: string,
         nodeId: string,
-        triggerSource = 'MANUAL'
+        triggerSource = 'MANUAL',
+        overrides?: SingleNodeRunOverrides
     ): Promise<{ ok: true; run: Run } | RunServiceFailure> {
         const flow = await flowRepo.get(flowId);
         if (!flow) return { ok: false, error: `Flow ${flowId} not found`, status: 404 };
 
         const snapshotNodes = (flow.nodes ?? []) as Array<Record<string, unknown>>;
-        const targetNode = snapshotNodes.find(n => (n['id'] ?? n['nodeId']) === nodeId);
+        const executableNodes = snapshotNodes.filter(isExecutableNode);
+        const targetNode = executableNodes.find(n => getNodeId(n) === nodeId);
         if (!targetNode) return { ok: false, error: `Node ${nodeId} not found in flow ${flowId}`, status: 404 };
 
         const costLimitResult = checkRunCostLimit([targetNode]);
@@ -405,10 +520,61 @@ export const runService = {
             progress: 0,
             retryCount: 0,
             parentNodeIds: [],
-            inputPayload: buildInitialInputPayload(targetNode),
+            inputPayload: buildSingleNodeInputPayload(targetNode, snapshotNodes, overrides),
             updatedAt: now,
         };
         await runRepo.putRunNode(runNode);
+
+        if (hasSuppliedOutput(overrides)) {
+            const outputPayload = { ...overrides.output, durationMs: 0 };
+            const startedAt = now;
+            const completedAt = new Date().toISOString();
+
+            await runRepo.updateRunStatus(runId, 'RUNNING', { startedAt });
+            await runRepo.updateRunNodeStatus(runId, nodeId, 'RUNNING', { startedAt, progress: 0 });
+            await runRepo.updateRunNodeStatus(runId, nodeId, 'COMPLETED', {
+                completedAt,
+                progress: 100,
+                outputPayload,
+            });
+            await runRepo.updateRunStatus(runId, 'COMPLETED', {
+                completedAt,
+                finalOutputSummary: { targetNodeId: nodeId, output: overrides.output },
+            });
+
+            try {
+                await wsService.broadcastToFlow(flowId, {
+                    type: 'node.completed',
+                    id: nodeId,
+                    runId,
+                    flowId,
+                    nodeId,
+                    status: 'COMPLETED',
+                    timestamp: Date.now(),
+                });
+                await broadcastNodePortUpdated(flowId, nodeId, overrides.output, { splitOutputPorts: true });
+                await wsService.broadcastToFlow(flowId, {
+                    type: 'run.completed',
+                    id: runId,
+                    runId,
+                    flowId,
+                    status: 'COMPLETED',
+                    timestamp: Date.now(),
+                });
+            } catch {
+                /* non-fatal — websocket delivery is best-effort */
+            }
+
+            try {
+                await traceService.record(runId, nodeId, 'STATUS', `Frontend node ${nodeId} completed`);
+                await traceService.record(runId, null, 'STATUS', 'Run completed');
+            } catch {
+                /* non-fatal */
+            }
+
+            const latest = await runRepo.getRun(runId);
+            return { ok: true, run: latest ?? { ...run, status: 'COMPLETED', completedAt } };
+        }
 
         await queue.send({
             type: 'EXECUTE_RUN',
