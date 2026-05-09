@@ -3,7 +3,6 @@ import { api, withRetry } from '@flows/web-core';
 import type {
     CreateFlowBody,
     DeleteFlowResult,
-    FlowDetail,
     FlowListParams,
     FlowListResult,
     FlowSummary,
@@ -46,10 +45,10 @@ export const createFlowV2 = async (body: CreateFlowBody): Promise<FlowSummary> =
  * Get flow by ID (complete state with nodes and edges)
  * GET /flows/{flowId}
  */
-export const getFlow = async (flowId: string): Promise<FlowDetail> => {
+export const getFlow = async (flowId: string): Promise<LoadFlowResult> => {
     if (!flowId) throw new Error('Flow ID is required');
     _log(`> getFlow(${flowId})`);
-    const response = await withRetry(() => api.get<FlowDetail>(`/flows/${flowId}`), 3, 'getFlow');
+    const response = await withRetry(() => api.get<LoadFlowResult>(`/flows/${flowId}/load`), 3, 'getFlow');
     return response.data;
 };
 

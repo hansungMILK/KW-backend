@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { flowsKeys } from './keys';
-import { createFlow, getFlow, updateFlow, updateFlowMetadata } from '../../api';
+import { createFlow, getFlow, saveFlow, updateFlowMetadata } from '../../api';
 
 import type {
     FlowView,
@@ -54,7 +54,7 @@ export const useSaveFlowMutation = () => {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: ({ id, body }: { id: string; body: SaveFlowBody }) => updateFlow(id, body),
+        mutationFn: ({ id, body }: { id: string; body: SaveFlowBody }) => saveFlow(id, body),
         onMutate: async ({ id, body }) => {
             // Cancel any outgoing refetches to prevent overwriting optimistic update
             await queryClient.cancelQueries({ queryKey: flowsKeys.snapshot(id) });
