@@ -142,11 +142,11 @@ export interface WorkflowState {
  * This type extends the API package's BlockDefinition to include the `isFrontend`
  * flag from the server response. When the API package is updated, this can be removed.
  *
- * @see /blocks/0/list API response
+ * @see /blocks API response
  *
  * Execution logic:
  * - `isFrontend: true` → Execute on client (use `execute` function)
- * - `isFrontend: false` → Execute on server (call POST /nodes/:id/run)
+ * - `isFrontend: false` → Execute on server via flow run APIs
  * - `isFrontend: undefined` → Fallback to legacy BACKEND_PROCESSOR_TYPES check
  */
 /**
@@ -161,7 +161,7 @@ export interface BlockDefinitionWithFrontend extends BlockDefinition {
      * or requires backend processing (server-side).
      *
      * - `true`: Client-side execution using the `execute` function
-     * - `false`: Server-side execution via POST /nodes/:id/run API
+     * - `false`: Server-side execution via flow run APIs
      * - `undefined`: Use legacy fallback (BACKEND_PROCESSOR_TYPES check)
      */
     isFrontend?: boolean;
@@ -317,7 +317,7 @@ export interface PortData {
 }
 
 /**
- * PortDataResponse - response from GET /nodes/:portId/port API
+ * PortDataResponse - port data derived from GET /flows/{flowId}
  *
  * @example
  * {
@@ -525,14 +525,12 @@ export interface SaveFlowView extends FlowView {
 }
 
 /**
- * UpsertNodeResult - response from node upsert endpoint
- * POST /nodes/:id/upsert?flowId=<flowId>
+ * UpsertNodeResult - compatibility result from flow-level canvas updates.
  *
  * Response uses SaveFlowView format (no $$ suffix):
  * - nodes: NodeData[] (created/updated nodes with server-assigned IDs)
  * - edges: EdgeData[] (created/updated edges with server-assigned IDs)
  *
- * @see eureka-flows-api POST /nodes/:id/upsert response
  */
 export interface UpsertNodeResult {
     nodes: NodeData[];
@@ -540,9 +538,9 @@ export interface UpsertNodeResult {
 }
 
 /**
- * LoadFlowPortData - port data from GET /flows/:id/load response
+ * LoadFlowPortData - port data from GET /flows/{flowId} response
  *
- * Unlike PortDataResponse (from GET /nodes/:portId/port), this type
+ * Unlike PortDataResponse, this type
  * has nullable data field because the server may return data: null
  * when port data hasn't been populated yet.
  *
@@ -759,10 +757,7 @@ export interface BlockSpec {
 // ============================================================================
 
 /**
- * S3ImageInfo - parsed S3 URL information
- * GET /nodes/0/image-info response
- *
- * @see eureka-flows-api v0.26.126
+ * S3ImageInfo - parsed S3 URL information for browser-side asset display.
  */
 export interface S3ImageInfo {
     s3Url: string;
@@ -778,10 +773,7 @@ export interface S3ImageInfo {
 }
 
 /**
- * BinaryImageResponse - response from image proxy endpoint
- * GET /nodes/0/image response
- *
- * @see eureka-flows-api v0.26.126
+ * BinaryImageResponse - compatibility shape for binary image payloads.
  */
 export interface BinaryImageResponse {
     $binary: true;

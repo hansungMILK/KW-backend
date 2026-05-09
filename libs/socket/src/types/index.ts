@@ -30,7 +30,7 @@ export interface WebSocketMessage {
 
 /**
  * Flow update notification from WebSocket
- * When received, client should reload the flow via GET /flows/:id/load
+ * When received, client should reload the flow via GET /flows/{flowId}
  *
  * @example
  * {

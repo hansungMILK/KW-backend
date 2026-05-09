@@ -1,6 +1,6 @@
 /**
  * Demo block definitions - hardcoded for offline demo mode
- * Based on /blocks/0/list API response
+ * Based on the /blocks API response
  */
 
 import type { BlockDefinitionWithFrontend } from '@flows/flows';

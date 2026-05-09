@@ -26,7 +26,7 @@ interface UseNodeSyncReturn {
 
     /**
      * Create a new node on backend with server-assigned ID
-     * POST /nodes/0/upsert?flowId=:flowId (id="0" for server to assign ID)
+     * Uses the spec flow update path through upsertFlow().
      *
      * @param tempId - Temporary ID used in UI (will be replaced by server ID)
      * @param node - Node data to create
@@ -80,7 +80,7 @@ interface UseNodeSyncReturn {
  * - Per-node debounce timers (changes to different nodes don't interfere)
  * - Automatic cleanup on unmount
  * - Server-assigned ID support with callback pattern
- * - Uses unified upsert endpoint (POST /nodes/:id/upsert)
+ * - Uses the spec flow update path through upsertFlow()
  *
  * Usage:
  * ```tsx
@@ -134,7 +134,7 @@ export const useNodeSync = ({ flowId }: UseNodeSyncOptions): UseNodeSyncReturn =
     /**
      * Sync node updates to backend with debouncing
      * Multiple rapid updates to the same node are merged and sent once
-     * Uses POST /nodes/:id/upsert endpoint
+     * Uses the spec flow update path through upsertFlow()
      */
     const syncNodeUpdate = useCallback(
         (nodeId: string, updates: Partial<NodeView>) => {
@@ -178,7 +178,6 @@ export const useNodeSync = ({ flowId }: UseNodeSyncOptions): UseNodeSyncReturn =
 
     /**
      * Create a new node on backend with server-assigned ID
-     * POST /nodes/0/upsert?flowId=:flowId
      *
      * Uses optimistic UI pattern:
      * 1. UI uses tempId immediately
@@ -286,7 +285,6 @@ export const useNodeSync = ({ flowId }: UseNodeSyncOptions): UseNodeSyncReturn =
     /**
      * @deprecated Use createNodeAsync instead for server-assigned IDs
      * Create a new node on backend via upsert (no debounce)
-     * POST /nodes/:id/upsert - creates if not exists, updates if exists
      */
     const createNodeOnBackend = useCallback(
         (node: { id: string; type: string; position: { x: number; y: number }; config: Record<string, unknown> }) => {

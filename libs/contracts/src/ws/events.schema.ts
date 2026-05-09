@@ -2,25 +2,49 @@ import { z } from 'zod';
 
 /**
  * WebSocket event schemas.
- * These define the `data` field inside the raw wrapper:
- *   { action: 'message', ts, data: <event>, channel }
+ *
+ * Server broadcasts flow/run/node/asset events as raw typed payloads:
+ *   { type: "run.started", runId, flowId, ... }
+ *
+ * The $default handler also sends system responses for direct client actions:
+ *   { type: "system", action: "pong", data: { timestamp }, ts }
  */
 
 // ============================================================================
-// Raw WebSocket message wrapper (server → client)
+// System messages (server → client direct responses)
 // ============================================================================
 
-export const RawWsMessageSchema = z.object({
-    action: z.enum(['message', 'info', 'ping', 'pong']),
+export const WsSystemPongSchema = z.object({
+    type: z.literal('system'),
+    action: z.literal('pong'),
     ts: z.string().optional(),
-    data: z.unknown().optional(),
-    channel: z.string().optional(),
+    data: z
+        .object({
+            timestamp: z.number(),
+        })
+        .passthrough(),
 });
 
-export type RawWsMessage = z.infer<typeof RawWsMessageSchema>;
+export const WsSystemInfoSchema = z.object({
+    type: z.literal('system'),
+    action: z.literal('info'),
+    ts: z.string().optional(),
+    data: z
+        .object({
+            id: z.string(),
+            connectionId: z.string(),
+        })
+        .passthrough(),
+});
+
+export const WsSystemMessageSchema = z.discriminatedUnion('action', [WsSystemPongSchema, WsSystemInfoSchema]);
+
+export type WsSystemPong = z.infer<typeof WsSystemPongSchema>;
+export type WsSystemInfo = z.infer<typeof WsSystemInfoSchema>;
+export type WsSystemMessage = z.infer<typeof WsSystemMessageSchema>;
 
 // ============================================================================
-// Flow update — client should reload via GET /flows/{id}/load
+// Flow update — client should reload via GET /flows/{flowId}
 // ============================================================================
 
 export const WsFlowUpdatedSchema = z.object({
@@ -168,6 +192,8 @@ export const WsProposalCreatedSchema = z.object({
     status: z.literal('PENDING'),
     blocks: z.array(z.object({ type: z.string(), label: z.string() })).optional(),
     estimatedCost: z.number().optional(),
+    estimatedCostUsd: z.number().optional(),
+    maxRunEstimatedCostUsd: z.number().optional(),
     description: z.string().optional(),
     approvalRequired: z.boolean(),
     timestamp: z.number(),
@@ -204,3 +230,19 @@ export const WsDataEventSchema = z.discriminatedUnion('type', [
 ]);
 
 export type WsDataEvent = z.infer<typeof WsDataEventSchema>;
+
+// ============================================================================
+// Server → client messages
+// ============================================================================
+
+export const WsServerMessageSchema = z.union([WsDataEventSchema, WsSystemMessageSchema]);
+
+/**
+ * @deprecated Use WsServerMessageSchema. Kept for older imports that still refer
+ * to "raw" WebSocket messages; server messages are no longer wrapped in
+ * { action, data, channel }.
+ */
+export const RawWsMessageSchema = WsServerMessageSchema;
+
+export type WsServerMessage = z.infer<typeof WsServerMessageSchema>;
+export type RawWsMessage = WsServerMessage;

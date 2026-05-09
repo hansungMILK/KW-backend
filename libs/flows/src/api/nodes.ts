@@ -1,179 +1,153 @@
-import { api, withRetry } from '@flows/web-core';
+import { API_URL, api } from '@flows/web-core';
+
+import { getFlow, upsertFlow } from './flows';
 
 import type {
-    ApiListResult,
     DataPacket,
+    EdgeData,
     NodeBody,
+    NodeData,
     NodeView,
     PortData,
     PortDataResponse,
     S3ImageInfo,
     UpsertNodeResult,
 } from '../types';
-import type { EdgeData } from '@lemoncloud/eureka-flows-api';
 
 const _log = console.log.bind(console, '[nodes-api]');
 
-// ============================================================================
-// Spec v2 API — /flows/{flowId}/nodes/* 명세 기준 경로
-// ============================================================================
+const createClientNodeId = (): string => `node_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-/**
- * List nodes by flow ID
- * GET /flows/{flowId}/nodes
- */
-export const listFlowNodes = async (flowId: string): Promise<NodeView[]> => {
-    _log(`> listFlowNodes(${flowId})`);
-    const response = await withRetry(
-        () => api.get<ApiListResult<NodeView>>(`/flows/${flowId}/nodes`),
-        3,
-        'listFlowNodes'
-    );
-    return response.data.list || [];
+const parsePortRef = (portId: string, direction: 'in' | 'out'): { nodeId: string; portName: string } => {
+    const [nodeId, rawPortName] = portId.split(':', 2);
+    const portName = rawPortName?.split('@')[0] || direction;
+    return { nodeId: nodeId || portId, portName };
+};
+
+const toDataPacket = (raw: unknown): PortDataResponse['data'] | null => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const data = raw as Record<string, unknown>;
+    const timestamp = typeof data['timestamp'] === 'number' ? data['timestamp'] : undefined;
+
+    if ('value' in data && typeof data['type'] === 'string') {
+        return { value: data['value'], type: data['type'], timestamp };
+    }
+    if ('S' in data) return { value: String(data['S'] ?? ''), type: 'text', timestamp };
+    if ('N' in data) return { value: Number(data['N']), type: 'number', timestamp };
+    if ('F' in data) return { value: Number(data['F']), type: 'number', timestamp };
+    if ('M' in data) {
+        const value = data['M'];
+        if (typeof value !== 'string') return { value, type: 'json', timestamp };
+        try {
+            return { value: JSON.parse(value), type: 'json', timestamp };
+        } catch {
+            return { value, type: 'json', timestamp };
+        }
+    }
+    return null;
 };
 
 /**
- * Create node under a flow
- * POST /flows/{flowId}/nodes
- */
-export const createFlowNode = async (flowId: string, body: NodeBody): Promise<NodeView> => {
-    _log(`> createFlowNode(${flowId})`, body);
-    if (!body.name) throw new Error('Node name is required');
-    if (!body.blockId) throw new Error('Node blockId is required');
-    const response = await api.post<NodeView>(`/flows/${flowId}/nodes`, body);
-    return response.data;
-};
-
-/**
- * Get node by ID within a flow
- * GET /flows/{flowId}/nodes/{nodeId}
- */
-export const getFlowNode = async (flowId: string, nodeId: string): Promise<NodeView> => {
-    _log(`> getFlowNode(${flowId}, ${nodeId})`);
-    const response = await api.get<NodeView>(`/flows/${flowId}/nodes/${nodeId}`);
-    return response.data;
-};
-
-/**
- * Update node within a flow
- * PUT /flows/{flowId}/nodes/{nodeId}
- */
-export const updateFlowNode = async (
-    flowId: string,
-    nodeId: string,
-    body: Partial<NodeView>
-): Promise<UpsertNodeResult> => {
-    _log(`> updateFlowNode(${flowId}, ${nodeId})`, body);
-    const response = await api.put<UpsertNodeResult>(`/flows/${flowId}/nodes/${nodeId}`, body);
-    return response.data;
-};
-
-/**
- * Delete node from a flow
- * DELETE /flows/{flowId}/nodes/{nodeId}
- */
-export const deleteFlowNode = async (flowId: string, nodeId: string): Promise<void> => {
-    _log(`> deleteFlowNode(${flowId}, ${nodeId})`);
-    await api.delete(`/flows/${flowId}/nodes/${nodeId}`);
-};
-
-/**
- * Get port data for a node
- * GET /flows/{flowId}/nodes/{nodeId}/port?direction=in|out
- */
-export const getFlowNodePort = async (
-    flowId: string,
-    nodeId: string,
-    direction: 'in' | 'out'
-): Promise<PortDataResponse> => {
-    _log(`> getFlowNodePort(${flowId}, ${nodeId}, direction=${direction})`);
-    const response = await api.get<PortDataResponse>(`/flows/${flowId}/nodes/${nodeId}/port`, {
-        params: { direction },
-    });
-    return response.data;
-};
-
-/**
- * Run a single node within a flow
- * POST /flows/{flowId}/nodes/{nodeId}/runs
- */
-export const runFlowNode = async (
-    flowId: string,
-    nodeId: string,
-    body?: RunNodeBody,
-    options?: RunNodeOptions
-): Promise<NodeView> => {
-    _log(`> runFlowNode(${flowId}, ${nodeId})`, { body, options });
-    const queryParams: string[] = [];
-    if (options?.async) queryParams.push('async');
-    if (options?.force) queryParams.push('force');
-    if (options?.propagate === false) queryParams.push('propagate=0');
-    const params = queryParams.length > 0 ? `?${queryParams.join('&')}` : '';
-    const response = await api.post<NodeView>(`/flows/${flowId}/nodes/${nodeId}/runs${params}`, body || {});
-    return response.data;
-};
-
-/**
- * Body for POST /nodes/:id/run
- * @see eureka-flows-api #0.26.212
+ * Body for POST /flows/{flowId}/nodes/{nodeId}/runs.
  */
 export interface RunNodeBody {
     /** Config to override during execution (not saved to node) */
-    config?: Record<string, string>;
+    config?: Record<string, unknown>;
     /** Output data from frontend execution (for isFrontend nodes) */
     output?: Record<string, DataPacket>;
 }
 
-// ============================================================================
-// Legacy API — Phase 3에서 제거 예정 (프론트 캔버스가 아직 의존 중)
-// ============================================================================
+const getAssetBaseUrl = (): string => {
+    const runtimeWindow =
+        typeof window !== 'undefined' ? (window as typeof window & { VITE_ASSET_BASE_URL?: string }) : undefined;
+    const configured = runtimeWindow?.VITE_ASSET_BASE_URL;
+    if (configured) return configured.replace(/\/+$/, '');
+
+    const apiUrl = API_URL.replace(/\/+$/, '');
+    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(apiUrl)) {
+        return `${apiUrl}/_local-assets`;
+    }
+
+    throw new Error('VITE_ASSET_BASE_URL is required to display legacy s3:// image URLs');
+};
+
+const keyFromS3Url = (s3Url: string): string => s3Url.replace(/^s3:\/\/[^/]+\//, '');
+
+const encodeAssetPath = (key: string): string => key.split('/').map(encodeURIComponent).join('/');
 
 /**
+ * @deprecated Use GET /flows/{flowId} nodes array instead. The legacy endpoint was removed in P3.
  * List nodes by flow ID
- * POST /nodes/0/list
- *
- * @deprecated Use listFlowNodes() — GET /flows/{flowId}/nodes
  */
 export const listNodes = async (flowId: string): Promise<NodeView[]> => {
     _log(`> listNodes(${flowId})`);
-    const response = await withRetry(
-        () => api.post<ApiListResult<NodeView>>('/nodes/0/list', { flowId }),
-        3,
-        'listNodes'
-    );
-    return response.data.list || [];
+    const flow = await getFlow(flowId);
+    return (flow.nodes ?? []) as unknown as NodeView[];
 };
 
 /**
  * Get node by ID
- * GET /nodes/:id
- *
- * @deprecated Use getFlowNode() — GET /flows/{flowId}/nodes/{nodeId}
+ * Requires flow context after P3 legacy endpoint removal.
  */
 export const getNode = async (id: string): Promise<NodeView> => {
     _log(`> getNode(${id})`);
-    const response = await api.get<NodeView>(`/nodes/${id}`);
-    return response.data;
+    throw new Error(`getNode(${id}) requires flow context after P3 legacy endpoint removal`);
 };
 
 /**
  * Get port data by port ID
- * GET /nodes/:portId/port?direction=in|out
  *
- * @deprecated Use getFlowNodePort() — GET /flows/{flowId}/nodes/{nodeId}/port
+ * Used for real-time port data synchronization via WebSocket.
+ * When a port update notification is received, this fetches the latest port data.
+ *
+ * @param portId - Port ID (e.g., "1000637:in" or "1000637:out")
+ * @param direction - Port direction ('in' or 'out')
+ * @returns PortDataResponse with port data
  */
-export const getPortData = async (portId: string, direction: 'in' | 'out'): Promise<PortDataResponse> => {
-    _log(`> getPortData(${portId}, direction=${direction})`);
-    const response = await api.get<PortDataResponse>(`/nodes/${portId}/port`, { params: { direction } });
-    return response.data;
+export const getPortData = async (
+    portId: string,
+    direction: 'in' | 'out',
+    flowId?: string
+): Promise<PortDataResponse> => {
+    _log(`> getPortData(${portId}, direction=${direction}, flowId=${flowId ?? 'n/a'})`);
+    if (!flowId) throw new Error('flowId is required to read port data after P3 legacy endpoint removal');
+
+    const { nodeId, portName } = parsePortRef(portId, direction);
+    const flow = await getFlow(flowId);
+    const port = flow.ports?.find(item => item.id === portId || (item.nodeId === nodeId && item.portId === portName));
+    if (port?.data) {
+        return { id: port.id, nodeId: port.nodeId, portId: port.portId, direction, data: port.data };
+    }
+
+    const portNode = (flow.nodes ?? []).find(node => {
+        const record = node as unknown as Record<string, unknown>;
+        return (
+            record['stereo'] === 'port' &&
+            record['parentId'] === nodeId &&
+            record['direction'] === direction &&
+            record['name'] === portName
+        );
+    }) as unknown as Record<string, unknown> | undefined;
+
+    const data = toDataPacket(
+        portNode?.['data$'] ?? (portNode?.['data'] as Record<string, unknown> | undefined)?.['data$']
+    );
+    if (!data) throw new Error(`Port data not found: ${portId}`);
+
+    return {
+        id: portId,
+        nodeId,
+        portId: portName,
+        direction,
+        data,
+    };
 };
 
 /**
+ * @deprecated Use upsertFlow() from flows.ts instead. The legacy endpoint was removed in P3.
  * Create new node
- * POST /nodes/0
  *
  * Required fields: name, flowId, blockId
- * @deprecated Use createFlowNode() — POST /flows/{flowId}/nodes
  */
 export const createNode = async (body: NodeBody): Promise<NodeView> => {
     _log('> createNode()', body);
@@ -182,38 +156,44 @@ export const createNode = async (body: NodeBody): Promise<NodeView> => {
     if (!body.flowId) throw new Error('Node flowId is required');
     if (!body.blockId) throw new Error('Node blockId is required');
 
-    const response = await api.post<NodeView>('/nodes/0', body);
-    return response.data;
+    const flowId = body.flowId;
+    const node = { id: createClientNodeId(), ...(body as unknown as Partial<NodeView>) } as unknown as NodeData;
+    const result = await upsertFlow(flowId, { nodes: [node], edges: [] });
+    return (result.nodes?.find(item => item.id === node.id) ?? node) as unknown as NodeView;
 };
 
 /**
+ * @deprecated Use upsertFlow() from flows.ts for canvas saves. The legacy endpoint was removed in P3.
  * Upsert node (create or update)
- * POST /nodes/:id/upsert?flowId=<flowId>
  *
- * @deprecated Use updateFlowNode() — PUT /flows/{flowId}/nodes/{nodeId}
+ * - id="0" → create new node with a client-generated ID
+ * - id=<nodeId> → update existing node
+ *
+ * @param id - Node ID or "0" for auto-assign
+ * @param flowId - Flow ID (required)
+ * @param body - Node data: { config, output, blockId, position, ... }
+ * @returns NodeData with server-assigned or existing ID
  */
 export const upsertNode = async (id: string, flowId: string, body: Partial<NodeView>): Promise<UpsertNodeResult> => {
     _log(`> upsertNode(${id}, flowId=${flowId})`, body);
-    // Send body directly - server expects { config?, output?, ...nodeFields }
-    // NOT wrapped in { nodes: [...] } format
-    const response = await api.post<UpsertNodeResult>(`/nodes/${id}/upsert`, body, { params: { flowId } });
-    return response.data;
+    const nodeId = id === '0' ? createClientNodeId() : id;
+    const node = { id: nodeId, ...(body as unknown as Partial<NodeData>) } as NodeData;
+    const result = await upsertFlow(flowId, { nodes: [node], edges: [] });
+    return {
+        nodes: [node, ...(result.nodes ?? []).filter(item => item.id !== nodeId)],
+        edges: result.edges,
+    };
 };
 
 /**
  * @deprecated Use upsertFlow() from flows.ts instead for edge operations
- * Edge creation should use POST /flows/:id/upsert with { nodes: [], edges: [...] }
- *
- * This function incorrectly calls /nodes/0/upsert which only supports { config, output } body format.
+ * Edge creation should use PUT /flows/{flowId} with the full canvas graph.
  */
 export const upsertEdge = async (flowId: string, edge: EdgeData): Promise<UpsertNodeResult> => {
     console.warn('[DEPRECATED] upsertEdge() is deprecated. Use upsertFlow() for edge operations.');
     _log(`> upsertEdge(flowId=${flowId})`, edge);
-    // This is incorrect - /nodes/:id/upsert only supports { config, output } format
-    // Edge operations should use POST /flows/:id/upsert with { nodes: [], edges: [...] }
-    const body = { edges: [edge] };
-    const response = await api.post<UpsertNodeResult>('/nodes/0/upsert', body, { params: { flowId } });
-    return response.data;
+    const result = await upsertFlow(flowId, { nodes: [], edges: [edge] });
+    return { nodes: result.nodes ?? [], edges: result.edges ?? [] };
 };
 
 /**
@@ -230,7 +210,6 @@ export interface PortNodeBody {
 
 /**
  * Upsert port node (save input/output port data)
- * POST /nodes/0/upsert?flowId=<flowId>
  *
  * Used to save port data before node execution.
  * Server's hydrateInputs() reads from these port nodes.
@@ -241,9 +220,12 @@ export interface PortNodeBody {
  */
 export const upsertPortNode = async (flowId: string, body: PortNodeBody): Promise<UpsertNodeResult> => {
     _log(`> upsertPortNode(flowId=${flowId})`, body);
-    const requestBody = { nodes: [body] };
-    const response = await api.post<UpsertNodeResult>('/nodes/0/upsert', requestBody, { params: { flowId } });
-    return response.data;
+    const node = {
+        id: `port_${body.parentId}_${body.direction}_${body.name}`,
+        ...body,
+    } as unknown as NodeData;
+    const result = await upsertFlow(flowId, { nodes: [node], edges: [] });
+    return { nodes: [node], edges: result.edges ?? [] };
 };
 
 /**
@@ -271,13 +253,11 @@ export const toPortData = (packet: DataPacket): PortData => {
 
 /**
  * Delete node
- * DELETE /nodes/:id
- *
- * @deprecated Use deleteFlowNode() — DELETE /flows/{flowId}/nodes/{nodeId}
  */
-export const deleteNode = async (id: string): Promise<void> => {
-    _log(`> deleteNode(${id})`);
-    await api.delete(`/nodes/${id}`);
+export const deleteNode = async (id: string, flowId?: string): Promise<void> => {
+    _log(`> deleteNode(${id}, flowId=${flowId ?? 'n/a'})`);
+    if (!flowId) throw new Error('flowId is required after P3 legacy /nodes endpoint removal');
+    await upsertFlow(flowId, { nodes: [{ id: `#${id}` } as NodeData], edges: [] });
 };
 
 /**
@@ -294,22 +274,35 @@ export interface RunNodeOptions {
 
 /**
  * Run node execution
- * POST /nodes/:nodeId/run
+ * POST /flows/{flowId}/nodes/{nodeId}/runs
  *
- * @deprecated Use runFlowNode() — POST /flows/{flowId}/nodes/{nodeId}/runs
+ * Executes the node's processor with current inputs and config.
+ * Supports async execution via SQS queue.
+ *
+ * @param nodeId - Node ID to execute
+ * @param body - Request body
+ * @param body.config - Config to override (not saved)
+ * @param body.output - Output data from frontend execution (for isFrontend nodes)
+ * @param options - Execution options
+ * @param options.async - If true, queues execution and returns immediately
+ * @param options.force - If true, forces execution even for isFrontend nodes
+ * @param options.propagate - If true, propagates to downstream nodes (default: true)
  */
-export const runNode = async (nodeId: string, body?: RunNodeBody, options?: RunNodeOptions): Promise<NodeView> => {
-    _log(`> runNode(${nodeId})`, { body, options });
+export const runNode = async (
+    flowId: string,
+    nodeId: string,
+    body?: RunNodeBody,
+    options?: RunNodeOptions
+): Promise<NodeView> => {
+    _log(`> runNode(${flowId}, ${nodeId})`, { body, options });
     try {
-        // Build query params
-        const queryParams: string[] = [];
-        if (options?.async) queryParams.push('async');
-        if (options?.force) queryParams.push('force');
-        if (options?.propagate === false) queryParams.push('propagate=0');
-
-        const params = queryParams.length > 0 ? `?${queryParams.join('&')}` : '';
-        const response = await api.post<NodeView>(`/nodes/${nodeId}/run${params}`, body || {});
-        return response.data;
+        const response = await api.post<{ runId: string; status: string }>(`/flows/${flowId}/nodes/${nodeId}/runs`, {
+            triggerSource: 'MANUAL',
+            config: body?.config,
+            output: body?.output,
+            async: options?.async,
+        });
+        return { id: nodeId, state: 'RUNNING', status: response.data.status } as unknown as NodeView;
     } catch (err) {
         _log('> runNode error:', err);
         throw err;
@@ -317,39 +310,23 @@ export const runNode = async (nodeId: string, body?: RunNodeBody, options?: RunN
 };
 
 /**
- * Get image from S3 URL
- * GET /nodes/0/image?s3Url=...
+ * Resolve an S3 URL to the current asset public URL.
  *
- * Fetches image binary from S3 via proxy endpoint.
- * Returns base64 data URL for direct use in <img> src.
- *
- * @see eureka-flows-api v0.26.126
  * @param s3Url - S3 reference (s3://bucket/key)
- * @returns Data URL (data:image/...;base64,...)
+ * @returns Public URL for browser display
  */
 export const getImageFromS3 = async (s3Url: string): Promise<string> => {
     if (!s3Url || !s3Url.startsWith('s3://')) {
         throw new Error('Invalid S3 URL');
     }
     _log(`> getImageFromS3(${s3Url})`);
-
-    const response = await api.get<{ body: string; headers: { 'Content-Type': string } }>('/nodes/0/image', {
-        params: { s3Url },
-    });
-
-    const contentType = response.data.headers?.['Content-Type'] || 'image/png';
-    const base64Body = response.data.body;
-
-    return `data:${contentType};base64,${base64Body}`;
+    return `${getAssetBaseUrl()}/${encodeAssetPath(keyFromS3Url(s3Url))}`;
 };
 
 /**
- * Get S3 image info (metadata only)
- * GET /nodes/0/image-info?s3Url=...
+ * Get S3 image info (metadata only) without calling removed legacy /nodes endpoints.
+ * Size/hash are unknown on the client; the UI uses this only for safe parsing.
  *
- * Returns parsed S3 URL information without fetching the image.
- *
- * @see eureka-flows-api v0.26.126
  * @param s3Url - S3 reference (s3://bucket/key)
  * @returns S3ImageInfo with parsed URL data
  */
@@ -358,16 +335,24 @@ export const getImageInfo = async (s3Url: string): Promise<S3ImageInfo> => {
         throw new Error('Invalid S3 URL');
     }
     _log(`> getImageInfo(${s3Url})`);
-
-    const response = await api.get<S3ImageInfo>('/nodes/0/image-info', {
-        params: { s3Url },
-    });
-
-    return response.data;
+    const key = keyFromS3Url(s3Url);
+    const ext = key.includes('.') ? key.slice(key.lastIndexOf('.') + 1).toLowerCase() : '';
+    return {
+        s3Url,
+        parsed: {
+            bucket: s3Url.replace(/^s3:\/\//, '').split('/')[0] ?? '',
+            key,
+            md5: '',
+            sizeKb: 0,
+            ext,
+            prefix: key.includes('/') ? key.slice(0, key.lastIndexOf('/')) : undefined,
+        },
+        allowed: true,
+    };
 };
 
 /**
- * Body for POST /nodes/:id/touch
+ * Body for development-only canvas touch updates.
  * Debug/test endpoint to update node metadata
  */
 export interface TouchNodeBody {
@@ -386,7 +371,6 @@ export interface TouchNodeBody {
 
 /**
  * Touch node (debug/test endpoint)
- * POST /nodes/:id/touch
  *
  * Updates node metadata for testing purposes.
  * Only available in development environment.
@@ -395,8 +379,27 @@ export interface TouchNodeBody {
  * @param body - Touch body with optional fields
  * @returns Updated NodeView
  */
-export const touchNode = async (nodeId: string, body: TouchNodeBody): Promise<NodeView> => {
-    _log(`> touchNode(${nodeId})`, body);
-    const response = await api.post<NodeView>(`/nodes/${nodeId}/touch`, body);
-    return response.data;
+export const touchNode = async (
+    flowId: string,
+    nodeId: string,
+    body: TouchNodeBody,
+    options: { target?: 'node' | 'edge' } = {}
+): Promise<NodeView> => {
+    _log(`> touchNode(flowId=${flowId}, nodeId=${nodeId})`, body);
+    if (!flowId) throw new Error('flowId is required to touch canvas data after P3 legacy endpoint removal');
+
+    if (options.target === 'edge') {
+        const edgePatch: EdgeData = {
+            id: nodeId,
+            ...('position' in body && body.position ? { position: body.position } : {}),
+            ...('disabled' in body && body.disabled !== undefined ? { disabled: body.disabled } : {}),
+            ...('name' in body && body.name ? { label: body.name } : {}),
+        } as EdgeData;
+        await upsertFlow(flowId, { nodes: [], edges: [edgePatch] });
+        return edgePatch as unknown as NodeView;
+    }
+
+    const nodePatch: NodeData = { id: nodeId, ...(body as Partial<NodeData>) } as NodeData;
+    const result = await upsertFlow(flowId, { nodes: [nodePatch], edges: [] });
+    return (result.nodes?.find(item => item.id === nodeId) ?? nodePatch) as unknown as NodeView;
 };

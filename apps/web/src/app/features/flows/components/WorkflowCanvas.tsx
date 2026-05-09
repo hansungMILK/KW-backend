@@ -1208,7 +1208,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                 },
                 updateNodeFromServer: (nodeId: string, serverData: Partial<NodeData>) => {
                     // Merge server data with existing node, preserving UI-specific fields
-                    // Note: Server returns NodeView format from GET /nodes/:id
+                    // Note: Server returns NodeView-compatible shape through flow-level APIs.
                     // - config$: ConfigItem[] (array) -> config: Record<string, string> (object)
                     // - inputData$$: DataPacketItem[] (array) -> inputData: Record<string, DataPacket> (object)
                     // - outputData$$: DataPacketItem[] (array) -> outputData: Record<string, DataPacket> (object)

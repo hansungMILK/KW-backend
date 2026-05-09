@@ -3,7 +3,7 @@
  *
  * Two response shapes are produced from the same source:
  * 1. Legacy `{ list: [{ $definition, isFrontend, stereo, isRunnable }] }`
- *    — consumed by `GET /blocks/0/list` (existing frontend).
+ *    — retained as an internal compatibility shape for frontend adapters.
  * 2. Spec `{ items: [{ blockType, name, description, category, ... }] }`
  *    — consumed by `GET /blocks` and `GET /blocks/{blockType}` (new spec).
  *

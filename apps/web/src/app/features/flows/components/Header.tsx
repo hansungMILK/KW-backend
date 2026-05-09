@@ -49,6 +49,7 @@ export interface SocketStateProps {
 }
 
 export interface SaveStateProps {
+    isSaving?: boolean;
     lastSavedAt: Date | null;
     isAutoSaveEnabled: boolean;
     onToggleAutoSave: () => void;

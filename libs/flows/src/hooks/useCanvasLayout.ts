@@ -5,7 +5,7 @@ import { useCanvasStore } from '../stores';
 import { useFlowsStore } from '../stores/useFlowsStore';
 import { DEFAULT_TEXTAREA_HEIGHT, getNodeHeight } from '../utils/nodeHeight';
 
-import type { BlockDefinition, NodeData } from '@lemoncloud/eureka-flows-api';
+import type { BlockDefinition, NodeData } from '../types';
 
 /** Layout configuration for auto-layout algorithm */
 export const LAYOUT_CONFIG = {

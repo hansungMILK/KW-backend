@@ -25,6 +25,7 @@ import {
 import {
     DEFAULT_TEXTAREA_HEIGHT,
     clampHeight,
+    compressImageIfNeeded,
     downloadImage,
     getEffectiveState,
     getNodeHeight,
@@ -45,6 +46,7 @@ import { tryParseJson } from '../utils';
 import type { BlockDefinition, ConfigField, Connection, DataPacket, NodeData } from '@flows/flows';
 
 interface DetailPanelProps {
+    flowId?: string | null;
     selectedNode: NodeData | null;
     selectedConnection: Connection | null;
     nodes: NodeData[];
@@ -64,6 +66,15 @@ interface DetailPanelProps {
 }
 
 type ConfigControlType = 'text' | 'number' | 'boolean' | 'select' | 'file' | 'workflow-selector' | 'separator';
+
+const toFormValue = (value: unknown): string | number | readonly string[] | undefined => {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'string' || typeof value === 'number') return value;
+    if (Array.isArray(value) && value.every(item => typeof item === 'string')) return value;
+    return String(value);
+};
+
+const toDisplayText = (value: unknown): string => (value === null || value === undefined ? '' : String(value));
 
 const ImagePreview = ({ src, t }: { src: string; t: (key: string) => string }) => {
     const [dims, setDims] = useState<string | null>(null);
@@ -393,6 +404,7 @@ const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
 };
 
 export const DetailPanel: React.FC<DetailPanelProps> = ({
+    flowId,
     selectedNode,
     selectedConnection,
     nodes,
@@ -524,6 +536,8 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
 
     const renderConfigInput = (node: NodeData, field: ConfigField, definition: BlockDefinition) => {
         const value = node.config?.[field.key] ?? definition.defaultConfig?.[field.key];
+        const formValue = toFormValue(value);
+        const stringValue = toDisplayText(value);
 
         const handleChange = (val: unknown) => onConfigChange(node.id, field.key, val);
 
@@ -533,7 +547,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                     <input
                         type="text"
                         className="w-full bg-background/80 border border-border/60 rounded-md px-2.5 py-2 text-xs text-foreground focus:border-primary/60 outline-none transition-colors font-mono"
-                        value={value || ''}
+                        value={formValue}
                         onChange={e => handleChange(e.target.value)}
                         onKeyDown={e => e.stopPropagation()}
                         placeholder={field.placeholder}
@@ -541,7 +555,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                 ) : (
                     <textarea
                         className="w-full bg-background/80 border border-border/60 rounded-md px-2.5 py-2 text-xs text-foreground focus:border-primary/60 outline-none transition-colors resize-y min-h-[56px] font-mono"
-                        value={value || ''}
+                        value={formValue}
                         onChange={e => handleChange(e.target.value)}
                         onKeyDown={e => e.stopPropagation()}
                         placeholder={field.placeholder}
@@ -552,7 +566,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                     <input
                         type="number"
                         className="w-full bg-background/80 border border-border/60 rounded-md px-2.5 py-2 text-xs text-foreground focus:border-primary/60 outline-none transition-colors font-mono"
-                        value={value || ''}
+                        value={formValue}
                         onChange={e => handleChange(e.target.value)}
                         onKeyDown={e => e.stopPropagation()}
                         placeholder={field.placeholder}
@@ -584,7 +598,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                 return (
                     <select
                         className="w-full bg-background/80 border border-border/60 rounded-md px-2.5 py-2 text-xs text-foreground focus:border-primary/60 outline-none transition-colors"
-                        value={value}
+                        value={formValue}
                         onChange={e => handleChange(e.target.value)}
                     >
                         {field.options?.map(opt => (
@@ -597,9 +611,11 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             case 'file':
                 return (
                     <div className="flex flex-col gap-2">
-                        {value && <FileImagePreview src={value} onRemove={() => handleChange('')} t={t} />}
+                        {stringValue && <FileImagePreview src={stringValue} onRemove={() => handleChange('')} t={t} />}
                         <label className="cursor-pointer bg-muted/50 hover:bg-muted border border-border/60 text-foreground/80 text-xs py-2 px-3 rounded-md text-center transition-colors">
-                            <span>{value ? t('flows:detailPanel.changeFile') : t('flows:detailPanel.uploadFile')}</span>
+                            <span>
+                                {stringValue ? t('flows:detailPanel.changeFile') : t('flows:detailPanel.uploadFile')}
+                            </span>
                             <input
                                 type="file"
                                 accept="image/*"
@@ -653,7 +669,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
         const isAuto = selectedNode.autoExecutionEnabled !== false;
         // Use def.type since loaded nodes may have blockId as type
         const isComponent = def.type === 'workflow-component';
-        const subFlowId = isComponent ? selectedNode.config?.selectedFlowId : null;
+        const subFlowId = isComponent ? toDisplayText(selectedNode.config?.selectedFlowId) : '';
 
         const configSchema =
             def.configSchema ||
@@ -883,7 +899,9 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                                                     </span>
                                                     {incomingConn && (
                                                         <button
-                                                            onClick={() => onSelectConnection(incomingConn.id)}
+                                                            onClick={() =>
+                                                                incomingConn.id && onSelectConnection(incomingConn.id)
+                                                            }
                                                             className="text-[9px] bg-warning/20 hover:bg-warning/30 text-warning px-1.5 py-0.5 rounded flex items-center gap-1 transition-colors"
                                                             title={t('flows:detailPanel.goToConnection')}
                                                         >
@@ -946,7 +964,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                                                             {outgoingConns.map((c, i) => (
                                                                 <button
                                                                     key={c.id}
-                                                                    onClick={() => onSelectConnection(c.id)}
+                                                                    onClick={() => c.id && onSelectConnection(c.id)}
                                                                     className="text-[9px] bg-warning/20 hover:bg-warning/30 text-warning px-1.5 py-0.5 rounded flex items-center gap-1 transition-colors"
                                                                     title={`${t('flows:detailPanel.goToConnection')} ${i + 1}`}
                                                                 >
@@ -1015,6 +1033,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                     <TouchDialog
                         open={isTouchDialogOpen}
                         onOpenChange={setIsTouchDialogOpen}
+                        flowId={flowId}
                         nodeId={selectedNode.id}
                         initialNode={selectedNode}
                         onSuccess={msg => onShowNotification?.(msg, 'success')}
@@ -1027,6 +1046,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                     <TouchDialog
                         open={!!touchPortId}
                         onOpenChange={open => !open && setTouchPortId(null)}
+                        flowId={flowId}
                         nodeId={touchPortId}
                         onSuccess={msg => {
                             onShowNotification?.(msg, 'success');
@@ -1099,7 +1119,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                                 {sourceDef?.label || t('flows:detailPanel.unknown')}
                             </div>
                             <div className="text-[10px] text-muted-foreground/70 font-mono mt-0.5 bg-muted/50 px-2 py-0.5 rounded">
-                                {sourcePort?.label}
+                                {toDisplayText(sourcePort?.label)}
                             </div>
                         </div>
 
@@ -1128,7 +1148,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                                 {targetDef?.label || t('flows:detailPanel.unknown')}
                             </div>
                             <div className="text-[10px] text-muted-foreground/70 font-mono mt-0.5 bg-muted/50 px-2 py-0.5 rounded">
-                                {targetPort?.label}
+                                {toDisplayText(targetPort?.label)}
                             </div>
                         </div>
                     </div>
@@ -1145,7 +1165,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                         </button>
                     )}
                     <button
-                        onClick={() => onDeleteConnection(selectedConnection.id)}
+                        onClick={() => selectedConnection.id && onDeleteConnection(selectedConnection.id)}
                         className="flex-1 bg-destructive/10 border border-destructive/30 hover:bg-destructive/20 text-destructive text-xs py-2.5 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2"
                     >
                         <Trash2 className="w-3.5 h-3.5" /> {t('flows:detailPanel.deleteConnection')}
@@ -1157,7 +1177,8 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                     <TouchDialog
                         open={isTouchDialogOpen}
                         onOpenChange={setIsTouchDialogOpen}
-                        nodeId={selectedConnection.id}
+                        flowId={flowId}
+                        nodeId={selectedConnection.id ?? ''}
                         initialConnection={selectedConnection}
                         onSuccess={msg => onShowNotification?.(msg, 'success')}
                         onError={msg => onShowNotification?.(msg, 'error')}
