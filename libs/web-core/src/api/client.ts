@@ -65,8 +65,12 @@ const hasPermissionError = (data: unknown): boolean => {
  *
  * Auth Error Scenarios:
  * 1. HTTP 403 → Clear API key (invalid/expired key)
- * 2. ERR_NETWORK/ERR_FAILED with API key → Clear API key (CORS-blocked 403)
- * 3. shouldLogout from classifyError → Clear API key
+ * 2. shouldLogout from classifyError → Clear API key
+ *
+ * NOTE: ERR_NETWORK/ERR_FAILED are intentionally NOT treated as auth errors.
+ * These codes appear for any network failure (server down, connectivity issues),
+ * not just CORS-blocked 403s. Clearing auth on network errors causes false
+ * "auth expired" popups when the backend is simply unreachable.
  */
 apiClient.interceptors.response.use(
     (response: AxiosResponse) => {
@@ -78,11 +82,9 @@ apiClient.interceptors.response.use(
     },
     (error: AxiosError) => {
         const status = error.response?.status;
-        const hasApiKey = !!useWebCoreStore.getState().apiKey;
-        const isCorsBlocked403 = !status && hasApiKey && (error.code === 'ERR_NETWORK' || error.code === 'ERR_FAILED');
 
-        // Handle auth errors: HTTP 403, CORS-blocked 403, or shouldLogout
-        if (status === 403 || isCorsBlocked403 || classifyError(error).shouldLogout) {
+        // Handle auth errors: only on actual HTTP 403 or explicit shouldLogout signal
+        if (status === 403 || classifyError(error).shouldLogout) {
             handleAuthError();
         }
 

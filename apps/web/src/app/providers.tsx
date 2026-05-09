@@ -134,7 +134,7 @@ export const Providers = ({ children }: ProvidersProps) => {
                 <I18nextProvider i18n={i18n}>
                     <HelmetProvider>
                         <QueryClientProvider client={queryClient}>
-                            <ThemeProvider defaultTheme="dark" storageKey="flows-theme">
+                            <ThemeProvider defaultTheme="system" storageKey="flows-theme">
                                 <ApiKeyGate>
                                     <AppContent>{children}</AppContent>
                                 </ApiKeyGate>

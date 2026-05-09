@@ -2,11 +2,20 @@ import { api, withRetry } from '@flows/web-core';
 
 import { EXECUTE_FUNCTIONS } from './execute-functions';
 
-import type { BlockDefinition, BlockDefinitionWithFrontend, BlockStereo, PortDefinition } from '../types';
-import type { BlockView } from '@lemoncloud/eureka-flows-api';
+import type { BlockDefinitionWithFrontend, BlockSpec, BlockStereo } from '../types';
+import type { BlockView, DataPacket, ListResult } from '@lemoncloud/eureka-flows-api';
 
 const _log = console.log.bind(console, '[blocks-api]');
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Create a DataPacket
+ */
+export const createPacket = (value: unknown, type: 'text' | 'image' | 'number'): DataPacket => ({
+    value,
+    type,
+    timestamp: Date.now(),
+});
 
 /** @deprecated Fallback for servers without isFrontend flag. Remove when server is updated. */
 const LEGACY_BACKEND_PROCESSOR_TYPES = [
@@ -15,37 +24,6 @@ const LEGACY_BACKEND_PROCESSOR_TYPES = [
     'single-image-generator',
     'title-generator',
 ] as const;
-
-const SPEC_BACKEND_PROCESSOR_TYPES = [
-    'search',
-    'content',
-    'data',
-    'analysis',
-    'media-image',
-    'media-tts',
-    'media-video',
-    'integration',
-] as const;
-
-type RawBlockDefinition = NonNullable<BlockView['$definition']>;
-type RawPortDefinition = NonNullable<RawBlockDefinition['inputs']>[number];
-
-const normalizePorts = (ports: RawPortDefinition[] | undefined): PortDefinition[] =>
-    (ports ?? []).map(port => ({
-        ...port,
-        type: port.type ?? 'any',
-    }));
-
-const normalizeDefinition = (definition: RawBlockDefinition): BlockDefinition => ({
-    ...definition,
-    inputs: normalizePorts(definition.inputs),
-    outputs: normalizePorts(definition.outputs),
-    defaultConfig: definition.defaultConfig ?? {},
-    configSchema: definition.configSchema,
-    input$: normalizePorts(definition.inputs),
-    output$: normalizePorts(definition.outputs),
-    execute: undefined,
-});
 
 /**
  * Extended BlockView with isFrontend flag from server
@@ -57,49 +35,14 @@ const normalizeDefinition = (definition: RawBlockDefinition): BlockDefinition =>
  * Note: Server returns `isFrontend` as BoolFlag (0 | 1), not boolean.
  * Conversion to boolean happens in listBlocks().
  */
-interface BlockViewWithFrontend extends Omit<BlockView, 'isFrontend'> {
+interface BlockViewWithFrontend extends BlockView {
     /** Server-provided flag indicating frontend execution capability (0 or 1) */
-    isFrontend?: boolean | 0 | 1;
+    isFrontend?: 0 | 1;
     /** Block stereotype for categorization (input, process, output) */
     stereo?: BlockStereo;
     /** Flag indicating if block can be executed (shows run button). Default true. */
     isRunnable?: boolean;
 }
-
-interface SpecBlockView {
-    blockType: string;
-    name: string;
-    description: string;
-    category: BlockStereo;
-    inputSchema: RawPortDefinition[];
-    outputSchema: RawPortDefinition[];
-    estimatedCost: number;
-}
-
-interface SpecBlocksResponse {
-    items?: SpecBlockView[];
-    list?: BlockViewWithFrontend[];
-}
-
-const specBlockToLegacyView = (item: SpecBlockView): BlockViewWithFrontend => {
-    const isBackend = (SPEC_BACKEND_PROCESSOR_TYPES as readonly string[]).includes(item.blockType);
-    return {
-        id: item.blockType,
-        $definition: {
-            id: `blk-${item.blockType}`,
-            type: item.blockType,
-            label: item.name,
-            description: item.description,
-            inputs: item.inputSchema,
-            outputs: item.outputSchema,
-            defaultConfig: {},
-            configSchema: [],
-        },
-        stereo: item.category,
-        isFrontend: isBackend ? 0 : 1,
-        isRunnable: true,
-    } as BlockViewWithFrontend;
-};
 
 /**
  * Check if a block definition requires backend processing
@@ -119,66 +62,59 @@ export const requiresBackendProcessing = (blockDef: BlockDefinitionWithFrontend)
     }
 
     // Fallback: use legacy hardcoded list for backward compatibility
-    return (LEGACY_BACKEND_PROCESSOR_TYPES as readonly string[]).includes(blockDef.type);
+    return LEGACY_BACKEND_PROCESSOR_TYPES.includes(blockDef.type);
 };
 
 /**
  * Fetch all available block definitions from server
- * GET /blocks
- *
- * Server response contains $definition for each block with:
- * - id: block ID (e.g., "1000006")
- * - type: block type (e.g., "input-text")
- * - label, description, inputs, outputs, configSchema, etc.
- * - isFrontend: BoolFlag (0 | 1) indicating execution location, converted to boolean
+ * GET /blocks/0/list?cores=1&limit=-1
  */
 export const listBlocks = async (): Promise<BlockDefinitionWithFrontend[]> => {
     _log('> listBlocks()');
     await delay(500);
 
-    const response = await withRetry(() => api.get<SpecBlocksResponse>('/blocks'), 3, 'listBlocks');
+    const response = await withRetry(
+        () => api.get<ListResult<BlockViewWithFrontend>>('/blocks/0/list?cores=1&limit=-1'),
+        3,
+        'listBlocks'
+    );
 
-    const rawList = response.data?.items?.map(specBlockToLegacyView) ?? response.data?.list;
-
+    const rawList = response.data?.list;
     if (!rawList?.length) {
         throw new Error('No block definitions returned from server');
     }
 
-    // Process blocks: extract $definition and attach isFrontend + execute function
     const list = rawList
         .filter(
             (item): item is BlockViewWithFrontend & { $definition: NonNullable<BlockView['$definition']> } =>
                 !!item?.$definition?.label
         )
         .map((item): BlockDefinitionWithFrontend => {
-            const definition = normalizeDefinition(item.$definition);
-            // Get isFrontend from the BlockView level (server response)
-            // Convert BoolFlag (0 | 1) to boolean for type safety
+            const definition = item.$definition;
             const isFrontend = item.isFrontend !== undefined ? Boolean(item.isFrontend) : undefined;
-            // Get stereo for block categorization
             const stereo = item.stereo;
-
-            // Build partial block def to reuse requiresBackendProcessing logic
             const blockDef: BlockDefinitionWithFrontend = { ...definition, isFrontend };
             const shouldRunOnFrontend = !requiresBackendProcessing(blockDef);
-
-            // Attach execute function only for frontend blocks
-            const execute = shouldRunOnFrontend ? EXECUTE_FUNCTIONS[definition.type] : undefined;
-
             return {
                 ...definition,
                 isFrontend,
                 stereo,
                 isRunnable: item.isRunnable,
-                execute,
+                execute: shouldRunOnFrontend ? EXECUTE_FUNCTIONS[definition.type] : undefined,
             };
         });
 
-    _log('> API listBlocks.len =', list.length);
-
-    if (!list.length) {
-        throw new Error('No valid block definitions found');
-    }
-
+    _log('> API listBlocks().len =', list.length);
+    if (!list.length) throw new Error('No valid block definitions found');
     return list;
+};
+
+/**
+ * Get single block definition by type
+ * GET /blocks/{blockType}
+ */
+export const getBlock = async (blockType: string): Promise<BlockSpec> => {
+    _log(`> getBlock(${blockType})`);
+    const response = await api.get<BlockSpec>(`/blocks/${blockType}`);
+    return response.data;
 };

@@ -59,7 +59,7 @@ export const EXECUTE_FUNCTIONS: Record<string, ExecuteFunction> = {
             onProgress?.(Math.round((i / steps) * 100));
         }
 
-        return { out: { ...input, timestamp: Date.now() } };
+        return { out: input ? { ...input, timestamp: Date.now() } : createPacket('', 'text') };
     },
 
     // Alias: buffer (same as buffer-delay)
@@ -74,12 +74,12 @@ export const EXECUTE_FUNCTIONS: Record<string, ExecuteFunction> = {
             onProgress?.(Math.round((i / steps) * 100));
         }
 
-        return { out: { ...input, timestamp: Date.now() } };
+        return { out: input ? { ...input, timestamp: Date.now() } : createPacket('', 'text') };
     },
 
     // Server type: text-transform, config key: mode
     'text-transform': async (inputs, config, onProgress) => {
-        const text = String(inputs['in'].value);
+        const text = String(inputs['in']?.value ?? '');
         onProgress?.(20);
         const result = `#mock: ${config.mode}(${text})`;
         await delay(300);

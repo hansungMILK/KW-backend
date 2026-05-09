@@ -13,6 +13,6 @@ export const useTheme = () => {
     return {
         ...context,
         theme,
-        isDarkTheme: theme === 'dark',
+        isDarkTheme: context.resolvedTheme === 'dark',
     };
 };

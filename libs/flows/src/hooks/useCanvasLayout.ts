@@ -5,7 +5,7 @@ import { useCanvasStore } from '../stores';
 import { useFlowsStore } from '../stores/useFlowsStore';
 import { DEFAULT_TEXTAREA_HEIGHT, getNodeHeight } from '../utils/nodeHeight';
 
-import type { BlockDefinition, NodeData } from '../types';
+import type { BlockDefinition, NodeData } from '@lemoncloud/eureka-flows-api';
 
 /** Layout configuration for auto-layout algorithm */
 export const LAYOUT_CONFIG = {
@@ -25,14 +25,14 @@ export const LAYOUT_CONFIG = {
 export const PORT_LAYOUT = {
     /** Node header height */
     HEADER_HEIGHT: 45,
-    /** First port Y offset from node top: container top (45) + half port height (12) */
-    FIRST_PORT_Y: 57,
+    /** First port Y offset from node top (header + centering) */
+    FIRST_PORT_Y: 58,
     /** Vertical spacing between ports (port height 24px + gap 4px) */
     PORT_SPACING: 28,
-    /** Input port X offset: port container at left-[-6px], circle center at node.x + 0 */
-    INPUT_X: 0,
-    /** Output port X offset from node left edge (node width, circle center at node.x + nodeWidth) */
-    OUTPUT_X: 260,
+    /** Input port X offset from node left edge */
+    INPUT_X: -3,
+    /** Output port X offset from node left edge (node width 260px + offset) */
+    OUTPUT_X: 263,
     /** Node width */
     NODE_WIDTH: 260,
     /** Port circle size */
@@ -45,8 +45,8 @@ export const PORT_LAYOUT = {
 const NODE_HEIGHT = {
     /** Base: header(40) + description(20) + border(10) + padding(40) */
     BASE: 110,
-    /** Height per port row: h-6(24px) + gap-1(4px) = 28px — must match PORT_LAYOUT.PORT_SPACING */
-    PORT_ROW: 28,
+    /** Height per port row */
+    PORT_ROW: 26,
     /** Extra height for input nodes (Run button + visualization) */
     INPUT_NODE: 100,
     /** Extra height for output-console nodes (visualization area) */
@@ -192,81 +192,42 @@ export const useCanvasLayout = ({ readOnly, onBeforeLayout }: UseCanvasLayoutOpt
             .map(Number)
             .sort((a, b) => a - b);
 
-        const nodeYPositions: Record<string, number> = {};
         const positionedNodes = [...nodes];
 
-        // When every node is unconnected (all at level 0), use a multi-column grid
-        // to avoid stacking dozens of nodes in one tall column at x=50.
-        const allUnconnected = sortedLevels.length === 1 && sortedLevels[0] === 0;
-        const GRID_MAX_ROWS = 4;
-
+        // 1. Pre-calculate total height for each level
+        const levelTotalHeights: Record<number, number> = {};
         sortedLevels.forEach(level => {
             const group = levelGroups[level];
+            levelTotalHeights[level] = group.reduce((sum, node) => {
+                return sum + estimateNodeHeight(node, blockRegistry[node.type]) + LAYOUT_CONFIG.MIN_GAP;
+            }, -LAYOUT_CONFIG.MIN_GAP);
+        });
 
-            // Sort nodes within level by average parent Y position
-            group.sort((a, b) => {
-                const getAvgParentY = (nodeId: string) => {
-                    const parents = incomingEdges[nodeId];
-                    if (parents.length === 0) return 0;
-                    const sum = parents.reduce((acc, pid) => acc + (nodeYPositions[pid] || 0), 0);
-                    return sum / parents.length;
-                };
+        // 2. Find the shared vertical midpoint based on the tallest column
+        const maxTotalHeight = Math.max(...Object.values(levelTotalHeights));
+        const midY = LAYOUT_CONFIG.START_Y + maxTotalHeight / 2;
 
-                const avgA = getAvgParentY(a.id);
-                const avgB = getAvgParentY(b.id);
+        // 3. Position each level centered around the shared midY
+        sortedLevels.forEach(level => {
+            const group = levelGroups[level];
+            const levelTotalHeight = levelTotalHeights[level];
+            const startY = Math.max(LAYOUT_CONFIG.START_Y, midY - levelTotalHeight / 2);
 
-                // If similar Y positions, sort by ID for consistency
-                if (Math.abs(avgA - avgB) < 10) return a.id.localeCompare(b.id);
-                return avgA - avgB;
+            let currentY = startY;
+            group.forEach(node => {
+                const x = LAYOUT_CONFIG.START_X + level * LAYOUT_CONFIG.LEVEL_WIDTH;
+                const y = currentY;
+
+                const nodeIndex = positionedNodes.findIndex(n => n.id === node.id);
+                if (nodeIndex !== -1) {
+                    positionedNodes[nodeIndex] = {
+                        ...positionedNodes[nodeIndex],
+                        position: { x, y },
+                    };
+                }
+
+                currentY += estimateNodeHeight(node, blockRegistry[node.type]) + LAYOUT_CONFIG.MIN_GAP;
             });
-
-            if (allUnconnected && group.length > GRID_MAX_ROWS) {
-                // Grid layout: wrap into multiple columns so the canvas doesn't become
-                // one impossibly tall column of unconnected nodes.
-                const rowHeights: number[] = [];
-                group.forEach((node, index) => {
-                    const col = Math.floor(index / GRID_MAX_ROWS);
-                    const row = index % GRID_MAX_ROWS;
-                    const x = LAYOUT_CONFIG.START_X + col * LAYOUT_CONFIG.LEVEL_WIDTH;
-                    // Accumulate y within each column using estimated heights
-                    if (row === 0) rowHeights[col] = LAYOUT_CONFIG.START_Y;
-                    const y = rowHeights[col];
-
-                    nodeYPositions[node.id] = y;
-
-                    const nodeIndex = positionedNodes.findIndex(n => n.id === node.id);
-                    if (nodeIndex !== -1) {
-                        positionedNodes[nodeIndex] = {
-                            ...positionedNodes[nodeIndex],
-                            position: { x, y },
-                        };
-                    }
-
-                    const nodeHeight = estimateNodeHeight(node, blockRegistry[node.type]);
-                    rowHeights[col] = y + nodeHeight + LAYOUT_CONFIG.MIN_GAP;
-                });
-            } else {
-                // Normal: single vertical column per level
-                let currentY = LAYOUT_CONFIG.START_Y;
-                group.forEach(node => {
-                    const x = LAYOUT_CONFIG.START_X + level * LAYOUT_CONFIG.LEVEL_WIDTH;
-                    const y = currentY;
-
-                    nodeYPositions[node.id] = y;
-
-                    const nodeIndex = positionedNodes.findIndex(n => n.id === node.id);
-                    if (nodeIndex !== -1) {
-                        positionedNodes[nodeIndex] = {
-                            ...positionedNodes[nodeIndex],
-                            position: { x, y },
-                        };
-                    }
-
-                    // Advance Y by estimated node height + gap
-                    const nodeHeight = estimateNodeHeight(node, blockRegistry[node.type]);
-                    currentY += nodeHeight + LAYOUT_CONFIG.MIN_GAP;
-                });
-            }
         });
 
         // Apply new positions and reset viewport

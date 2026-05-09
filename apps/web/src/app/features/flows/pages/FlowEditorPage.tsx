@@ -1,26 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { Play } from 'lucide-react';
-
-import {
-    EXECUTE_FUNCTIONS,
-    createFlowRun,
-    getPortData,
-    getRun,
-    getRunAssets,
-    getRunNodes,
-    useBlocks,
-    useCanvasStore,
-    useFlows,
-} from '@flows/flows';
+import { EXECUTE_FUNCTIONS, getNode, getPortData, useBlocks, useCanvasStore, useFlows } from '@flows/flows';
 import { ApiKeyDialog } from '@flows/shared';
 import { useInitFlowSocket } from '@flows/socket';
-import { extractErrorMessage, useWebCoreStore } from '@flows/web-core';
+import { useWebCoreStore } from '@flows/web-core';
 
-// [추가] Flow Agent 채팅 패널 컴포넌트 import
-// - 원본에는 없던 컴포넌트로, 우측에 열리는 AI 채팅 패널을 담당합니다.
-import { AssetPreviewPanel } from '../components/AssetPreviewPanel';
 import { FlowAgentPanel } from '../components/FlowAgentPanel';
 import { Header } from '../components/Header';
 import { HelpDialog } from '../components/HelpDialog';
@@ -30,9 +15,7 @@ import { WorkflowCanvas } from '../components/WorkflowCanvas';
 import type { HelpTab } from '../components/help';
 import type { SidebarRef } from '../components/Sidebar';
 import type { WorkflowCanvasRef } from '../components/WorkflowCanvas';
-import type { RunGetResponse, RunNode } from '@flows/contracts';
-import type { DataPacket } from '@flows/flows';
-import type { AssetCreatedMessage, NodeUpdateInfo, PortUpdateInfo, ProposalCreatedMessage } from '@flows/socket';
+import type { NodeUpdateInfo, PortUpdateInfo } from '@flows/socket';
 
 const serializeWorkflowState = (data: { nodes?: unknown[]; connections?: unknown[]; edges?: unknown[] }): string =>
     JSON.stringify({ nodes: data.nodes ?? [], connections: data.connections ?? data.edges ?? [] });
@@ -40,79 +23,6 @@ const serializeWorkflowState = (data: { nodes?: unknown[]; connections?: unknown
 const isInputElement = (target: EventTarget | null): boolean => {
     if (!target || !(target instanceof HTMLElement)) return false;
     return ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable;
-};
-
-type RunActivity = {
-    nodeId?: string;
-    nodeLabel?: string;
-    progress?: number;
-    state?: 'queued' | 'running' | 'completed' | 'failed';
-    error?: string | null;
-};
-
-const RUN_POLL_INTERVAL_MS = 2000;
-const RUN_POLL_TIMEOUT_MS = 15 * 60 * 1000;
-
-const delay = (ms: number): Promise<void> => new Promise(resolve => window.setTimeout(resolve, ms));
-
-const toCanvasNodeState = (status: RunNode['status']) => {
-    if (status === 'RUNNING') return 'RUNNING';
-    if (status === 'COMPLETED') return 'COMPLETED';
-    if (status === 'FAILED' || status === 'CANCELLED' || status === 'SKIPPED') return 'ERROR';
-    return undefined;
-};
-
-const toVisibleRunError = (message?: string | null): string | null => {
-    if (!message) return null;
-    if (/PAID_OPENAI_DISABLED|Paid OpenAI calls are disabled/i.test(message)) {
-        return '현재 OpenAI 실제 호출이 꺼져 있습니다. 비용이 나가는 테스트를 할 때만 백엔드에서 ALLOW_PAID_OPENAI=1로 켜주세요.';
-    }
-    if (/MISSING_API_KEYS|Required API keys not configured|OPENAI_API_KEY/i.test(message)) {
-        return 'OpenAI API 키가 설정되어 있지 않습니다. 백엔드 환경변수 또는 Settings API에 키를 넣은 뒤 다시 시도해주세요.';
-    }
-    if (/RUN_COST_LIMIT_EXCEEDED|exceeds the per-run cap/i.test(message)) {
-        return '예상 실행 비용이 1회 한도 $2.00를 넘어 실행을 차단했습니다. 장면 수나 이미지 품질을 낮추거나 한도를 조정해주세요.';
-    }
-    const rawIndex = message.indexOf(' Raw:');
-    const trimmed = (rawIndex === -1 ? message : message.slice(0, rawIndex)).trim();
-    return trimmed.length > 260 ? `${trimmed.slice(0, 257)}...` : trimmed;
-};
-
-const toVisibleHttpError = (error: unknown): string =>
-    toVisibleRunError(extractErrorMessage(error)) ?? '요청 처리 중 문제가 발생했습니다.';
-
-const toVisibleRunNodeError = (runNode: RunNode): string | undefined => {
-    if (runNode.status === 'CANCELLED') return '실행이 취소되었습니다.';
-    if (runNode.status === 'SKIPPED') return '상위 노드 실패로 실행을 건너뛰었습니다.';
-    return toVisibleRunError(runNode.errorMessage) ?? undefined;
-};
-
-const getFinalSummaryValue = (run: RunGetResponse, key: string): string | null => {
-    const value = run.finalOutputSummary?.[key];
-    return typeof value === 'string' ? value : null;
-};
-
-const inferRunOutputType = (runNode: RunNode, payload: Record<string, unknown>): DataPacket['type'] => {
-    if (runNode.blockType === 'media-video') return 'video';
-    if (runNode.blockType === 'media-tts') return 'audio';
-    if (runNode.blockType === 'media-image' && typeof payload['url'] === 'string') return 'image';
-    if (typeof payload['text'] === 'string' || typeof payload['content'] === 'string') return 'text';
-    return 'json';
-};
-
-const runOutputToDataPacket = (runNode: RunNode): Record<string, DataPacket> | undefined => {
-    const payload = runNode.outputPayload;
-    if (!payload || typeof payload !== 'object' || Array.isArray(payload) || Object.keys(payload).length === 0) {
-        return undefined;
-    }
-
-    return {
-        out: {
-            value: payload,
-            type: inferRunOutputType(runNode, payload),
-            timestamp: runNode.completedAt ? new Date(runNode.completedAt).getTime() : Date.now(),
-        },
-    };
 };
 
 export const FlowEditorPage = () => {
@@ -125,6 +35,7 @@ export const FlowEditorPage = () => {
         currentFlowId,
         flowName,
         isLoading,
+        isSaving,
         lastSavedAt,
         isAutoSaveEnabled,
         saveStatus,
@@ -147,7 +58,6 @@ export const FlowEditorPage = () => {
                 const flowData = await loadFlowById(flowId);
                 if (canvasRef.current && flowData) {
                     await canvasRef.current.loadWorkflow(flowData);
-                    setCanvasNodeCount(flowData.nodes?.length ?? 0);
                     lastSavedStateRef.current = serializeWorkflowState(flowData);
                 }
             } catch (error) {
@@ -162,7 +72,7 @@ export const FlowEditorPage = () => {
 
     const handleNodeUpdate = useCallback(
         async (info: NodeUpdateInfo) => {
-            const { nodeId, flowId, isPort, parentNodeId, state, progress, no, errorMessage } = info;
+            const { nodeId, flowId, isPort, parentNodeId, state, progress, no } = info;
 
             // Skip if flowId is missing or doesn't match current flow (socket channel is shared)
             if (!flowId || flowId !== currentFlowId) return;
@@ -180,14 +90,6 @@ export const FlowEditorPage = () => {
 
             if (!canvasRef.current) return;
 
-            const currentWorkflow = canvasRef.current.getWorkflow();
-            const currentNode = currentWorkflow?.nodes?.find(n => n.id === nodeId);
-            const nodeLabel =
-                (currentNode as { customLabel?: string } | undefined)?.customLabel ??
-                currentNode?.name ??
-                (currentNode?.type ? blockRegistry[currentNode.type]?.label : undefined) ??
-                nodeId;
-
             // Skip port updates from type:'node' messages (deprecated pattern)
             // Port updates are handled by type:'node/port' messages via handlePortUpdate
             if (isPort && parentNodeId) {
@@ -200,29 +102,22 @@ export const FlowEditorPage = () => {
                 return;
             }
 
-            // ERROR state: prefer run-node error from WebSocket, then fall back to node fetch.
+            // ERROR state: still need API fetch for errorMessage (not sent via WebSocket)
             if (state === 'ERROR') {
-                const visibleError = toVisibleRunError(errorMessage) ?? '노드 실행 실패';
-                setRunActivity({
-                    nodeId,
-                    nodeLabel,
-                    progress,
-                    state: 'failed',
-                    error: visibleError,
-                });
-                if (errorMessage) {
+                try {
+                    const nodeData = await getNode(nodeId);
                     canvasRef.current.updateNodeFromServer(nodeId, {
                         state,
                         status: state,
-                        errorMessage: visibleError,
+                        errorMessage: nodeData.errorMessage,
                     });
-                    return;
+                } catch {
+                    // Fallback: update state without errorMessage if API fails
+                    canvasRef.current.updateNodeFromServer(nodeId, {
+                        state,
+                        status: state,
+                    });
                 }
-                canvasRef.current.updateNodeFromServer(nodeId, {
-                    state,
-                    status: state,
-                    errorMessage: currentNode?.errorMessage,
-                });
                 return;
             }
 
@@ -239,26 +134,6 @@ export const FlowEditorPage = () => {
                 status: state,
                 executionStats,
             });
-
-            if (state === 'RUNNING') {
-                setRunActivity({
-                    nodeId,
-                    nodeLabel,
-                    progress: progress ?? 0,
-                    state: 'running',
-                });
-            } else if (state === 'COMPLETED') {
-                setRunActivity(prev =>
-                    prev?.nodeId === nodeId
-                        ? {
-                              nodeId,
-                              nodeLabel,
-                              progress: 100,
-                              state: 'completed',
-                          }
-                        : prev
-                );
-            }
 
             // Auto-execute isFrontend nodes when READY (if all inputs have data)
             if (state !== 'READY') return;
@@ -354,7 +229,7 @@ export const FlowEditorPage = () => {
             const direction = isOutputPort ? 'out' : 'in';
 
             try {
-                const portData = await getPortData(portId, direction, currentFlowId ?? undefined);
+                const portData = await getPortData(portId, direction);
 
                 if (portData?.data) {
                     const dataPacket = {
@@ -418,58 +293,15 @@ export const FlowEditorPage = () => {
         onFlowUpdate: handleFlowUpdate,
         onNodeReload: handleNodeUpdate,
         onPortUpdate: handlePortUpdate,
-        onProposalCreated: msg => {
-            setLatestProposal(msg);
-            setIsAgentOpen(true);
-        },
-        onRunStarted: () => {
-            setRunStatus('running');
-            setRunFailedError(null);
-            setRunActivity({ nodeLabel: '실행 준비 중', progress: 0, state: 'queued' });
-            if (runStatusTimerRef.current) window.clearTimeout(runStatusTimerRef.current);
-        },
-        onRunCompleted: () => {
-            setRunStatus('completed');
-            setRunActivity({ nodeLabel: '전체 실행 완료', progress: 100, state: 'completed' });
-            runStatusTimerRef.current = window.setTimeout(() => {
-                setRunStatus(null);
-                setRunActivity(null);
-            }, 4000);
-        },
-        onRunFailed: msg => {
-            const errorMessage = msg.errorMessage ?? msg.error ?? null;
-            setRunStatus('failed');
-            setRunFailedError(errorMessage);
-            setRunActivity({
-                nodeId: msg.failedNodeId,
-                nodeLabel: msg.failedNodeId ? `노드 ${msg.failedNodeId}` : '실행 실패',
-                state: 'failed',
-                error: errorMessage,
-            });
-            if (msg.failedNodeId) {
-                canvasRef.current?.updateNodeFromServer(msg.failedNodeId, { status: 'ERROR' });
-            }
-        },
-        onAssetCreated: msg => setLatestAsset(msg),
     });
 
     const [isAppReady, setIsAppReady] = useState(false);
+    const [isBootError, setIsBootError] = useState(false);
     const [loadingText, setLoadingText] = useState('');
     const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
     const [isApiKeyDialogOpen, setIsApiKeyDialogOpen] = useState(false);
     const [isHelpDialogOpen, setIsHelpDialogOpen] = useState(false);
-    // [추가] Flow Agent 패널 열림/닫힘 상태
-    // - true: 우측에 채팅 패널이 열림
-    // - false: 패널이 닫히고 우측 하단에 채팅 버튼이 표시됨
     const [isAgentOpen, setIsAgentOpen] = useState(false);
-    const [latestProposal, setLatestProposal] = useState<ProposalCreatedMessage | null>(null);
-    const [runStatus, setRunStatus] = useState<'running' | 'completed' | 'failed' | null>(null);
-    const [runFailedError, setRunFailedError] = useState<string | null>(null);
-    const [runActivity, setRunActivity] = useState<RunActivity | null>(null);
-    const [canvasNodeCount, setCanvasNodeCount] = useState(0);
-    const [latestAsset, setLatestAsset] = useState<AssetCreatedMessage | null>(null);
-    const runStatusTimerRef = useRef<number | null>(null);
-    const runPollTokenRef = useRef(0);
     const [helpDialogTab, setHelpDialogTab] = useState<HelpTab>('gettingStarted');
     const [agentBtnPos, setAgentBtnPos] = useState<{ x: number; y: number } | null>(null);
     const agentBtnDragRef = useRef<{ mouseX: number; mouseY: number; btnX: number; btnY: number } | null>(null);
@@ -558,7 +390,6 @@ export const FlowEditorPage = () => {
                         if (initialFlow) {
                             try {
                                 await canvasRef.current.loadWorkflow(initialFlow);
-                                setCanvasNodeCount(initialFlow.nodes?.length ?? 0);
                                 lastSavedStateRef.current = serializeWorkflowState(initialFlow);
                             } catch (error) {
                                 console.error('[FlowEditor] Failed to load workflow:', error);
@@ -578,6 +409,7 @@ export const FlowEditorPage = () => {
                 requestAnimationFrame(waitForCanvas);
             } catch (e) {
                 setLoadingText(t('flowEditor.errorLoadingApp'));
+                setIsBootError(true);
                 console.error(e);
             }
         };
@@ -632,7 +464,6 @@ export const FlowEditorPage = () => {
         if (!canvasRef.current) return;
         if (window.confirm(t('flowEditor.confirmNewFlow'))) {
             canvasRef.current.newWorkflow();
-            setCanvasNodeCount(0);
             lastSavedStateRef.current = serializeWorkflowState({ nodes: [], connections: [] });
             const newId = await createNewFlow();
             if (newId) {
@@ -668,32 +499,24 @@ export const FlowEditorPage = () => {
         if (!canvasRef.current) return;
         if (window.confirm(t('flowEditor.confirmClearCanvas'))) {
             canvasRef.current.clearWorkflow();
-            setCanvasNodeCount(0);
             showNotification(t('flowEditor.canvasCleared'), 'success');
         }
     };
 
-    const handleAddNode = useCallback((type: string, customLabel?: string) => {
-        canvasRef.current?.addNode(type, customLabel);
+    const handleAddNode = useCallback((type: string) => {
+        canvasRef.current?.addNode(type);
     }, []);
 
-    const handleApproveProposal = useCallback(
-        async (nodes: unknown[], edges: unknown[]) => {
-            if (!canvasRef.current || (!nodes.length && !edges.length)) return;
-            try {
-                await canvasRef.current.loadWorkflow({ nodes, edges } as Parameters<
-                    WorkflowCanvasRef['loadWorkflow']
-                >[0]);
-                setCanvasNodeCount(nodes.length);
-                lastSavedStateRef.current = null;
-                showNotification('캔버스에 블록이 배치되었습니다.', 'success');
-                triggerAutoSave();
-            } catch {
-                showNotification('캔버스 업데이트 실패', 'error');
-            }
-        },
-        [triggerAutoSave]
-    );
+    const handleApproveProposal = useCallback(async (nodes: unknown[], edges: unknown[]) => {
+        if (!canvasRef.current || (!nodes.length && !edges.length)) return;
+        try {
+            await canvasRef.current.loadWorkflow({ nodes, edges } as Parameters<WorkflowCanvasRef['loadWorkflow']>[0]);
+            lastSavedStateRef.current = null;
+            showNotification('캔버스에 블록이 배치되었습니다.', 'success');
+        } catch {
+            showNotification('캔버스 업데이트 실패', 'error');
+        }
+    }, []);
 
     const handleSelectionChange = (nodeId: string | null) => {
         updateUrl(currentFlowId, nodeId);
@@ -701,195 +524,14 @@ export const FlowEditorPage = () => {
 
     const handleCanvasChange = () => {
         lastLocalUpdateTimestampRef.current = Date.now(); // Mark change time to ignore self-echo from socket
-        setCanvasNodeCount(canvasRef.current?.getWorkflow().nodes.length ?? 0);
         triggerAutoSave();
     };
-
-    const applyRunNodeSnapshots = useCallback((runNodes: RunNode[]) => {
-        let runningNode: RunNode | undefined;
-        let failedNode: RunNode | undefined;
-
-        for (const runNode of runNodes) {
-            const canvasState = toCanvasNodeState(runNode.status);
-            if (canvasState) {
-                const outputData = runOutputToDataPacket(runNode);
-                canvasRef.current?.updateNodeFromServer(runNode.nodeId, {
-                    state: canvasState,
-                    status: canvasState,
-                    errorMessage: toVisibleRunNodeError(runNode),
-                    ...(outputData ? { outputData } : {}),
-                    executionStats: {
-                        progress: runNode.progress,
-                    },
-                });
-            }
-
-            if (runNode.status === 'RUNNING') runningNode = runNode;
-            if (runNode.status === 'FAILED') failedNode = runNode;
-        }
-
-        if (failedNode) {
-            setRunActivity({
-                nodeId: failedNode.nodeId,
-                nodeLabel: failedNode.label,
-                progress: failedNode.progress,
-                state: 'failed',
-                error: toVisibleRunError(failedNode.errorMessage) ?? '노드 실행 실패',
-            });
-            return;
-        }
-
-        if (runningNode) {
-            setRunActivity({
-                nodeId: runningNode.nodeId,
-                nodeLabel: runningNode.label,
-                progress: runningNode.progress,
-                state: 'running',
-            });
-        }
-    }, []);
-
-    const showLatestRunAsset = useCallback(
-        async (runId: string) => {
-            const assets = await getRunAssets(runId);
-            const asset = assets.find(item => item.type === 'video') ?? assets[assets.length - 1];
-            if (!asset) return;
-
-            setLatestAsset({
-                type: 'asset.created',
-                id: asset.id,
-                flowId: currentFlowId ?? undefined,
-                assetId: asset.id,
-                assetType: asset.type,
-                url: asset.url,
-                publicUrl: asset.url,
-                timestamp: Date.now(),
-            });
-        },
-        [currentFlowId]
-    );
-
-    const handleStartFlowRun = useCallback(async () => {
-        if (!currentFlowId) {
-            showNotification('실행할 Flow가 없습니다.', 'error');
-            return;
-        }
-
-        const nodeCount = canvasRef.current?.getWorkflow().nodes.length ?? canvasNodeCount;
-        if (nodeCount === 0) {
-            showNotification('먼저 블록을 생성하거나 승인해주세요.', 'error');
-            return;
-        }
-
-        setIsAgentOpen(true);
-        setRunStatus('running');
-        setRunFailedError(null);
-        setRunActivity({ nodeLabel: '실행 요청 전송 중', progress: 0, state: 'queued' });
-        if (runStatusTimerRef.current) window.clearTimeout(runStatusTimerRef.current);
-        const pollToken = runPollTokenRef.current + 1;
-        runPollTokenRef.current = pollToken;
-
-        try {
-            const run = await createFlowRun(currentFlowId);
-            if (run.status === 'COMPLETED') {
-                setRunStatus('completed');
-                setRunActivity({ nodeLabel: '전체 실행 완료', progress: 100, state: 'completed' });
-                await showLatestRunAsset(run.id);
-                runStatusTimerRef.current = window.setTimeout(() => {
-                    setRunStatus(null);
-                    setRunActivity(null);
-                }, 4000);
-                return;
-            }
-
-            if (run.status === 'FAILED') {
-                setRunStatus('failed');
-                setRunFailedError('Run failed');
-                setRunActivity({ nodeLabel: '실행 실패', state: 'failed', error: 'Run failed' });
-                await showLatestRunAsset(run.id);
-                return;
-            }
-
-            setRunActivity({ nodeLabel: 'Worker 대기 중', progress: 0, state: 'queued' });
-
-            const startedAt = Date.now();
-            while (runPollTokenRef.current === pollToken && Date.now() - startedAt < RUN_POLL_TIMEOUT_MS) {
-                await delay(RUN_POLL_INTERVAL_MS);
-                if (runPollTokenRef.current !== pollToken) return;
-
-                const [runDetail, runNodes] = await Promise.all([getRun(run.id), getRunNodes(run.id)]);
-                applyRunNodeSnapshots(runNodes);
-
-                if (runDetail.status === 'COMPLETED') {
-                    setRunStatus('completed');
-                    setRunFailedError(null);
-                    setRunActivity({ nodeLabel: '전체 실행 완료', progress: 100, state: 'completed' });
-                    await showLatestRunAsset(run.id);
-                    runStatusTimerRef.current = window.setTimeout(() => {
-                        setRunStatus(null);
-                        setRunActivity(null);
-                    }, 4000);
-                    return;
-                }
-
-                if (runDetail.status === 'FAILED') {
-                    const failedNodeId = getFinalSummaryValue(runDetail, 'failedNodeId');
-                    const failedNode = runNodes.find(node => node.nodeId === failedNodeId || node.status === 'FAILED');
-                    const message =
-                        toVisibleRunError(failedNode?.errorMessage) ??
-                        toVisibleRunError(getFinalSummaryValue(runDetail, 'errorMessage')) ??
-                        '워크플로우 실행 실패';
-
-                    setRunStatus('failed');
-                    setRunFailedError(message);
-                    setRunActivity({
-                        nodeId: failedNode?.nodeId ?? failedNodeId ?? undefined,
-                        nodeLabel: failedNode?.label ?? (failedNodeId ? `노드 ${failedNodeId}` : '실행 실패'),
-                        progress: failedNode?.progress,
-                        state: 'failed',
-                        error: message,
-                    });
-                    if (failedNode?.nodeId) {
-                        canvasRef.current?.updateNodeFromServer(failedNode.nodeId, {
-                            state: 'ERROR',
-                            status: 'ERROR',
-                            errorMessage: message,
-                        });
-                    }
-                    await showLatestRunAsset(run.id);
-                    showNotification(message, 'error');
-                    return;
-                }
-
-                if (runDetail.status === 'CANCELLED') {
-                    setRunStatus('failed');
-                    setRunFailedError('실행이 취소되었습니다.');
-                    setRunActivity({ nodeLabel: '실행 취소', state: 'failed', error: '실행이 취소되었습니다.' });
-                    return;
-                }
-            }
-
-            setRunActivity({
-                nodeLabel: '실행 중 - 상태 확인 계속 필요',
-                progress: 0,
-                state: 'running',
-            });
-        } catch (error) {
-            const message = toVisibleHttpError(error);
-            setRunStatus('failed');
-            setRunFailedError(message);
-            setRunActivity({ nodeLabel: '실행 시작 실패', state: 'failed', error: message });
-            showNotification(message, 'error');
-        }
-    }, [applyRunNodeSnapshots, canvasNodeCount, currentFlowId, showLatestRunAsset]);
 
     const handleConnectionError = useCallback(
         (error: 'cycle' | 'invalid_type') => {
             if (error === 'cycle') {
                 showNotification(t('flowEditor.circularConnectionError'), 'error');
-                return;
             }
-            showNotification('포트 타입이 맞지 않아 연결할 수 없습니다.', 'error');
         },
         [t]
     );
@@ -1015,11 +657,25 @@ export const FlowEditorPage = () => {
     if (!isAppReady) {
         return (
             <div className="flex h-screen bg-background text-foreground font-sans items-center justify-center flex-col gap-4">
-                <div className="relative w-16 h-16">
-                    <div className="absolute inset-0 border-4 border-border rounded-full"></div>
-                    <div className="absolute inset-0 border-4 border-primary rounded-full border-t-transparent animate-spin-slow"></div>
-                </div>
-                <div className="text-muted-foreground font-mono text-sm animate-pulse">{loadingText}</div>
+                {isBootError ? (
+                    <>
+                        <div className="text-destructive font-mono text-sm">{loadingText}</div>
+                        <button
+                            onClick={() => window.location.reload()}
+                            className="px-4 py-2 text-sm rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                        >
+                            {t('flowEditor.retry')}
+                        </button>
+                    </>
+                ) : (
+                    <>
+                        <div className="relative w-16 h-16">
+                            <div className="absolute inset-0 border-4 border-border rounded-full"></div>
+                            <div className="absolute inset-0 border-4 border-primary rounded-full border-t-transparent animate-spin"></div>
+                        </div>
+                        <div className="text-muted-foreground font-mono text-sm animate-pulse">{loadingText}</div>
+                    </>
+                )}
             </div>
         );
     }
@@ -1065,6 +721,7 @@ export const FlowEditorPage = () => {
                     onSave: handleSave,
                 }}
                 saveState={{
+                    isSaving,
                     lastSavedAt,
                     isAutoSaveEnabled,
                     onToggleAutoSave: toggleAutoSave,
@@ -1103,28 +760,15 @@ export const FlowEditorPage = () => {
             {/* Help Dialog */}
             <HelpDialog open={isHelpDialogOpen} onOpenChange={setIsHelpDialogOpen} defaultTab={helpDialogTab} />
 
-            {/*
-             * [추가] Flow Agent 채팅 패널
-             * - isAgentOpen이 true일 때 화면 우측에 채팅 패널이 열립니다.
-             * - open: 패널 열림 여부 전달
-             * - onClose: X 버튼 클릭 시 패널을 닫는 함수 전달
-             */}
+            {/* Flow Agent Panel */}
             <FlowAgentPanel
                 open={isAgentOpen}
                 onClose={() => setIsAgentOpen(false)}
                 flowId={currentFlowId}
                 onApproveProposal={handleApproveProposal}
-                externalProposal={latestProposal}
-                runStatus={runStatus}
-                runActivity={runActivity}
             />
 
-            {/*
-             * [추가] Flow Agent 실행 버튼 (채팅 버튼)
-             * - 패널이 닫혀 있을 때(!isAgentOpen)만 화면 우측 하단에 표시됩니다.
-             * - 클릭하면 isAgentOpen을 true로 바꿔 패널을 엽니다.
-             * - 패널이 열리면 이 버튼은 자동으로 사라집니다(중복 방지).
-             */}
+            {/* Flow Agent Button */}
             {!isAgentOpen && (
                 <button
                     onMouseDown={e => {
@@ -1166,7 +810,6 @@ export const FlowEditorPage = () => {
                     className={`z-30 w-12 h-12 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center hover:bg-primary/90 cursor-grab active:cursor-grabbing select-none ${agentBtnPos ? 'fixed' : 'absolute bottom-24 right-6'}`}
                     title="Flow Agent"
                 >
-                    {/* 말풍선 아이콘 (lucide-react에 없어서 SVG 직접 사용) */}
                     <svg
                         xmlns="http://www.w3.org/2000/svg"
                         viewBox="0 0 24 24"
@@ -1182,76 +825,10 @@ export const FlowEditorPage = () => {
                 </button>
             )}
 
-            {canvasNodeCount > 0 && (
-                <button
-                    onClick={() => void handleStartFlowRun()}
-                    disabled={runStatus === 'running'}
-                    className="absolute bottom-20 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-primary/35 bg-background/85 px-5 py-2.5 text-sm font-semibold text-foreground shadow-floating backdrop-blur-xl transition-colors hover:border-primary/60 hover:bg-primary/15 disabled:cursor-not-allowed disabled:opacity-60"
-                    title="워크플로우 실행"
-                    aria-label="워크플로우 실행"
-                >
-                    <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                        <Play className="h-3.5 w-3.5 fill-current" />
-                    </span>
-                    워크플로우 실행
-                </button>
-            )}
-
-            {/* Run status banner */}
-            {runStatus && (
-                <div
-                    style={
-                        isAgentOpen
-                            ? {
-                                  left: '1rem',
-                                  right: '21rem',
-                                  maxWidth: 'none',
-                                  transform: 'none',
-                              }
-                            : undefined
-                    }
-                    className={`absolute top-16 left-1/2 -translate-x-1/2 flex items-center justify-center gap-2 px-4 py-2 rounded-full shadow-lg text-sm font-medium text-center animate-in slide-in-from-top-2 fade-in z-50 backdrop-blur-sm ${
-                        runStatus === 'running'
-                            ? 'bg-status-running/20 text-status-running border border-status-running/30'
-                            : runStatus === 'completed'
-                              ? 'bg-status-completed/20 text-status-completed border border-status-completed/30'
-                              : 'bg-destructive/20 text-destructive border border-destructive/30'
-                    }`}
-                >
-                    {runStatus === 'running' && (
-                        <span className="w-2 h-2 rounded-full bg-status-running animate-pulse" />
-                    )}
-                    {runStatus === 'running' && '실행 중...'}
-                    {runStatus === 'completed' && '✓ 실행 완료'}
-                    {runStatus === 'failed' && `실행 실패${runFailedError ? `: ${runFailedError}` : ''}`}
-                    {runStatus !== 'running' && (
-                        <button
-                            onClick={() => setRunStatus(null)}
-                            className="ml-1 opacity-60 hover:opacity-100 transition-opacity text-xs"
-                        >
-                            ✕
-                        </button>
-                    )}
-                </div>
-            )}
-
-            {/* Asset preview panel */}
-            {latestAsset && <AssetPreviewPanel asset={latestAsset} onClose={() => setLatestAsset(null)} />}
-
             {/* Notification Toast */}
             {notification && (
                 <div
-                    style={
-                        isAgentOpen
-                            ? {
-                                  left: '1rem',
-                                  right: '21rem',
-                                  maxWidth: 'none',
-                                  transform: 'none',
-                              }
-                            : undefined
-                    }
-                    className={`absolute top-20 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full shadow-lg text-sm font-medium text-center animate-in slide-in-from-top-2 fade-in z-50 backdrop-blur-sm ${
+                    className={`absolute top-20 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full shadow-lg text-sm font-medium animate-in slide-in-from-top-2 fade-in z-50 backdrop-blur-sm ${
                         notification.type === 'success'
                             ? 'bg-success/90 text-success-foreground'
                             : 'bg-destructive/90 text-destructive-foreground'

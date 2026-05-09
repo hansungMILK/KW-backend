@@ -677,9 +677,81 @@ export const isFlowExecutionError = (error: unknown): error is FlowExecutionErro
  * POST /flows/:id
  *
  * @see eureka-flows-api v0.26.126
+ * @deprecated Use PutFlowBody with PUT /flows/{flowId}
  */
 export interface UpdateFlowBody {
     name?: string;
+}
+
+// ============================================================================
+// New Spec Flow Types (spec v2 API)
+// ============================================================================
+
+export type FlowStatus = 'DRAFT' | 'READY' | 'ARCHIVED';
+
+/** Flow summary returned by GET /flows, POST /flows, PUT /flows/{flowId} */
+export interface FlowSummary {
+    flowId: string;
+    title: string;
+    description?: string;
+    status: FlowStatus;
+    createdAt: string;
+    updatedAt: string;
+    latestProposalId?: string;
+    lastRunId?: string;
+}
+
+/** Full flow detail returned by GET /flows/{flowId} */
+export interface FlowDetail extends FlowSummary {
+    nodes: NodeData[];
+    edges: EdgeData[];
+}
+
+/** Body for POST /flows */
+export interface CreateFlowBody {
+    title: string;
+    description?: string;
+    scenario?: string;
+}
+
+/** Body for PUT /flows/{flowId} */
+export interface PutFlowBody {
+    title?: string;
+    description?: string;
+    nodes: NodeData[];
+    edges: EdgeData[];
+}
+
+/** Query params for GET /flows */
+export interface FlowListParams {
+    limit?: number;
+    cursor?: string;
+    status?: FlowStatus;
+}
+
+/** Response from GET /flows */
+export interface FlowListResult {
+    items: FlowSummary[];
+    nextCursor?: string;
+}
+
+/** Response from DELETE /flows/{flowId} */
+export interface DeleteFlowResult {
+    deleted: true;
+    messagesDeleted: number;
+    proposalsDeleted: number;
+}
+
+/** Block spec item from GET /blocks and GET /blocks/{blockType} */
+export interface BlockSpec {
+    blockType: string;
+    name: string;
+    description?: string;
+    category: 'input' | 'process' | 'output';
+    inputSchema?: unknown[];
+    outputSchema?: unknown[];
+    estimatedCost?: number;
+    configFields?: unknown[];
 }
 
 // ============================================================================
