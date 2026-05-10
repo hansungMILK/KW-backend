@@ -9,7 +9,20 @@ For production Shorts, add project-owned Suno-generated instrumental templates h
 Only add Suno files that were generated under a plan/license that grants the project
 commercial use rights. Do not add random YouTube Music downloads.
 
-The backend currently looks for these filenames:
+YouTube Studio Audio Library tracks are preferred when installed. Download them
+from YouTube Studio Audio Library, verify the visible license screen, then save
+the MP3 files with these exact filenames:
+
+- `ytal-warm-education-lovely-afternoon-breeze.mp3` — Lovely Afternoon Breeze / The 126ers
+- `ytal-cinematic-tension-dark-toys.mp3` — Dark Toys / SYBS
+- `ytal-fast-explainer-rouse.mp3` — ROUSE / Density & Time
+- `ytal-quirky-office-funhouse.mp3` — Funhouse / Bad Snacks
+- `ytal-futuristic-tech-after-all.mp3` — After All / Geographer
+
+Candidate metadata is tracked in `youtube-audio-library-candidates.json`.
+
+If YouTube Audio Library files are not installed, the backend then looks for
+these Suno filenames:
 
 - `warm-education-suno.mp3` (fallback: `warm-storytelling-loop.mp3`)
 - `cinematic-tension-suno.mp3` (fallback: `cinematic-tension-loop.mp3`)

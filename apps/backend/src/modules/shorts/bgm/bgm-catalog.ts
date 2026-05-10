@@ -30,11 +30,64 @@ export interface ResolvedShortsBgmTrack extends ShortsBgmTrack {
 const ASSET_DIR = env.shortsBgmAssetsDir;
 const GENERATED_SOURCE = 'project-generated procedural instrumental loop';
 const GENERATED_LICENSE = 'Project-owned generated asset; safe to replace with a licensed commercial track';
+const YOUTUBE_AUDIO_LIBRARY_SOURCE = 'YouTube Studio Audio Library';
+const YOUTUBE_AUDIO_LIBRARY_LICENSE =
+    'YouTube Audio Library standard license candidate; verify in YouTube Studio before committing the MP3';
 const SUNO_TEMPLATE_SOURCE = 'project-supplied Suno-generated instrumental template';
 const SUNO_TEMPLATE_LICENSE =
     'Project-owned Suno-generated asset; use only if generated under a plan that grants commercial rights';
 
 export const SHORTS_BGM_CATALOG: ShortsBgmTrack[] = [
+    {
+        id: 'ytal-warm-education-01',
+        title: 'Lovely Afternoon Breeze',
+        filename: 'ytal-warm-education-lovely-afternoon-breeze.mp3',
+        mood: 'warm-storytelling',
+        tags: ['education', 'admission', 'school', 'information', 'storytelling'],
+        source: YOUTUBE_AUDIO_LIBRARY_SOURCE,
+        license: YOUTUBE_AUDIO_LIBRARY_LICENSE,
+        attribution: 'The 126ers',
+    },
+    {
+        id: 'ytal-cinematic-tension-01',
+        title: 'Dark Toys',
+        filename: 'ytal-cinematic-tension-dark-toys.mp3',
+        mood: 'cinematic-tension',
+        tags: ['news', 'history', 'war', 'incident', 'mystery', 'documentary'],
+        source: YOUTUBE_AUDIO_LIBRARY_SOURCE,
+        license: YOUTUBE_AUDIO_LIBRARY_LICENSE,
+        attribution: 'SYBS',
+    },
+    {
+        id: 'ytal-fast-explainer-01',
+        title: 'ROUSE',
+        filename: 'ytal-fast-explainer-rouse.mp3',
+        mood: 'fast-explainer',
+        tags: ['tips', 'how-to', 'product', 'shorts', 'explainer'],
+        source: YOUTUBE_AUDIO_LIBRARY_SOURCE,
+        license: YOUTUBE_AUDIO_LIBRARY_LICENSE,
+        attribution: 'Density & Time',
+    },
+    {
+        id: 'ytal-quirky-office-01',
+        title: 'Funhouse',
+        filename: 'ytal-quirky-office-funhouse.mp3',
+        mood: 'quirky-office',
+        tags: ['office', 'psychology', 'relationship', 'work', 'humor'],
+        source: YOUTUBE_AUDIO_LIBRARY_SOURCE,
+        license: YOUTUBE_AUDIO_LIBRARY_LICENSE,
+        attribution: 'Bad Snacks',
+    },
+    {
+        id: 'ytal-futuristic-tech-01',
+        title: 'After All',
+        filename: 'ytal-futuristic-tech-after-all.mp3',
+        mood: 'futuristic-tech',
+        tags: ['ai', 'developer', 'automation', 'tool', 'tech'],
+        source: YOUTUBE_AUDIO_LIBRARY_SOURCE,
+        license: YOUTUBE_AUDIO_LIBRARY_LICENSE,
+        attribution: 'Geographer',
+    },
     {
         id: 'warm-education-suno-01',
         title: 'Warm Education Suno Template',

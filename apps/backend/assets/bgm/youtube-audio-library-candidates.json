@@ -1,0 +1,57 @@
+{
+    "source": "YouTube Studio Audio Library",
+    "selectionDate": "2026-05-10",
+    "policy": "Download from YouTube Studio Audio Library only. Verify the Studio license screen before committing MP3 files. Do not use random YouTube uploads or playlist rips.",
+    "tracks": [
+        {
+            "theme": "warm-storytelling",
+            "filename": "ytal-warm-education-lovely-afternoon-breeze.mp3",
+            "title": "Lovely Afternoon Breeze",
+            "artist": "The 126ers",
+            "genre": "Pop",
+            "mood": "Inspirational",
+            "durationSec": 154,
+            "intendedUse": "education, admission, calm information shorts"
+        },
+        {
+            "theme": "cinematic-tension",
+            "filename": "ytal-cinematic-tension-dark-toys.mp3",
+            "title": "Dark Toys",
+            "artist": "SYBS",
+            "genre": "Cinematic",
+            "mood": "Dark",
+            "durationSec": 173,
+            "intendedUse": "news, history, incidents, mystery, documentary shorts"
+        },
+        {
+            "theme": "fast-explainer",
+            "filename": "ytal-fast-explainer-rouse.mp3",
+            "title": "ROUSE",
+            "artist": "Density & Time",
+            "genre": "Dance & Electronic",
+            "mood": "Inspirational",
+            "durationSec": 216,
+            "intendedUse": "tips, reviews, product, comparison, explainer shorts"
+        },
+        {
+            "theme": "quirky-office",
+            "filename": "ytal-quirky-office-funhouse.mp3",
+            "title": "Funhouse",
+            "artist": "Bad Snacks",
+            "genre": "Dance & Electronic",
+            "mood": "Funky",
+            "durationSec": 116,
+            "intendedUse": "workplace, psychology, relationships, light tension shorts"
+        },
+        {
+            "theme": "futuristic-tech",
+            "filename": "ytal-futuristic-tech-after-all.mp3",
+            "title": "After All",
+            "artist": "Geographer",
+            "genre": "Ambient",
+            "mood": "Calm",
+            "durationSec": 187,
+            "intendedUse": "AI, developer tools, automation, technology shorts"
+        }
+    ]
+}
