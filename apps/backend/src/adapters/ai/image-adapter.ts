@@ -8,6 +8,7 @@ export interface ImageGenerationRequest {
     width?: number;
     height?: number;
     style?: string;
+    signal?: AbortSignal;
 }
 
 export interface ImageGenerationResult {
@@ -41,7 +42,7 @@ export const imageAdapter = {
         const size = openAIImageSizeFor(width, height);
         const model = env.openaiImageModel;
 
-        return generateWithModel(apiKey, model, request.prompt, size);
+        return generateWithModel(apiKey, model, request.prompt, size, request.signal);
     },
 };
 
@@ -49,7 +50,8 @@ async function generateWithModel(
     apiKey: string,
     model: string,
     prompt: string,
-    size: { size: string; width: number; height: number }
+    size: { size: string; width: number; height: number },
+    signal?: AbortSignal
 ): Promise<ImageGenerationResult> {
     log.info('OpenAI image generation', {
         model,
@@ -61,7 +63,7 @@ async function generateWithModel(
     });
 
     const startedAt = Date.now();
-    const data = await requestOpenAIImage(apiKey, model, prompt, size);
+    const data = await requestOpenAIImage(apiKey, model, prompt, size, signal);
     const first = data.data?.[0];
     if (!first?.b64_json && !first?.url) throw new Error('OpenAI returned no image data');
 
@@ -88,17 +90,21 @@ async function requestOpenAIImage(
     apiKey: string,
     model: string,
     prompt: string,
-    size: { size: string; width: number; height: number }
+    size: { size: string; width: number; height: number },
+    signal?: AbortSignal
 ): Promise<{ data?: Array<{ b64_json?: string; url?: string }> }> {
     let lastError: unknown;
 
     for (let attempt = 1; attempt <= IMAGE_MAX_ATTEMPTS; attempt += 1) {
         let shouldRetry = false;
+        throwIfAborted(signal);
 
         try {
             log.info('OpenAI image API attempt', { model, attempt, maxAttempts: IMAGE_MAX_ATTEMPTS });
-            return await fetchOpenAIImageData(apiKey, model, prompt, size);
+            return await fetchOpenAIImageData(apiKey, model, prompt, size, signal);
         } catch (err) {
+            if (isAbortError(err)) throw err;
+
             if (err instanceof Error && err.message.includes('requires OpenAI organization verification')) {
                 throw err;
             }
@@ -135,7 +141,7 @@ async function requestOpenAIImage(
         }
 
         if (shouldRetry) {
-            await sleep(imageRetryDelayMs(attempt));
+            await sleep(imageRetryDelayMs(attempt), signal);
         }
     }
 
@@ -147,38 +153,42 @@ async function fetchOpenAIImageData(
     apiKey: string,
     model: string,
     prompt: string,
-    size: { size: string; width: number; height: number }
+    size: { size: string; width: number; height: number },
+    signal?: AbortSignal
 ): Promise<OpenAIImageResponse> {
+    throwIfAborted(signal);
+
     const controller = new AbortController();
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
+    let abortListener: (() => void) | undefined;
 
     try {
-        const timeoutPromise = new Promise<never>((_, reject) => {
-            timeout = setTimeout(() => {
-                controller.abort();
-                reject(new Error(`OpenAI image API timed out after ${Math.round(IMAGE_TIMEOUT_MS / 1000)} seconds`));
-            }, IMAGE_TIMEOUT_MS);
-        });
-        const response = await Promise.race([
-            fetch(`${env.openaiBaseUrl}/images/generations`, {
-                method: 'POST',
-                headers: {
-                    Authorization: `Bearer ${apiKey}`,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    model,
-                    prompt,
-                    n: 1,
-                    size: size.size,
-                    quality: env.openaiImageQuality,
-                    output_format: 'png',
-                }),
-                signal: controller.signal,
+        abortListener = () => controller.abort(signal?.reason);
+        signal?.addEventListener('abort', abortListener, { once: true });
+
+        timeout = setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+        }, IMAGE_TIMEOUT_MS);
+
+        const response = await fetch(`${env.openaiBaseUrl}/images/generations`, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                model,
+                prompt,
+                n: 1,
+                size: size.size,
+                quality: env.openaiImageQuality,
+                output_format: 'png',
             }),
-            timeoutPromise,
-        ]);
-        const text = await Promise.race([response.text(), timeoutPromise]);
+            signal: controller.signal,
+        });
+        const text = await response.text();
 
         if (!response.ok) {
             if (response.status === 403 && /verified|verification|organization/i.test(text)) {
@@ -198,12 +208,17 @@ async function fetchOpenAIImageData(
             );
         }
     } catch (err) {
+        if (timedOut) {
+            throw new Error(`OpenAI image API timed out after ${Math.round(IMAGE_TIMEOUT_MS / 1000)} seconds`);
+        }
+        if (signal?.aborted) throw createAbortError(abortMessageFromSignal(signal));
         if (err instanceof Error && err.name === 'AbortError') {
             throw new Error(`OpenAI image API timed out after ${Math.round(IMAGE_TIMEOUT_MS / 1000)} seconds`);
         }
         throw err;
     } finally {
         if (timeout) clearTimeout(timeout);
+        if (abortListener) signal?.removeEventListener('abort', abortListener);
     }
 }
 
@@ -215,6 +230,44 @@ function imageRetryDelayMs(attempt: number): number {
     return attempt === 1 ? 1000 : 3000;
 }
 
-function sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+function isAbortError(err: unknown): boolean {
+    return err instanceof Error && err.name === 'AbortError';
+}
+
+function createAbortError(message: string): Error {
+    const error = new Error(message);
+    error.name = 'AbortError';
+    return error;
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+    if (signal?.aborted) throw createAbortError(abortMessageFromSignal(signal));
+}
+
+function abortMessageFromSignal(signal?: AbortSignal): string {
+    const reason = signal?.reason;
+    if (reason instanceof Error) return reason.message;
+    if (typeof reason === 'string' && reason) return reason;
+    return 'OpenAI image API request aborted';
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+        if (signal?.aborted) {
+            reject(createAbortError(abortMessageFromSignal(signal)));
+            return;
+        }
+
+        const timeout = setTimeout(() => {
+            signal?.removeEventListener('abort', onAbort);
+            resolve();
+        }, ms);
+
+        const onAbort = () => {
+            clearTimeout(timeout);
+            reject(createAbortError(abortMessageFromSignal(signal)));
+        };
+
+        signal?.addEventListener('abort', onAbort, { once: true });
+    });
 }

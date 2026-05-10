@@ -16,6 +16,18 @@ import type { BlockExecutorResult } from '../modules/blocks/types';
  * Called by the queue adapter (local: inline; prod: Lambda/SQS worker).
  */
 
+const NODE_CANCEL_POLL_MS = 1000;
+
+function createExecutionCancelledError(message = 'Run cancelled during node execution'): Error {
+    const error = new Error(message);
+    error.name = 'ExecutionCancelledError';
+    return error;
+}
+
+function isExecutionCancelledError(err: unknown): boolean {
+    return err instanceof Error && (err.name === 'ExecutionCancelledError' || /cancelled/i.test(err.message));
+}
+
 // ============================================================================
 // Topological sort (Kahn's algorithm) — waves of parallel-executable nodes
 // ============================================================================
@@ -351,14 +363,69 @@ export const executionEngine = {
 
         const persistedAssetKeys = new Set<string>();
         let lastProgress = 0;
+        const abortController = new AbortController();
+        let cancelPoller: ReturnType<typeof setInterval> | undefined;
+        let cancelPromiseReject: ((error: Error) => void) | undefined;
+
+        const isCancelled = async (): Promise<boolean> => {
+            const [currentRun, currentNode] = await Promise.all([
+                runRepo.getRun(runId),
+                runRepo.getRunNode(runId, nodeId),
+            ]);
+            return currentRun?.status === 'CANCELLED' || currentNode?.status === 'CANCELLED';
+        };
+
+        const abortAsCancelled = (): void => {
+            if (!abortController.signal.aborted) {
+                abortController.abort(createExecutionCancelledError());
+            }
+            cancelPromiseReject?.(createExecutionCancelledError());
+        };
+
+        const ensureNodeActive = async (): Promise<void> => {
+            if (abortController.signal.aborted || (await isCancelled())) {
+                abortAsCancelled();
+                throw createExecutionCancelledError();
+            }
+        };
+
+        const markNodeCancelled = async (): Promise<void> => {
+            abortAsCancelled();
+            const currentNode = await runRepo.getRunNode(runId, nodeId);
+            if (!currentNode || currentNode.status === 'CANCELLED') return;
+            if (currentNode.status === 'PENDING' || currentNode.status === 'RUNNING') {
+                await runRepo.updateRunNodeStatus(runId, nodeId, 'CANCELLED', {
+                    errorCode: 'RUN_CANCELLED',
+                    errorMessage: 'Run was cancelled by user',
+                });
+            }
+        };
+
+        const cancelPromise = new Promise<never>((_, reject) => {
+            cancelPromiseReject = reject;
+            cancelPoller = setInterval(() => {
+                void isCancelled()
+                    .then(cancelled => {
+                        if (cancelled) abortAsCancelled();
+                    })
+                    .catch(() => {
+                        /* cancellation polling is best-effort */
+                    });
+            }, NODE_CANCEL_POLL_MS);
+        });
+        void cancelPromise.catch(() => {
+            /* cancellation is consumed by the active node execution race */
+        });
 
         const broadcastProgress = async (progress: number, message?: string): Promise<void> => {
             if (!runForNode) return;
+            await ensureNodeActive();
             const boundedProgress = Math.max(lastProgress, Math.max(0, Math.min(99, Math.round(progress))));
             const progressResult = await runRepo.updateRunNodeStatus(runId, nodeId, 'RUNNING', {
                 progress: boundedProgress,
             });
             if (!progressResult.ok) {
+                if (await isCancelled()) throw createExecutionCancelledError();
                 throw new Error(progressResult.error);
             }
             lastProgress = boundedProgress;
@@ -381,6 +448,7 @@ export const executionEngine = {
 
         const persistAsset = async (asset: NonNullable<BlockExecutorResult['assets']>[number]): Promise<void> => {
             if (!runForNode) return;
+            await ensureNodeActive();
 
             const metadataKey = typeof asset.metadata?.['s3Key'] === 'string' ? asset.metadata['s3Key'] : undefined;
             const dataKey = typeof asset.data === 'string' ? asset.data : undefined;
@@ -389,6 +457,7 @@ export const executionEngine = {
 
             const assetId = generateNumericId();
             const publicUrl = await resolveAssetPublicUrl(asset, runId, nodeId);
+            await ensureNodeActive();
 
             await assetRepo.put({
                 assetId,
@@ -403,6 +472,7 @@ export const executionEngine = {
             });
 
             if (dedupeKey) persistedAssetKeys.add(dedupeKey);
+            await ensureNodeActive();
 
             try {
                 await wsService.broadcastToFlow(runForNode.flowId, {
@@ -427,15 +497,28 @@ export const executionEngine = {
             await broadcastProgress(25, `${node.blockType} 실행 준비 중...`);
 
             const resolvedInput = await resolveNodeInput(runId, node);
-            const result = await blockExecutor.execute(node.blockType, resolvedInput, node.inputPayload ?? undefined, {
-                runId,
-                nodeId,
-                flowId: runForNode?.flowId,
-                onProgress: broadcastProgress,
-                onAsset: persistAsset,
+            await ensureNodeActive();
+            const executionPromise = blockExecutor.execute(
+                node.blockType,
+                resolvedInput,
+                node.inputPayload ?? undefined,
+                {
+                    runId,
+                    nodeId,
+                    flowId: runForNode?.flowId,
+                    abortSignal: abortController.signal,
+                    isCancelled,
+                    onProgress: broadcastProgress,
+                    onAsset: persistAsset,
+                }
+            );
+            void executionPromise.catch(() => {
+                /* handled by Promise.race below */
             });
+            const result = await Promise.race([executionPromise, cancelPromise]);
             const { output, durationMs, assets } = result;
 
+            await ensureNodeActive();
             // Broadcast node.progress at 75% after execution, before save
             await broadcastProgress(75, `${node.blockType} 결과 저장 중...`);
 
@@ -452,11 +535,17 @@ export const executionEngine = {
                     : 'analysis rejected the content';
                 const errorMessage = `Analysis rejected content: ${issueSummary}`;
 
-                await runRepo.updateRunNodeStatus(runId, nodeId, 'FAILED', {
+                await ensureNodeActive();
+                const analysisFailedResult = await runRepo.updateRunNodeStatus(runId, nodeId, 'FAILED', {
                     errorCode: 'ANALYSIS_REJECTED',
                     errorMessage,
                     outputPayload: { ...output, durationMs },
                 });
+                if (!analysisFailedResult.ok) {
+                    if (await isCancelled()) throw createExecutionCancelledError();
+                    throw new Error(analysisFailedResult.error);
+                }
+                await ensureNodeActive();
 
                 if (runForNode) {
                     try {
@@ -488,10 +577,12 @@ export const executionEngine = {
             // completed event with missing downloadable outputs.
             if (assets && assets.length > 0 && runForNode) {
                 for (const asset of assets) {
+                    await ensureNodeActive();
                     await persistAsset(asset);
                 }
             }
 
+            await ensureNodeActive();
             await runRepo.updateRunNodeStatus(runId, nodeId, 'COMPLETED', {
                 completedAt: new Date().toISOString(),
                 progress: 100,
@@ -523,13 +614,30 @@ export const executionEngine = {
                 await broadcastNodePortUpdated(runForNode.flowId, nodeId, output);
             }
         } catch (err: unknown) {
+            if (isExecutionCancelledError(err) || abortController.signal.aborted || (await isCancelled())) {
+                await markNodeCancelled();
+                try {
+                    await traceService.record(runId, nodeId, 'STATUS', `Node ${nodeId} cancelled`);
+                } catch {
+                    /* non-fatal */
+                }
+                return;
+            }
+
             const errorMessage = err instanceof Error ? err.message : String(err);
             console.error(`[execution-engine] node ${nodeId} failed:`, errorMessage);
 
-            await runRepo.updateRunNodeStatus(runId, nodeId, 'FAILED', {
+            const failedResult = await runRepo.updateRunNodeStatus(runId, nodeId, 'FAILED', {
                 errorCode: 'EXECUTION_ERROR',
                 errorMessage,
             });
+            if (!failedResult.ok) {
+                if (await isCancelled()) {
+                    await markNodeCancelled();
+                    return;
+                }
+                throw new Error(failedResult.error);
+            }
 
             // Broadcast node.failed + record trace
             if (runForNode) {
@@ -554,6 +662,8 @@ export const executionEngine = {
             } catch {
                 /* non-fatal */
             }
+        } finally {
+            if (cancelPoller) clearInterval(cancelPoller);
         }
     },
 };

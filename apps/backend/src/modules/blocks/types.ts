@@ -64,6 +64,8 @@ export interface BlockExecutorContext {
     runId: string;
     nodeId: string;
     flowId?: string;
+    abortSignal?: AbortSignal;
+    isCancelled?: () => boolean | Promise<boolean>;
     onProgress?: (progress: number, message?: string) => Promise<void>;
     onAsset?: (asset: NonNullable<BlockExecutorResult['assets']>[number]) => Promise<void>;
 }
