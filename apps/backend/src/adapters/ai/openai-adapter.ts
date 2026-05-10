@@ -8,6 +8,9 @@ export interface OpenAIJsonRequest {
     userMessage: string;
     model?: string;
     maxTokens?: number;
+    maxAttempts?: number;
+    signal?: AbortSignal;
+    timeoutMs?: number;
 }
 
 export interface OpenAIJsonResponse {
@@ -79,7 +82,10 @@ export const openaiAdapter = {
                     ],
                     max_completion_tokens: request.maxTokens ?? 512,
                 }),
-            }
+            },
+            request.maxAttempts ?? 3,
+            request.signal,
+            request.timeoutMs
         );
 
         const content = body.choices?.[0]?.message?.content?.trim();
@@ -136,7 +142,10 @@ export const openaiAdapter = {
                     response_format: { type: 'json_object' },
                     max_completion_tokens: request.maxTokens ?? 1024,
                 }),
-            }
+            },
+            request.maxAttempts ?? 3,
+            request.signal,
+            request.timeoutMs
         );
 
         const content = body.choices?.[0]?.message?.content;
@@ -194,7 +203,10 @@ export const openaiAdapter = {
                     ],
                     max_output_tokens: request.maxTokens ?? 2048,
                 }),
-            }
+            },
+            request.maxAttempts ?? 3,
+            request.signal,
+            request.timeoutMs
         );
 
         const content = extractResponseText(body);
@@ -248,7 +260,10 @@ export const openaiAdapter = {
                     response_format: { type: 'json_object' },
                     max_completion_tokens: request.maxTokens ?? 1024,
                 }),
-            }
+            },
+            request.maxAttempts ?? 3,
+            request.signal,
+            request.timeoutMs
         );
 
         const content = body.choices?.[0]?.message?.content;
@@ -268,12 +283,15 @@ async function fetchOpenAIJson<T extends { error?: { message?: string } }>(
     label: string,
     url: string,
     init: RequestInit,
-    maxAttempts = 3
+    maxAttempts = 3,
+    signal?: AbortSignal,
+    timeoutMs = env.openaiTextTimeoutMs
 ): Promise<T> {
     let lastError: unknown;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        throwIfAborted(signal, label);
         try {
-            const response = await fetch(url, init);
+            const response = await fetchWithTimeout(label, url, init, timeoutMs, signal);
             const body = (await response.json().catch(() => ({}))) as T;
             if (response.ok) return body;
 
@@ -283,23 +301,60 @@ async function fetchOpenAIJson<T extends { error?: { message?: string } }>(
             }
 
             log.warn(`${label} transient error, retrying`, { status: response.status, attempt, message });
-            await sleep(retryDelayMs(attempt));
+            await sleep(retryDelayMs(attempt), signal);
         } catch (err) {
             lastError = err;
             if (err instanceof Error && err.message.startsWith(`${label} error `)) {
                 throw err;
             }
+            if (signal?.aborted) throw createAbortError(`${label} aborted`);
             if (attempt === maxAttempts) break;
             log.warn(`${label} request failed, retrying`, {
                 attempt,
                 message: err instanceof Error ? err.message : String(err),
             });
-            await sleep(retryDelayMs(attempt));
+            await sleep(retryDelayMs(attempt), signal);
         }
     }
 
     if (lastError instanceof Error) throw lastError;
     throw new Error(`${label} request failed`);
+}
+
+async function fetchWithTimeout(
+    label: string,
+    url: string,
+    init: RequestInit,
+    timeoutMs: number,
+    signal?: AbortSignal
+): Promise<Response> {
+    const controller = new AbortController();
+    let timedOut = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let abortListener: (() => void) | undefined;
+
+    try {
+        abortListener = () => controller.abort(signal?.reason);
+        signal?.addEventListener('abort', abortListener, { once: true });
+        timeout = setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+        }, timeoutMs);
+
+        return await fetch(url, {
+            ...init,
+            signal: controller.signal,
+        });
+    } catch (err) {
+        if (timedOut) {
+            throw new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)} seconds`);
+        }
+        if (signal?.aborted) throw createAbortError(`${label} aborted`);
+        throw err;
+    } finally {
+        if (timeout) clearTimeout(timeout);
+        if (abortListener) signal?.removeEventListener('abort', abortListener);
+    }
 }
 
 function isTransientStatus(status: number): boolean {
@@ -310,8 +365,33 @@ function retryDelayMs(attempt: number): number {
     return attempt === 1 ? 750 : 2000;
 }
 
-function sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+        if (signal?.aborted) {
+            reject(createAbortError('OpenAI request aborted'));
+            return;
+        }
+
+        const onAbort = () => {
+            clearTimeout(timeout);
+            reject(createAbortError('OpenAI request aborted'));
+        };
+        const timeout = setTimeout(() => {
+            signal?.removeEventListener('abort', onAbort);
+            resolve();
+        }, ms);
+        signal?.addEventListener('abort', onAbort, { once: true });
+    });
+}
+
+function throwIfAborted(signal: AbortSignal | undefined, label: string): void {
+    if (signal?.aborted) throw createAbortError(`${label} aborted`);
+}
+
+function createAbortError(message: string): Error {
+    const error = new Error(message);
+    error.name = 'AbortError';
+    return error;
 }
 
 function extractResponseText(body: ResponsesApiResponse): string {

@@ -52,6 +52,7 @@ export const env = {
     openaiVisionModel: readEnv('OPENAI_VISION_MODEL', 'gpt-5.4-nano'),
     openaiSearchModel: readEnv('OPENAI_SEARCH_MODEL', readEnv('OPENAI_MODEL', 'gpt-5.4-nano')),
     openaiBaseUrl: readEnv('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
+    openaiTextTimeoutMs: readIntEnv('OPENAI_TEXT_TIMEOUT_MS', 60000, 1),
     allowPaidOpenAI: readBoolEnv('ALLOW_PAID_OPENAI', false),
     maxRunEstimatedCostUsd: readNumberEnv('MAX_RUN_ESTIMATED_COST_USD', 2, 0),
     openaiImageModel: readEnv('OPENAI_IMAGE_MODEL', 'gpt-image-2'),

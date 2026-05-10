@@ -3,7 +3,7 @@ import { publicUrlFromS3Uri } from '../../adapters/aws/s3';
 import { env } from '../../config/env';
 import { log } from '../../utils/logger';
 
-import type { BlockExecutor, BlockExecutorResult } from './types';
+import type { BlockExecutor, BlockExecutorContext, BlockExecutorResult } from './types';
 
 /**
  * Integration block — assembles upstream outputs into a final deliverable.
@@ -142,7 +142,11 @@ function dummyIntegrationOutput(): Record<string, unknown> {
 export const integrationBlock: BlockExecutor = {
     blockType: 'integration',
 
-    async execute(input: unknown, _config?: Record<string, unknown>): Promise<BlockExecutorResult> {
+    async execute(
+        input: unknown,
+        _config?: Record<string, unknown>,
+        context?: BlockExecutorContext
+    ): Promise<BlockExecutorResult> {
         const mode = env.orchestratorMode;
         if (mode === 'mock') {
             return { output: dummyIntegrationOutput(), durationMs: 0 };
@@ -188,6 +192,9 @@ export const integrationBlock: BlockExecutor = {
                     'Generate a catchy Korean YouTube Shorts title and description for an education video. Return JSON: { "title": "...", "description": "...", "hashtags": ["..."] }',
                 userMessage: `키워드: ${upstream.search?.keywords?.join(', ') || '입시'}\n훅: ${upstream.content?.hook || ''}\nCTA: ${upstream.content?.cta || ''}`,
                 maxTokens: 512,
+                maxAttempts: 1,
+                signal: context?.abortSignal,
+                timeoutMs: Math.min(env.openaiTextTimeoutMs, 15000),
             });
             try {
                 const enhanced = JSON.parse(resp.content) as {

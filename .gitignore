@@ -54,6 +54,8 @@ tmp
 
 # Playwright MCP
 .playwright-mcp
+test-results/
+playwright-report/
 
 # Backend local DB
 .local-assets/
