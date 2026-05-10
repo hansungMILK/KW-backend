@@ -34,10 +34,49 @@ user topic
 - 주제마다 content pattern, production mode, scene count, length band, route mix가 달라진다.
 - 1차 MVP는 길이와 비용 폭주를 막기 위해 safety cap을 적용한다.
 - 사용자가 승인하기 전에는 TTS, SRT, render, paid API를 실행하지 않는다.
+- 사용자는 프론트엔드에서 script plan, scene table, timing, scene contract를 직접 검수하고 pass / reject / request changes를 선택할 수 있어야 한다.
 - 최종 결과는 placeholder가 아니라 실제 audio/video stream이 있는 MP4여야 한다.
 - 기존 쇼츠 파이프라인은 회귀하면 안 된다.
 
-## 2. Source System
+## 2. Completion Gates
+
+Production MVP는 두 개의 gate로 나눈다.
+
+### Gate A. Production Foundation
+
+Gate A는 "롱폼 제작 프로젝트가 eureka-flow 노드 자동화로 만들어지고, 사용자가 검수할 수 있는 상태"를 뜻한다.
+
+Gate A 완료 조건:
+
+- longform proposal 생성
+- longform nodes 캔버스 배치
+- topic profile 선택
+- research/brief/draft-scenes/plan artifact 생성
+- 사용자가 plan output을 프론트에서 읽고 pass / reject / request changes 선택 가능
+- approval gate가 backend invariant로 동작
+- 승인 전 paid/TTS/render 차단
+
+Gate A만 끝난 상태를 **production MVP 완료**라고 부르지 않는다. 이 상태는 **production MVP foundation 완료**라고만 부른다.
+
+### Gate B. Production Smoke
+
+Gate B는 "승인된 plan에서 실제 MP4가 만들어지고 검증된다"를 뜻한다.
+
+Gate B 완료 조건:
+
+- 승인된 plan 기준 TTS 생성
+- SRT/timing artifact 생성
+- scene contract 검증 통과
+- tool routing 생성
+- Hyperframes composition 생성
+- MP4 render 완료
+- `ffprobe`에서 video stream 확인
+- `ffprobe`에서 audio stream 확인
+- package node가 final video URL과 metadata를 반환
+
+Gate B까지 통과해야만 **longform production MVP 완료**라고 말할 수 있다.
+
+## 3. Source System
 
 참고 원본은 `kwmin122/sun_tube`다.
 
@@ -59,7 +98,7 @@ user topic
 - scene마다 primary tool route를 고른다.
 - Hyperframes는 최종 TTS-driven motion composition의 기본 조립 장소다.
 
-## 3. MVP Safety Cap
+## 4. MVP Safety Cap
 
 주제별로 production profile은 달라지지만, 첫 production MVP에는 안전 상한이 필요하다.
 
@@ -80,7 +119,7 @@ Default cap:
 - MVP cap 때문에 축소되는 경우 assumptions에 명시한다.
 - 예: `"사용자는 10분을 요청했지만 현재 production MVP는 5분/8 scenes cap으로 축소합니다."`
 
-## 4. Topic-dependent Production Profiles
+## 5. Topic-dependent Production Profiles
 
 Longform은 분량 고정이 아니라 topic profile 기반이다.
 
@@ -127,7 +166,7 @@ In the first production MVP:
 
 This keeps the first production MVP real enough to create MP4 while avoiding a full `sun_tube` automation port.
 
-## 5. Proposed Node Graph
+## 6. Proposed Node Graph
 
 Production MVP graph:
 
@@ -138,6 +177,7 @@ longform-intake
 -> longform-brief
 -> longform-draft-scenes
 -> longform-plan
+-> user-review
 -> approval-gate
 -> longform-tts
 -> longform-timing
@@ -151,7 +191,7 @@ longform-intake
 
 The graph is intentionally longer than the shorts graph. Longform is not "more scenes"; it is a staged production workflow.
 
-## 6. Node Responsibilities
+## 7. Node Responsibilities
 
 ### longform-intake
 
@@ -248,6 +288,38 @@ Output:
 - approvalSummary
 - blockedQuestions
 
+### user-review
+
+역할: 사용자가 프론트엔드에서 longform-plan output을 직접 검수하고 다음 행동을 선택한다.
+
+User actions:
+
+- pass: plan을 승인 후보로 넘긴다.
+- reject: run을 중단하거나 plan을 rejected 상태로 표시한다.
+- request changes: 사용자의 수정 요청을 새 input으로 저장하고 plan 재생성을 요청한다.
+- edit notes: 사용자가 장면별 수정 메모를 남긴다.
+
+Frontend display requirements:
+
+- title / hook / target viewer
+- topic profile and safety cap assumptions
+- scene table
+- rough narration by scene
+- visual direction by scene
+- factuality/source status
+- blocked questions
+- estimated cost before approval
+- "이대로 음성/렌더 진행" 버튼
+- "수정 요청" 버튼
+- "중단" 버튼
+
+Backend requirements:
+
+- review decision is persisted.
+- plan rejection prevents downstream nodes.
+- request changes creates a new plan attempt or supersedes the previous artifact.
+- pass alone is not enough for paid execution; approval-gate must still enforce `plan_approved === true`.
+
 ### approval-gate
 
 역할: plan approval을 backend invariant로 고정한다.
@@ -259,6 +331,7 @@ Output:
 - backend executor가 gate를 검사해야 한다.
 - frontend가 우회 호출을 해도 backend가 차단해야 한다.
 - 승인 이벤트는 artifact envelope의 `approvedAt`과 run metadata에 남아야 한다.
+- rejected 또는 superseded plan은 downstream paid/render nodes로 전달되지 않는다.
 
 ### longform-tts
 
@@ -392,7 +465,58 @@ Output:
 - blockedEnhancements
 - artifactManifest
 
-## 7. Artifact Contract
+## 8. User Review Flow
+
+사용자 관점의 기본 흐름:
+
+```text
+1. 사용자가 채팅에서 롱폼 제작 요청
+2. proposal card에서 예상 노드, 예상 비용, safety cap 확인
+3. proposal 승인
+4. 캔버스에 longform nodes 배치
+5. Gate A 실행
+6. longform-plan node output에서 대본/씬/근거/비용 검수
+7. 사용자가 pass / reject / request changes 선택
+8. pass이면 approval-gate에서 최종 진행 승인
+9. 승인 후 TTS/SRT/Hyperframes/render/QA/package 실행
+10. Gate B 결과에서 MP4, QA, package 확인
+```
+
+사용자는 최소한 다음 artifact를 프론트에서 확인할 수 있어야 한다.
+
+- topic profile
+- research status and source-needed list
+- creative brief
+- draft scene packets
+- script draft
+- scene table
+- rough narration
+- scene contracts
+- tool routing
+- timing/SRT
+- render QA report
+- final package
+
+Reject behavior:
+
+- reject는 downstream TTS/render를 실행하지 않는다.
+- reject reason은 artifact validation issues에 남긴다.
+- run은 CANCELLED 또는 REVIEW_REJECTED 계열 상태로 끝난다.
+
+Request changes behavior:
+
+- 사용자의 수정 요청은 structured review feedback으로 저장된다.
+- 기존 plan artifact는 `superseded`가 된다.
+- 새 plan attempt는 이전 feedback을 input으로 사용한다.
+- 비용이 발생하는 downstream step은 여전히 차단된다.
+
+Pass behavior:
+
+- pass는 사용자가 plan을 읽고 통과시켰다는 뜻이다.
+- paid execution은 approval-gate가 `plan_approved === true`를 확인한 뒤에만 시작한다.
+- pass와 approve를 같은 버튼으로 합칠 수는 있지만, backend에는 review decision과 approval state가 둘 다 남아야 한다.
+
+## 9. Artifact Contract
 
 모든 longform 노드 output은 artifact envelope를 따른다.
 
@@ -411,6 +535,12 @@ Output:
         "issues": [],
         "warnings": []
     },
+    "review": {
+        "decision": "pending",
+        "feedback": [],
+        "reviewedBy": null,
+        "reviewedAt": null
+    },
     "approvedAt": null
 }
 ```
@@ -424,6 +554,7 @@ Required fields:
 - inputs
 - content
 - validation
+- review
 - approvedAt
 
 Allowed status values:
@@ -435,9 +566,17 @@ Allowed status values:
 - `running`
 - `completed`
 - `failed`
+- `rejected`
 - `superseded`
 
-## 8. Imported Rulepack Mapping
+Allowed review decisions:
+
+- `pending`
+- `pass`
+- `reject`
+- `request_changes`
+
+## 10. Imported Rulepack Mapping
 
 | sun_tube source                     | eureka-flow target                                               |
 | ----------------------------------- | ---------------------------------------------------------------- |
@@ -448,7 +587,7 @@ Allowed status values:
 | project templates                   | artifact envelope and longform package manifest                  |
 | hype/Codex skills                   | backend prompt/rulepack text, not runtime skills                 |
 
-## 9. Orchestrator Detection
+## 11. Orchestrator Detection
 
 The orchestrator should produce a longform proposal when the user explicitly asks for:
 
@@ -472,7 +611,7 @@ It should not produce a longform proposal for:
 
 If the request is ambiguous, the proposal may proceed with assumptions, but must include clarifying questions in artifact output.
 
-## 10. Backend Touchpoints
+## 12. Backend Touchpoints
 
 Expected backend surfaces:
 
@@ -483,6 +622,8 @@ Expected backend surfaces:
 - artifact envelope validators
 - topic profile selector
 - approval gate invariant
+- user review persistence
+- review feedback retry/supersede flow
 - TTS provider adapter
 - SRT/timing generator
 - Hyperframes composition adapter
@@ -492,7 +633,7 @@ Expected backend surfaces:
 
 This MVP should avoid changing existing shorts rulepacks and media blocks unless integration requires shared provider adapters.
 
-## 11. Frontend Touchpoints
+## 13. Frontend Touchpoints
 
 Expected frontend surfaces:
 
@@ -500,13 +641,15 @@ Expected frontend surfaces:
 - proposal card shows estimated cost and safety cap assumptions
 - canvas renders longform nodes
 - node detail panel displays artifact envelope content
+- longform-plan output has pass / reject / request changes controls
+- review decision and feedback are visible in node detail
 - approval gate status is visible
 - TTS/render nodes are blocked until approval
 - final MP4 asset is visible in node output or asset list
 
-No new full video editor UI is required for the first production MVP.
+No new full video editor UI is required for the first production MVP, but a review surface for script/scene artifacts is required.
 
-## 12. UAT Matrix
+## 14. UAT Matrix
 
 ### UAT 1. Chat classification
 
@@ -568,7 +711,19 @@ Expected:
 - backend enforces the block even if frontend tries to bypass it
 - approval updates artifact envelope and run metadata
 
-### UAT 5. TTS and timing
+### UAT 5. User review
+
+Expected:
+
+- user can open longform-plan node output
+- script draft, scene table, rough narration, assumptions, and estimated cost are readable
+- user can pass the plan
+- user can reject the plan
+- user can request changes with feedback
+- reject prevents TTS/render execution
+- request changes supersedes the previous plan artifact
+
+### UAT 6. TTS and timing
 
 Expected:
 
@@ -577,7 +732,7 @@ Expected:
 - timed scene packets map narration to scene start/end
 - missing API key blocks before paid execution
 
-### UAT 6. Scene contract and routing
+### UAT 7. Scene contract and routing
 
 Expected:
 
@@ -586,7 +741,7 @@ Expected:
 - non-executed routes are marked `planned` or `blocked`, not silently ignored
 - missing primary screen object blocks composition
 
-### UAT 7. Hyperframes compose and render
+### UAT 8. Hyperframes compose and render
 
 Expected:
 
@@ -596,7 +751,7 @@ Expected:
 - `ffprobe` finds video stream
 - `ffprobe` finds audio stream
 
-### UAT 8. QA and package
+### UAT 9. QA and package
 
 Expected:
 
@@ -604,7 +759,7 @@ Expected:
 - package returns final video URL
 - package includes title candidates, description draft, thumbnail direction
 
-### UAT 9. Shorts regression
+### UAT 10. Shorts regression
 
 Expected:
 
@@ -612,7 +767,7 @@ Expected:
 - existing shorts block catalog remains available
 - no longform changes break `search -> content -> data -> analysis -> media-image + media-tts -> media-video -> integration`
 
-## 13. Acceptance Criteria
+## 15. Acceptance Criteria
 
 The MVP is complete only when all are true.
 
@@ -621,6 +776,10 @@ The MVP is complete only when all are true.
 - topic-dependent production profile is selected.
 - MVP safety cap is applied and disclosed.
 - longform nodes can be placed on the canvas.
+- Gate A can complete and be reported as foundation only.
+- user can review script/scene plan in frontend.
+- user can pass, reject, or request changes.
+- rejected or superseded plans cannot trigger downstream paid/render nodes.
 - approval gate is enforced by backend logic.
 - TTS audio is generated after approval.
 - SRT/timing artifact is generated after TTS.
@@ -630,23 +789,25 @@ The MVP is complete only when all are true.
 - MP4 render produces real audio/video streams.
 - QA blocks placeholder or invalid MP4.
 - package exposes final MP4 URL and upload metadata.
+- Gate B passes on at least one real sample topic before production MVP is called complete.
 - existing shorts UAT remains green.
 
-## 14. Rollout Plan
+## 16. Rollout Plan
 
 1. Commit this revised production MVP design spec.
 2. User reviews the spec.
 3. After approval, write an implementation plan.
 4. Implement topic profile and proposal path.
-5. Implement approval-gated TTS/SRT path.
-6. Implement scene contract and routing validators.
-7. Implement minimal Hyperframes composition/render adapter.
-8. Implement ffprobe QA and package node.
-9. Run no-paid classification/canvas UAT.
-10. Run limited paid production smoke with safety cap.
-11. Verify existing shorts flow after longform changes.
+5. Implement user-review and approval-gate invariants.
+6. Run Gate A no-paid foundation UAT.
+7. Implement approval-gated TTS/SRT path.
+8. Implement scene contract and routing validators.
+9. Implement minimal Hyperframes composition/render adapter.
+10. Implement ffprobe QA and package node.
+11. Run limited paid Gate B production smoke with safety cap.
+12. Verify existing shorts flow after longform changes.
 
-## 15. Explicit Deferrals
+## 17. Explicit Deferrals
 
 These belong to later phases.
 
