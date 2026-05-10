@@ -26,8 +26,8 @@ const openAIImageSizeFor = (width: number, height: number): { size: string; widt
     return { size: '1024x1024', width: 1024, height: 1024 };
 };
 
-const IMAGE_TIMEOUT_MS = Number(process.env.OPENAI_IMAGE_TIMEOUT_MS || 120000);
-const IMAGE_MAX_ATTEMPTS = Math.max(1, Number(process.env.OPENAI_IMAGE_MAX_ATTEMPTS || 1));
+const IMAGE_TIMEOUT_MS = env.openaiImageTimeoutMs;
+const IMAGE_MAX_ATTEMPTS = env.openaiImageMaxAttempts;
 
 type OpenAIImageResponse = { data?: Array<{ b64_json?: string; url?: string }> };
 

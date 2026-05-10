@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 
+import { runWithConcurrency } from './concurrency';
 import { imageAdapter } from '../../adapters/ai/image-adapter';
 import { getPublicUrl, putObject } from '../../adapters/aws/s3';
 import { env } from '../../config/env';
@@ -357,16 +358,18 @@ export const mediaImageBlock: BlockExecutor = {
         };
 
         const generateSceneImageWithRetries = async (
-            scene: (typeof scenePrompts)[number]
+            scene: (typeof scenePrompts)[number],
+            parentSignal: AbortSignal
         ): Promise<{ image: ImageResult; asset: NonNullable<BlockExecutorResult['assets']>[number] }> => {
             let lastError: unknown;
 
             for (let attempt = 1; attempt <= IMAGE_SCENE_MAX_ATTEMPTS; attempt += 1) {
                 await throwIfCancelled(context);
+                throwIfAborted(parentSignal);
 
                 const attemptId = randomUUID();
                 activeSceneAttempts.set(scene.sceneNumber, attemptId);
-                const { controller, cleanup } = createLinkedAbortController(context?.abortSignal);
+                const { controller, cleanup } = createLinkedAbortController(parentSignal);
                 const attemptPromise = generateSceneImage(scene, attemptId, controller.signal);
                 const timeoutMessage = `media-image scene ${scene.sceneNumber} timed out after ${Math.round(
                     IMAGE_SCENE_TIMEOUT_MS / 1000
@@ -407,10 +410,27 @@ export const mediaImageBlock: BlockExecutor = {
             throw lastError instanceof Error ? lastError : new Error(`media-image scene ${scene.sceneNumber} failed`);
         };
 
-        const settledResults = await runWithConcurrency(scenePrompts, IMAGE_SCENE_CONCURRENCY, async scene => {
-            await throwIfCancelled(context);
-            return generateSceneImageWithRetries(scene);
-        });
+        const { controller: batchController, cleanup: cleanupBatchController } = createLinkedAbortController(
+            context?.abortSignal
+        );
+        const settledResults = await runWithConcurrency(
+            scenePrompts,
+            IMAGE_SCENE_CONCURRENCY,
+            async scene => {
+                await throwIfCancelled(context);
+                throwIfAborted(batchController.signal);
+
+                try {
+                    return await generateSceneImageWithRetries(scene, batchController.signal);
+                } catch (err) {
+                    if (!isCancellationError(context, err) && !batchController.signal.aborted) {
+                        batchController.abort(err instanceof Error ? err : new Error(String(err)));
+                    }
+                    throw err;
+                }
+            },
+            { shouldStop: () => batchController.signal.aborted }
+        ).finally(cleanupBatchController);
         const generatedResults: Array<{
             image: ImageResult;
             asset: NonNullable<BlockExecutorResult['assets']>[number];
@@ -464,6 +484,13 @@ function isCancellationError(context: BlockExecutorContext | undefined, err: unk
     if (err instanceof BlockCancelledError) return true;
     if (context?.abortSignal?.aborted) return true;
     return err instanceof Error && /cancelled/i.test(err.message);
+}
+
+function throwIfAborted(signal: AbortSignal): void {
+    if (!signal.aborted) return;
+    const reason = signal.reason;
+    if (reason instanceof Error) throw reason;
+    throw new Error(typeof reason === 'string' && reason ? reason : 'media-image batch aborted');
 }
 
 function createLinkedAbortController(parentSignal?: AbortSignal): {
@@ -528,30 +555,6 @@ function cleanSourceLabel(value: string | undefined): string | undefined {
     const compact = value.replace(/\s+/g, ' ').trim();
     if (!compact || compact === '출처 확인 필요') return undefined;
     return compact;
-}
-
-async function runWithConcurrency<T, R>(
-    items: T[],
-    concurrency: number,
-    worker: (item: T) => Promise<R>
-): Promise<PromiseSettledResult<R>[]> {
-    const results: PromiseSettledResult<R>[] = new Array(items.length);
-    let nextIndex = 0;
-
-    const runNext = async (): Promise<void> => {
-        while (nextIndex < items.length) {
-            const currentIndex = nextIndex;
-            nextIndex += 1;
-            try {
-                results[currentIndex] = { status: 'fulfilled', value: await worker(items[currentIndex]) };
-            } catch (reason) {
-                results[currentIndex] = { status: 'rejected', reason };
-            }
-        }
-    };
-
-    await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => runNext()));
-    return results;
 }
 
 function withTimeoutAndAbort<T>(

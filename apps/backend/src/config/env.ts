@@ -56,6 +56,8 @@ export const env = {
     maxRunEstimatedCostUsd: readNumberEnv('MAX_RUN_ESTIMATED_COST_USD', 2, 0),
     openaiImageModel: readEnv('OPENAI_IMAGE_MODEL', 'gpt-image-2'),
     openaiImageQuality: readEnv('OPENAI_IMAGE_QUALITY', 'medium'),
+    openaiImageTimeoutMs: readIntEnv('OPENAI_IMAGE_TIMEOUT_MS', 120000, 1),
+    openaiImageMaxAttempts: readIntEnv('OPENAI_IMAGE_MAX_ATTEMPTS', 1, 1),
     openaiImageSceneTimeoutMs: readIntEnv('OPENAI_IMAGE_SCENE_TIMEOUT_MS', 120000, 1),
     openaiImageSceneMaxAttempts: readIntEnv('OPENAI_IMAGE_SCENE_MAX_ATTEMPTS', 1, 1),
     openaiImageSceneConcurrency: readIntEnv('OPENAI_IMAGE_SCENE_CONCURRENCY', 12, 1),
