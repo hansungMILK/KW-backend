@@ -6,14 +6,18 @@ import { env } from '../../config/env';
 import { traceService } from '../../services/trace-service';
 import { selectBgmForShorts } from '../shorts/bgm/bgm-selector';
 
-import type { BlockExecutor, BlockExecutorResult } from './types';
+import type { BlockExecutor, BlockExecutorContext, BlockExecutorResult } from './types';
 
 // ─── block ───────────────────────────────────────────────────────────────────
 
 export const mediaVideoBlock: BlockExecutor = {
     blockType: 'media-video',
 
-    async execute(input: unknown, _config?: Record<string, unknown>): Promise<BlockExecutorResult> {
+    async execute(
+        input: unknown,
+        _config?: Record<string, unknown>,
+        context?: BlockExecutorContext
+    ): Promise<BlockExecutorResult> {
         const start = Date.now();
 
         // Extract image URLs from media-image output and audio URL from media-tts output.
@@ -61,6 +65,8 @@ export const mediaVideoBlock: BlockExecutor = {
             throw new Error('media-video requires audio output from media-tts');
         }
 
+        await ensureVideoNotCancelled(context?.abortSignal);
+
         try {
             const backgroundMusic = enableBackgroundMusic
                 ? selectBgmForShorts({
@@ -76,22 +82,50 @@ export const mediaVideoBlock: BlockExecutor = {
                 );
             }
 
-            const result = await ffmpegAdapter.compose({
-                images,
-                audioUrl,
+            await recordVideoTrace('media-video: composing started', {
+                imageCount: images.length,
+                hasAudio: Boolean(audioUrl),
                 backgroundMusic: backgroundMusic
                     ? {
-                          path: backgroundMusic.track.filePath,
-                          volume: backgroundMusic.volume,
+                          id: backgroundMusic.track.id,
                           title: backgroundMusic.track.title,
-                          license: backgroundMusic.track.license,
-                          attribution: backgroundMusic.track.attribution,
+                          mood: backgroundMusic.track.mood,
                       }
-                    : false,
-                outputWidth: 1080,
-                outputHeight: 1920,
-                outputFormat: 'mp4',
+                    : null,
             });
+            await context?.onProgress?.(35, '영상 합성 입력 준비 완료');
+
+            const timeoutMs = readPositiveIntEnv(
+                'MEDIA_VIDEO_TIMEOUT_MS',
+                readPositiveIntEnv('FFMPEG_TIMEOUT_MS', 840000)
+            );
+            const compositionSignal = createTimeoutSignal(timeoutMs, context?.abortSignal);
+            const result = await (async () => {
+                try {
+                    return await ffmpegAdapter.compose({
+                        images,
+                        audioUrl,
+                        backgroundMusic: backgroundMusic
+                            ? {
+                                  path: backgroundMusic.track.filePath,
+                                  volume: backgroundMusic.volume,
+                                  title: backgroundMusic.track.title,
+                                  license: backgroundMusic.track.license,
+                                  attribution: backgroundMusic.track.attribution,
+                              }
+                            : false,
+                        outputWidth: 1080,
+                        outputHeight: 1920,
+                        outputFormat: 'mp4',
+                        signal: compositionSignal.signal,
+                        onProgress: async (progress, message) => {
+                            await context?.onProgress?.(progress, message);
+                        },
+                    });
+                } finally {
+                    compositionSignal.cleanup();
+                }
+            })();
 
             const backgroundMusicMetadata = backgroundMusic
                 ? {
@@ -112,6 +146,7 @@ export const mediaVideoBlock: BlockExecutor = {
                   };
 
             const s3Key = `media/video/${randomUUID()}/output.mp4`;
+            await ensureVideoNotCancelled(context?.abortSignal);
             await putObject(s3Key, result.videoBuffer, 'video/mp4');
             const publicUrl = getPublicUrl(s3Key);
 
@@ -132,7 +167,7 @@ export const mediaVideoBlock: BlockExecutor = {
             ];
 
             try {
-                await traceService.record('pending', null, 'STATUS', 'media-video: video composed', {
+                await recordVideoTrace('media-video: video composed', {
                     s3Key,
                     durationSec: result.durationSec,
                     sizeBytes: result.sizeBytes,
@@ -173,6 +208,59 @@ export const mediaVideoBlock: BlockExecutor = {
         }
     },
 };
+
+function readPositiveIntEnv(name: string, fallback: number): number {
+    const raw = process.env[name];
+    if (!raw) return fallback;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function createTimeoutSignal(
+    timeoutMs: number,
+    parentSignal?: AbortSignal
+): { signal: AbortSignal; cleanup: () => void } {
+    const controller = new AbortController();
+    const abort = (reason?: unknown) => {
+        if (!controller.signal.aborted) {
+            controller.abort(reason instanceof Error ? reason : new Error(String(reason || 'media-video cancelled')));
+        }
+    };
+    const onParentAbort = () => abort(parentSignal?.reason ?? new Error('media-video cancelled'));
+
+    if (parentSignal?.aborted) {
+        onParentAbort();
+        return { signal: controller.signal, cleanup: () => undefined };
+    }
+
+    parentSignal?.addEventListener('abort', onParentAbort, { once: true });
+    const timer = setTimeout(
+        () => abort(new Error(`media-video timed out after ${Math.round(timeoutMs / 1000)} seconds`)),
+        timeoutMs
+    );
+
+    return {
+        signal: controller.signal,
+        cleanup: () => {
+            clearTimeout(timer);
+            parentSignal?.removeEventListener('abort', onParentAbort);
+        },
+    };
+}
+
+async function ensureVideoNotCancelled(signal?: AbortSignal): Promise<void> {
+    if (!signal?.aborted) return;
+    const reason = signal.reason;
+    throw reason instanceof Error ? reason : new Error('media-video cancelled');
+}
+
+async function recordVideoTrace(message: string, data?: Record<string, unknown>): Promise<void> {
+    try {
+        await traceService.record('pending', null, 'STATUS', message, data);
+    } catch {
+        /* non-fatal */
+    }
+}
 
 function durationForImage(
     image: { sceneNumber?: number; durationSec?: number },

@@ -34,6 +34,8 @@ describe('mediaVideoBlock', () => {
     });
 
     it('passes narration-derived subtitles to the video compositor instead of visual teaser captions', async () => {
+        const abortController = new AbortController();
+        const progress = vi.fn(async () => undefined);
         await mediaVideoBlock.execute(
             {
                 images: [
@@ -60,14 +62,23 @@ describe('mediaVideoBlock', () => {
                     title: '테스트 제목',
                 },
             },
-            { backgroundMusic: false }
+            { backgroundMusic: false },
+            {
+                runId: 'run_1',
+                nodeId: 'node_1',
+                abortSignal: abortController.signal,
+                onProgress: progress,
+            }
         );
 
         expect(ffmpegAdapter.compose).toHaveBeenCalledTimes(1);
         const request = vi.mocked(ffmpegAdapter.compose).mock.calls[0]?.[0];
+        expect(request?.signal).toBeInstanceOf(AbortSignal);
+        expect(request?.onProgress).toBeTypeOf('function');
         expect(request?.images[0]).toMatchObject({
             title: '테스트 제목',
             caption: '이 문장이 실제 TTS로 읽히고 하단 자막에도 그대로 나와야 합니다.',
         });
+        expect(progress).toHaveBeenCalledWith(35, '영상 합성 입력 준비 완료');
     });
 });

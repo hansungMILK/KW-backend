@@ -22,6 +22,8 @@ export interface VideoCompositionRequest {
     outputWidth: number;
     outputHeight: number;
     outputFormat: 'mp4';
+    signal?: AbortSignal;
+    onProgress?: (progress: number, message: string) => void | Promise<void>;
 }
 
 export interface VideoCompositionResult {
@@ -49,6 +51,7 @@ export const ffmpegAdapter = {
             if (request.images.length === 0) {
                 throw new Error('FFmpeg composition requires at least one real image input');
             }
+            throwIfAborted(request.signal);
 
             const imageFiles: Array<{
                 path: string;
@@ -62,7 +65,8 @@ export const ffmpegAdapter = {
             for (let i = 0; i < request.images.length; i++) {
                 const image = request.images[i];
                 const path = join(workDir, `image-${String(i).padStart(2, '0')}.png`);
-                const imageBuffer = await loadImageBinary(image.url);
+                throwIfAborted(request.signal);
+                const imageBuffer = await loadImageBinary(image.url, request.signal);
                 await writeFile(path, imageBuffer);
                 imageFiles.push({
                     path,
@@ -71,24 +75,43 @@ export const ffmpegAdapter = {
                     caption: image.caption,
                     sourceLabel: image.sourceLabel,
                 });
+                await request.onProgress?.(
+                    40 + Math.round(((i + 1) / request.images.length) * 12),
+                    `이미지 입력 준비 중 (${i + 1}/${request.images.length})`
+                );
             }
 
             const overlayStrategy = resolveOverlayStrategy();
             if (overlayStrategy === 'image') {
                 for (let i = 0; i < imageFiles.length; i += 1) {
+                    throwIfAborted(request.signal);
                     imageFiles[i].overlayPath = await createOverlayPng(imageFiles[i], i, workDir);
+                    await request.onProgress?.(
+                        52 + Math.round(((i + 1) / imageFiles.length) * 8),
+                        `자막 오버레이 준비 중 (${i + 1}/${imageFiles.length})`
+                    );
                 }
             }
 
             let audioPath: string | null = null;
             if (request.audioUrl) {
                 audioPath = join(workDir, 'audio.mp3');
-                await writeFile(audioPath, await loadAudioBinary(request.audioUrl));
+                throwIfAborted(request.signal);
+                await writeFile(audioPath, await loadAudioBinary(request.audioUrl, request.signal));
+                await request.onProgress?.(62, '나레이션 입력 준비 완료');
             }
 
-            const backgroundMusicPath = await resolveBackgroundMusicPath(request.backgroundMusic, workDir);
+            const backgroundMusicPath = await resolveBackgroundMusicPath(
+                request.backgroundMusic,
+                workDir,
+                request.signal
+            );
+            if (backgroundMusicPath) await request.onProgress?.(65, '배경음악 입력 준비 완료');
 
-            await runFfmpeg(buildArgs(imageFiles, audioPath, backgroundMusicPath, request, outputPath));
+            throwIfAborted(request.signal);
+            await request.onProgress?.(70, 'FFmpeg 합성 시작');
+            await runFfmpeg(buildArgs(imageFiles, audioPath, backgroundMusicPath, request, outputPath), request.signal);
+            await request.onProgress?.(88, 'FFmpeg 합성 완료');
 
             const videoBuffer = await readFile(outputPath);
             const { size } = await stat(outputPath);
@@ -401,7 +424,8 @@ function escapeXml(value: string): string {
 
 async function resolveBackgroundMusicPath(
     backgroundMusic: VideoCompositionRequest['backgroundMusic'],
-    workDir: string
+    workDir: string,
+    signal?: AbortSignal
 ): Promise<string | null> {
     if (!backgroundMusic || backgroundMusic === true) return null;
     if (typeof backgroundMusic !== 'object') return null;
@@ -415,7 +439,7 @@ async function resolveBackgroundMusicPath(
 
     if (backgroundMusic.url) {
         const bgmPath = join(workDir, 'background-music.mp3');
-        await writeFile(bgmPath, await loadAudioBinary(backgroundMusic.url));
+        await writeFile(bgmPath, await loadAudioBinary(backgroundMusic.url, signal));
         return bgmPath;
     }
 
@@ -429,7 +453,8 @@ function resolveBackgroundMusicVolume(backgroundMusic: VideoCompositionRequest['
     return Math.min(0.3, Math.max(0, volume));
 }
 
-async function loadImageBinary(url: string): Promise<Buffer> {
+async function loadImageBinary(url: string, signal?: AbortSignal): Promise<Buffer> {
+    throwIfAborted(signal);
     if (url.startsWith('fake://') || url.startsWith('placeholder://')) {
         throw new Error(`FFmpeg image input must be a real public URL, got ${url}`);
     }
@@ -441,12 +466,13 @@ async function loadImageBinary(url: string): Promise<Buffer> {
     const localAssetKey = localAssetKeyFromUrl(url);
     if (localAssetKey) return readFile(getLocalAssetPath(localAssetKey));
 
-    const response = await fetch(url);
+    const response = await fetch(url, { signal });
     if (!response.ok) throw new Error(`Failed to fetch image input ${url}: HTTP ${response.status}`);
     return Buffer.from(await response.arrayBuffer());
 }
 
-async function loadAudioBinary(url: string): Promise<Buffer> {
+async function loadAudioBinary(url: string, signal?: AbortSignal): Promise<Buffer> {
+    throwIfAborted(signal);
     if (url.startsWith('fake://') || url.startsWith('placeholder://')) {
         throw new Error(`FFmpeg audio input must be a real public URL, got ${url}`);
     }
@@ -457,7 +483,7 @@ async function loadAudioBinary(url: string): Promise<Buffer> {
     const localAssetKey = localAssetKeyFromUrl(url);
     if (localAssetKey) return readFile(getLocalAssetPath(localAssetKey));
 
-    const response = await fetch(url);
+    const response = await fetch(url, { signal });
     if (!response.ok) throw new Error(`Failed to fetch audio input ${url}: HTTP ${response.status}`);
     return Buffer.from(await response.arrayBuffer());
 }
@@ -468,13 +494,34 @@ function localAssetKeyFromUrl(url: string): string | undefined {
     return decodeURIComponent(url.slice(base.length + 1));
 }
 
-function runFfmpeg(args: string[]): Promise<void> {
+function runFfmpeg(args: string[], signal?: AbortSignal): Promise<void> {
     return new Promise((resolve, reject) => {
+        if (signal?.aborted) {
+            reject(abortError(signal));
+            return;
+        }
+
         const child = spawn(FFMPEG_PATH, args);
         let stderr = '';
+        let settled = false;
+        const rejectOnce = (error: Error) => {
+            if (settled) return;
+            settled = true;
+            reject(error);
+        };
+        const resolveOnce = () => {
+            if (settled) return;
+            settled = true;
+            resolve();
+        };
+        const onAbort = () => {
+            child.kill('SIGKILL');
+            rejectOnce(abortError(signal));
+        };
+        signal?.addEventListener('abort', onAbort, { once: true });
         const timeout = setTimeout(() => {
             child.kill('SIGKILL');
-            reject(new Error(`FFmpeg timed out after ${Math.round(FFMPEG_TIMEOUT_MS / 1000)} seconds`));
+            rejectOnce(new Error(`FFmpeg timed out after ${Math.round(FFMPEG_TIMEOUT_MS / 1000)} seconds`));
         }, FFMPEG_TIMEOUT_MS);
 
         child.stderr.on('data', chunk => {
@@ -482,7 +529,8 @@ function runFfmpeg(args: string[]): Promise<void> {
         });
         child.on('error', err => {
             clearTimeout(timeout);
-            reject(
+            signal?.removeEventListener('abort', onAbort);
+            rejectOnce(
                 new Error(
                     `FFmpeg not available at ${FFMPEG_PATH}. Set FFMPEG_PATH to a working binary or attach a Lambda layer with /opt/bin/ffmpeg. ${err.message}`
                 )
@@ -490,11 +538,22 @@ function runFfmpeg(args: string[]): Promise<void> {
         });
         child.on('close', code => {
             clearTimeout(timeout);
+            signal?.removeEventListener('abort', onAbort);
             if (code === 0) {
-                resolve();
+                resolveOnce();
                 return;
             }
-            reject(new Error(`FFmpeg failed with exit code ${code}: ${stderr.slice(0, 2000)}`));
+            rejectOnce(new Error(`FFmpeg failed with exit code ${code}: ${stderr.slice(0, 2000)}`));
         });
     });
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+    if (!signal?.aborted) return;
+    throw abortError(signal);
+}
+
+function abortError(signal?: AbortSignal): Error {
+    const reason = signal?.reason;
+    return reason instanceof Error ? reason : new Error('FFmpeg composition cancelled');
 }
