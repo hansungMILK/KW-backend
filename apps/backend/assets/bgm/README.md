@@ -5,6 +5,11 @@ Put only licensed or royalty-free BGM files in this directory.
 The current checked-in MP3 files are project-generated procedural instrumental loops.
 They are intentionally simple and copyright-safe fallbacks.
 
+Default Shorts BGM:
+
+- `default-comic-mi-steak-loop.mp3` — default comic/explainer Shorts bed.
+  This is selected for ordinary non-horror/non-specialized topics.
+
 For production Shorts, add project-owned Suno-generated instrumental templates here.
 Only add Suno files that were generated under a plan/license that grants the project
 commercial use rights. Do not add random YouTube Music downloads.

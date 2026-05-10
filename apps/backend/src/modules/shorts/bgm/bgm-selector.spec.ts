@@ -15,6 +15,13 @@ describe('selectBgmForShorts', () => {
         ]);
     });
 
+    it('uses the comic Shorts template as the default track for ordinary topics', () => {
+        const selection = selectBgmForShorts({ requestText: '식물원김밥이 왜 유행인지 알려줘' });
+
+        expect(selection?.track.id).toBe('default-comic-mi-steak-loop');
+        expect(selection?.track.filename).toBe('default-comic-mi-steak-loop.mp3');
+    });
+
     it('does not use Dark Toys for ordinary history or news documentary topics', () => {
         const selection = selectBgmForShorts({ requestText: '한국 역사 충격 사건 쇼츠 만들어줘' });
 

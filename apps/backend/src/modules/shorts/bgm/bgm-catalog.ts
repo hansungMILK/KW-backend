@@ -4,6 +4,7 @@ import { isAbsolute, join, resolve } from 'path';
 import { env } from '../../../config/env';
 
 export type ShortsBgmMood =
+    | 'default-comic'
     | 'cinematic-tension'
     | 'fast-explainer'
     | 'warm-storytelling'
@@ -39,6 +40,15 @@ const SUNO_TEMPLATE_LICENSE =
     'Project-owned Suno-generated asset; use only if generated under a plan that grants commercial rights';
 
 export const SHORTS_BGM_CATALOG: ShortsBgmTrack[] = [
+    {
+        id: 'default-comic-mi-steak-loop',
+        title: 'I My Mi-steak Looping',
+        filename: 'default-comic-mi-steak-loop.mp3',
+        mood: 'default-comic',
+        tags: ['default', 'comic', 'shorts', 'explainer', 'meme', 'korean-shorts'],
+        source: 'user-supplied Shorts BGM template',
+        license: 'User-supplied asset; verify project usage rights before public/commercial deployment',
+    },
     {
         id: 'ytal-warm-education-01',
         title: 'Lovely Afternoon Breeze',

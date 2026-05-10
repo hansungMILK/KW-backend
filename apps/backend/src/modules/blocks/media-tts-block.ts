@@ -69,22 +69,17 @@ export const mediaTtsBlock: BlockExecutor = {
                   ? (metadata['cta'] as string)
                   : '';
 
-        const narrationParts: string[] = [];
-        if (hook) narrationParts.push(hook);
-        for (const scene of rawScenes) {
-            if (scene.narration) narrationParts.push(scene.narration);
-        }
-        if (cta) narrationParts.push(cta);
+        const segments = buildNarrationSegments(rawScenes, hook, cta);
 
-        if (narrationParts.length === 0) {
+        if (segments.length === 0) {
             throw new Error('media-tts requires narration text from content or data block');
         }
 
-        const fullText = narrationParts.join(' ');
-        const subtitleCues = buildSceneSubtitleCues(rawScenes);
+        const fullText = segments.map(segment => segment.text).join(' ');
 
         try {
             const result = await ttsAdapter.synthesize({ text: fullText });
+            const subtitleCues = buildSceneSubtitleCues(segments, result.estimatedDurationSec);
 
             const s3Key = `media/audio/${randomUUID()}/narration.mp3`;
             await putObject(s3Key, result.audioBuffer, result.contentType);
@@ -120,6 +115,7 @@ export const mediaTtsBlock: BlockExecutor = {
                         format: 'mp3',
                         sampleRate: 44100,
                     },
+                    narrationText: fullText,
                     subtitleCues,
                     normalizedScenes: rawScenes,
                     ...(metadata ? { metadata } : {}),
@@ -140,24 +136,80 @@ export const mediaTtsBlock: BlockExecutor = {
     },
 };
 
-function buildSceneSubtitleCues(scenes: Array<{ sceneNumber?: number; narration?: string; durationSec?: number }>) {
+type NarrationSegment = {
+    sceneNumber: number;
+    text: string;
+    role: 'hook' | 'scene' | 'cta';
+};
+
+function buildNarrationSegments(
+    scenes: Array<{ sceneNumber?: number; narration?: string }>,
+    hook: string,
+    cta: string
+): NarrationSegment[] {
+    const segments: NarrationSegment[] = [];
+    const firstSceneNumber = normalizeSceneNumber(scenes[0]?.sceneNumber, 1);
+    const lastSceneNumber = normalizeSceneNumber(scenes.at(-1)?.sceneNumber, Math.max(1, scenes.length));
+
+    const hookText = normalizeSubtitleText(hook);
+    if (hookText) {
+        segments.push({ sceneNumber: firstSceneNumber, text: hookText, role: 'hook' });
+    }
+
+    scenes.forEach((scene, index) => {
+        const text = normalizeSubtitleText(scene.narration);
+        if (!text) return;
+        segments.push({
+            sceneNumber: normalizeSceneNumber(scene.sceneNumber, index + 1),
+            text,
+            role: 'scene',
+        });
+    });
+
+    const ctaText = normalizeSubtitleText(cta);
+    if (ctaText) {
+        segments.push({ sceneNumber: lastSceneNumber, text: ctaText, role: 'cta' });
+    }
+
+    return segments;
+}
+
+function buildSceneSubtitleCues(segments: NarrationSegment[], totalDurationSec: number) {
+    const safeTotalDurationSec = Number.isFinite(totalDurationSec) && totalDurationSec > 0 ? totalDurationSec : 1;
+    const totalWeight = segments.reduce((sum, segment) => sum + subtitleWeight(segment.text), 0) || segments.length;
     let cursorSec = 0;
-    return scenes.flatMap((scene, index) => {
-        const durationSec = typeof scene.durationSec === 'number' && scene.durationSec > 0 ? scene.durationSec : 5;
+
+    return segments.map((segment, index) => {
+        const isLast = index === segments.length - 1;
+        const durationSec = isLast
+            ? Math.max(0.25, safeTotalDurationSec - cursorSec)
+            : (safeTotalDurationSec * subtitleWeight(segment.text)) / totalWeight;
         const startSec = cursorSec;
-        const endSec = startSec + durationSec;
+        const endSec = isLast ? safeTotalDurationSec : Math.min(safeTotalDurationSec, startSec + durationSec);
         cursorSec = endSec;
 
-        const text = typeof scene.narration === 'string' ? scene.narration.replace(/\s+/g, ' ').trim() : '';
-        if (!text) return [];
-
-        return [
-            {
-                sceneNumber: typeof scene.sceneNumber === 'number' ? scene.sceneNumber : index + 1,
-                text,
-                startSec,
-                endSec,
-            },
-        ];
+        return {
+            sceneNumber: segment.sceneNumber,
+            text: segment.text,
+            role: segment.role,
+            startSec: roundToMillis(startSec),
+            endSec: roundToMillis(endSec),
+        };
     });
+}
+
+function subtitleWeight(text: string): number {
+    return Math.max(4, text.replace(/\s+/g, '').length);
+}
+
+function normalizeSubtitleText(value: unknown): string {
+    return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
+}
+
+function normalizeSceneNumber(value: unknown, fallback: number): number {
+    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function roundToMillis(value: number): number {
+    return Math.round(value * 1000) / 1000;
 }

@@ -1,3 +1,8 @@
+import { spawnSync } from 'child_process';
+import { mkdtemp, rm, writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
+
 import { ensurePaidOpenAIAllowed } from './paid-openai-guard';
 import { env } from '../../config/env';
 import { settingsService } from '../../services/settings-service';
@@ -17,6 +22,11 @@ export interface TtsResult {
 
 const TTS_TIMEOUT_MS = Number(process.env.OPENAI_TTS_TIMEOUT_MS || 120000);
 const TTS_MAX_ATTEMPTS = Math.max(1, Number(process.env.OPENAI_TTS_MAX_ATTEMPTS || 1));
+const FFPROBE_PATH =
+    process.env.FFPROBE_PATH ||
+    (process.env.FFMPEG_PATH && process.env.FFMPEG_PATH.endsWith('ffmpeg')
+        ? process.env.FFMPEG_PATH.replace(/ffmpeg$/, 'ffprobe')
+        : 'ffprobe');
 
 export const ttsAdapter = {
     async synthesize(request: TtsRequest): Promise<TtsResult> {
@@ -38,14 +48,17 @@ export const ttsAdapter = {
         });
 
         const buffer = await requestOpenAITts(apiKey, model, voice, input);
-        // Estimate: OpenAI Korean narration is roughly 7.5 chars/sec with the current default voice.
-        const estimatedDurationSec = Math.ceil(input.length / 7.5);
+        const measuredDurationSec = await probeAudioDurationSec(buffer);
+        // Fallback estimate: OpenAI Korean narration is roughly 7.5 chars/sec with the current default voice.
+        const estimatedDurationSec = measuredDurationSec ?? Math.ceil(input.length / 7.5);
 
         log.info('OpenAI TTS generation complete', {
             model,
             voice,
             latencyMs: Date.now() - startedAt,
             bytes: buffer.byteLength,
+            measuredDurationSec,
+            durationSec: estimatedDurationSec,
         });
 
         return { audioBuffer: buffer, contentType: 'audio/mpeg', estimatedDurationSec };
@@ -90,6 +103,32 @@ async function requestOpenAITts(apiKey: string, model: string, voice: string, in
 
     if (lastError instanceof Error) throw lastError;
     throw new Error('OpenAI TTS request failed');
+}
+
+async function probeAudioDurationSec(buffer: Buffer): Promise<number | undefined> {
+    const workDir = await mkdtemp(join(tmpdir(), 'eureka-tts-probe-'));
+    const audioPath = join(workDir, 'speech.mp3');
+
+    try {
+        await writeFile(audioPath, buffer);
+        const result = spawnSync(
+            FFPROBE_PATH,
+            ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', audioPath],
+            { encoding: 'utf8', timeout: 5000 }
+        );
+        if (result.error || result.status !== 0) return undefined;
+
+        const durationSec = Number.parseFloat(result.stdout.trim());
+        return Number.isFinite(durationSec) && durationSec > 0 ? roundToMillis(durationSec) : undefined;
+    } catch {
+        return undefined;
+    } finally {
+        await rm(workDir, { recursive: true, force: true });
+    }
+}
+
+function roundToMillis(value: number): number {
+    return Math.round(value * 1000) / 1000;
 }
 
 async function fetchOpenAITtsBuffer(apiKey: string, model: string, voice: string, input: string): Promise<Buffer> {

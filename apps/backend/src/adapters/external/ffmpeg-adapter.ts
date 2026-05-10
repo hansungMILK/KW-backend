@@ -2,7 +2,7 @@ import { spawn, spawnSync } from 'child_process';
 import { existsSync } from 'fs';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { join, resolve } from 'path';
 
 import { getLocalAssetPath } from '../aws/s3';
 
@@ -70,7 +70,7 @@ export const ffmpegAdapter = {
                 await writeFile(path, imageBuffer);
                 imageFiles.push({
                     path,
-                    durationSec: Math.max(1, Math.ceil(image.durationSec || 5)),
+                    durationSec: normalizeDurationSec(image.durationSec),
                     title: image.title,
                     caption: image.caption,
                     sourceLabel: image.sourceLabel,
@@ -221,6 +221,7 @@ function buildArgs(
 function resolveOverlayFontFile(): string | undefined {
     const candidates = [
         process.env.FFMPEG_FONT_FILE,
+        resolve('assets/fonts/Jalnan2.otf'),
         '/opt/fonts/Pretendard-Black.otf',
         '/opt/fonts/BlackHanSans-Regular.ttf',
         '/opt/fonts/NotoSansKR-Black.otf',
@@ -259,6 +260,11 @@ function resolveOverlayStrategy(): OverlayStrategy {
     throw new Error(
         'Shorts text overlay requires an ffmpeg build with drawtext support or macOS /usr/bin/sips for local overlay PNG rendering. Set SHORTS_FFMPEG_OVERLAY=off only if text overlay is intentionally disabled.'
     );
+}
+
+function normalizeDurationSec(value: number | undefined): number {
+    const durationSec = typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 5;
+    return Math.max(0.25, Math.round(durationSec * 1000) / 1000);
 }
 
 async function createOverlayPng(

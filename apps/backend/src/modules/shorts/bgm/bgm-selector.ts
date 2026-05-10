@@ -21,7 +21,8 @@ export function selectBgmForShorts(input: {
 
     const mood = classifyBgmMood(input);
     const direct = available.find(track => track.mood === mood);
-    const fallback = available.find(track => track.mood === 'neutral-documentary') ?? available[0];
+    const defaultComic = available.find(track => track.mood === 'default-comic');
+    const fallback = defaultComic ?? available.find(track => track.mood === 'neutral-documentary') ?? available[0];
     const track = direct ?? fallback;
 
     return {
@@ -63,5 +64,5 @@ function classifyBgmMood(input: {
     if (/(꿀팁|방법|리뷰|제품|추천|비교|사용법|설명)/.test(haystack)) {
         return 'fast-explainer';
     }
-    return 'neutral-documentary';
+    return 'default-comic';
 }

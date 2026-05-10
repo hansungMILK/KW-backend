@@ -201,6 +201,18 @@ export const MediaTtsOutputSchema = z.object({
         format: z.string(),
         sampleRate: z.number().optional(),
     }),
+    narrationText: z.string().optional(),
+    subtitleCues: z
+        .array(
+            z.object({
+                sceneNumber: z.number(),
+                text: z.string(),
+                role: z.enum(['hook', 'scene', 'cta']).optional(),
+                startSec: z.number(),
+                endSec: z.number(),
+            })
+        )
+        .optional(),
 });
 
 /** media-video block */

@@ -33,7 +33,7 @@ provider:
             ]
         FFMPEG_PATH: ${self:custom.ffmpegPath.${self:provider.stage}, '/opt/bin/ffmpeg'}
         FFMPEG_TIMEOUT_MS: ${env:FFMPEG_TIMEOUT_MS, '840000'}
-        FFMPEG_FONT_FILE: ${env:FFMPEG_FONT_FILE, '/opt/fonts/NotoSansCJKkr-Regular.otf'}
+        FFMPEG_FONT_FILE: ${env:FFMPEG_FONT_FILE, 'assets/fonts/Jalnan2.otf'}
         SHORTS_FFMPEG_OVERLAY: ${env:SHORTS_FFMPEG_OVERLAY, 'all'}
         SHORTS_BGM_MODE: ${env:SHORTS_BGM_MODE, 'catalog'}
         SHORTS_BGM_REQUIRED: ${env:SHORTS_BGM_REQUIRED, 'false'}
@@ -152,6 +152,7 @@ plugins:
 package:
     patterns:
         - assets/bgm/**
+        - assets/fonts/**
 
 custom:
     corsAllowedOrigins:

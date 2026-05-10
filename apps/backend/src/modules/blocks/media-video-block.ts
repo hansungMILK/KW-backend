@@ -40,23 +40,29 @@ export const mediaVideoBlock: BlockExecutor = {
             visualText?: string;
             sourceLabel?: string;
         };
+        type RawSubtitleCue = {
+            sceneNumber?: number;
+            text?: string;
+            startSec?: number;
+            endSec?: number;
+        };
         const rawImages: RawImage[] = (inp?.images as RawImage[] | undefined) ?? [];
         const rawScenes: RawScene[] = (inp?.normalizedScenes as RawScene[] | undefined) ?? [];
+        const subtitleCues: RawSubtitleCue[] = Array.isArray(inp?.subtitleCues)
+            ? (inp.subtitleCues as RawSubtitleCue[])
+            : [];
         const metadata = inp?.metadata as Record<string, unknown> | undefined;
         const enableBackgroundMusic = _config?.backgroundMusic !== false;
 
-        const images = rawImages
-            .filter(img => typeof img.url === 'string')
-            .map(img => ({
-                url: img.url as string,
-                durationSec: durationForImage(img, rawScenes),
-                title: typeof metadata?.title === 'string' ? metadata.title : undefined,
-                caption: subtitleForImage(img, rawScenes),
-                sourceLabel: img.sourceLabel || sourceLabelForImage(img, rawScenes),
-            }));
-
-        const audioObj = inp?.audio as { url?: string } | undefined;
+        const audioObj = inp?.audio as { url?: string; durationSec?: number } | undefined;
         const audioUrl = typeof audioObj?.url === 'string' ? audioObj.url : undefined;
+        const audioDurationSec =
+            typeof audioObj?.durationSec === 'number' &&
+            Number.isFinite(audioObj.durationSec) &&
+            audioObj.durationSec > 0
+                ? audioObj.durationSec
+                : undefined;
+        const images = buildSyncedImageSegments(rawImages, rawScenes, subtitleCues, metadata, audioDurationSec);
 
         if (images.length === 0) {
             throw new Error('media-video requires image outputs from media-image');
@@ -262,6 +268,98 @@ async function recordVideoTrace(message: string, data?: Record<string, unknown>)
     }
 }
 
+function buildSyncedImageSegments(
+    images: Array<{
+        url?: string;
+        sceneNumber?: number;
+        durationSec?: number;
+        caption?: string;
+        visualText?: string;
+        sourceLabel?: string;
+    }>,
+    scenes: Array<{
+        sceneNumber?: number;
+        durationSec?: number;
+        caption?: string;
+        narration?: string;
+        visualText?: string;
+        sourceLabel?: string;
+    }>,
+    subtitleCues: Array<{ sceneNumber?: number; text?: string; startSec?: number; endSec?: number }>,
+    metadata?: Record<string, unknown>,
+    audioDurationSec?: number
+): Array<{ url: string; durationSec: number; title?: string; caption?: string; sourceLabel?: string }> {
+    const title = typeof metadata?.title === 'string' ? metadata.title : undefined;
+    const usableImages = images.filter(
+        (image): image is typeof image & { url: string } => typeof image.url === 'string'
+    );
+    const imagesBySceneNumber = new Map<number, (typeof usableImages)[number]>();
+    usableImages.forEach((image, index) => {
+        imagesBySceneNumber.set(normalizeSceneNumber(image.sceneNumber, index + 1), image);
+    });
+
+    const timedCues = subtitleCues
+        .map(cue => {
+            const startSec =
+                typeof cue.startSec === 'number' && Number.isFinite(cue.startSec) ? cue.startSec : undefined;
+            const endSec = typeof cue.endSec === 'number' && Number.isFinite(cue.endSec) ? cue.endSec : undefined;
+            const text = normalizeSubtitleText(cue.text);
+            if (startSec === undefined || endSec === undefined || endSec <= startSec || !text) return undefined;
+            return {
+                sceneNumber: normalizeSceneNumber(cue.sceneNumber, 1),
+                text,
+                startSec,
+                endSec,
+            };
+        })
+        .filter((cue): cue is { sceneNumber: number; text: string; startSec: number; endSec: number } => Boolean(cue));
+
+    const syncedCues = scaleSubtitleCuesToAudioDuration(timedCues, audioDurationSec);
+
+    if (syncedCues.length > 0 && usableImages.length > 0) {
+        return syncedCues.map((cue, index) => {
+            const image =
+                imagesBySceneNumber.get(cue.sceneNumber) ?? usableImages[Math.min(index, usableImages.length - 1)];
+            return {
+                url: image.url,
+                durationSec: roundToMillis(cue.endSec - cue.startSec),
+                title,
+                caption: cue.text,
+                sourceLabel: image.sourceLabel || sourceLabelForImage(image, scenes),
+            };
+        });
+    }
+
+    return usableImages.map(image => ({
+        url: image.url,
+        durationSec: durationForImage(image, scenes),
+        title,
+        caption: subtitleForImage(image, scenes),
+        sourceLabel: image.sourceLabel || sourceLabelForImage(image, scenes),
+    }));
+}
+
+function scaleSubtitleCuesToAudioDuration(
+    cues: Array<{ sceneNumber: number; text: string; startSec: number; endSec: number }>,
+    audioDurationSec: number | undefined
+): Array<{ sceneNumber: number; text: string; startSec: number; endSec: number }> {
+    if (!audioDurationSec || cues.length === 0) return cues;
+
+    const cueDurationSec = Math.max(...cues.map(cue => cue.endSec));
+    if (!Number.isFinite(cueDurationSec) || cueDurationSec <= 0) return cues;
+    if (Math.abs(cueDurationSec - audioDurationSec) <= 0.5) return cues;
+
+    const scale = audioDurationSec / cueDurationSec;
+    return cues.map((cue, index) => {
+        const isLast = index === cues.length - 1;
+        return {
+            ...cue,
+            startSec: roundToMillis(cue.startSec * scale),
+            endSec: isLast ? roundToMillis(audioDurationSec) : roundToMillis(cue.endSec * scale),
+        };
+    });
+}
+
 function durationForImage(
     image: { sceneNumber?: number; durationSec?: number },
     scenes: Array<{ sceneNumber?: number; durationSec?: number }>
@@ -288,4 +386,16 @@ function subtitleForImage(
 ): string | undefined {
     const matchingScene = scenes.find(scene => scene.sceneNumber === image.sceneNumber);
     return matchingScene?.narration || matchingScene?.caption || image.caption || image.visualText;
+}
+
+function normalizeSubtitleText(value: unknown): string {
+    return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
+}
+
+function normalizeSceneNumber(value: unknown, fallback: number): number {
+    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function roundToMillis(value: number): number {
+    return Math.round(value * 1000) / 1000;
 }
