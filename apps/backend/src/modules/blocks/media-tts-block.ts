@@ -81,6 +81,7 @@ export const mediaTtsBlock: BlockExecutor = {
         }
 
         const fullText = narrationParts.join(' ');
+        const subtitleCues = buildSceneSubtitleCues(rawScenes);
 
         try {
             const result = await ttsAdapter.synthesize({ text: fullText });
@@ -119,6 +120,7 @@ export const mediaTtsBlock: BlockExecutor = {
                         format: 'mp3',
                         sampleRate: 44100,
                     },
+                    subtitleCues,
                     normalizedScenes: rawScenes,
                     ...(metadata ? { metadata } : {}),
                 },
@@ -137,3 +139,25 @@ export const mediaTtsBlock: BlockExecutor = {
         }
     },
 };
+
+function buildSceneSubtitleCues(scenes: Array<{ sceneNumber?: number; narration?: string; durationSec?: number }>) {
+    let cursorSec = 0;
+    return scenes.flatMap((scene, index) => {
+        const durationSec = typeof scene.durationSec === 'number' && scene.durationSec > 0 ? scene.durationSec : 5;
+        const startSec = cursorSec;
+        const endSec = startSec + durationSec;
+        cursorSec = endSec;
+
+        const text = typeof scene.narration === 'string' ? scene.narration.replace(/\s+/g, ' ').trim() : '';
+        if (!text) return [];
+
+        return [
+            {
+                sceneNumber: typeof scene.sceneNumber === 'number' ? scene.sceneNumber : index + 1,
+                text,
+                startSec,
+                endSec,
+            },
+        ];
+    });
+}

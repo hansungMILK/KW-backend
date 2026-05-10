@@ -67,7 +67,7 @@ export const env = {
     shortsBgmMode: readEnv('SHORTS_BGM_MODE', 'catalog'),
     shortsBgmRequired: readBoolEnv('SHORTS_BGM_REQUIRED', false),
     shortsBgmAssetsDir: readEnv('SHORTS_BGM_ASSETS_DIR', 'assets/bgm'),
-    shortsBgmVolume: readNumberEnv('SHORTS_BGM_VOLUME', 0.07, 0),
+    shortsBgmVolume: readNumberEnv('SHORTS_BGM_VOLUME', 0.05, 0),
     nanobananaBaseUrl: readEnv('NANOBANANA_BASE_URL', 'https://www.nananobanana.com/api/v1'),
     nanobananaModel: readEnv('NANOBANANA_MODEL', 'nano-banana'),
 } as const;

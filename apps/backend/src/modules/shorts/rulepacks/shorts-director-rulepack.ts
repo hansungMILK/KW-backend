@@ -3,8 +3,10 @@ export const SHORTS_DIRECTOR_RULES = `Shorts Director Rules:
 - Canvas: 9:16 vertical for Shorts/Reels/TikTok.
 - Use one persistent topTitle across every scene.
 - The final video compositor adds the black top title band and caption/source overlays.
-- Each scene needs one short mainCaption, 6-18 Korean characters when possible.
+- Each scene needs one short mainCaption, 6-18 Korean characters when possible, but this is a visual beat label, not the final lower subtitle.
+- The lower subtitle must match the scene narration text. Do not create a separate subtitle line that conflicts with narration.
 - The main image should feel like a comic, meme, or staged situation, not a report slide.
+- For documentary/history/news topics, central visuals may be evidence-like: flag, map, building, object, x-ray, chart, document, or simple meme reaction.
 - Use exaggerated reaction, clear contrast, simple background, and one visual idea per cut.
 - Scenes should progress as a story: hook -> setup -> escalation -> reveal -> takeaway -> CTA.
 - Use imageSlot values like [Image #1], [Image #2], ... in order.

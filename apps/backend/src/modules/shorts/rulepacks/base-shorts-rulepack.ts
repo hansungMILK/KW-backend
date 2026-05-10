@@ -23,9 +23,11 @@ export const BASE_SHORTS_RULES = `Base Shorts Engine Rules:
 - Default to ${BASE_SHORTS_DEFAULTS.defaultSceneCount} scenes and about ${BASE_SHORTS_DEFAULTS.durationSec} seconds unless the user asks otherwise.
 - Keep each scene visually simple: one strong idea, one short caption, one clear image prompt.
 - Keep one persistent topTitle across all scenes.
-- Use the same final-video grammar across topics: black top title band, bold yellow/white Korean title, comic/meme main scene, and one short caption overlay.
+- Use the same final-video grammar across topics: black top title band, bold yellow/white Korean title, central visual evidence/artwork area, and a black lower subtitle band.
+- Lower subtitles must come from the spoken narration, not from a separate teaser caption.
 - Use [Image #1] through [Image #12] or [Image #15] slots in order.
 - Use a fast opening hook, dense but accurate narration, and a short CTA.
+- Keep the pacing close to Korean documentary Shorts: one new fact, contrast, or reveal every 2-4 seconds.
 - Preserve source references from search through content, image, analysis, and final integration output.
 - Do not invent URLs, source names, publication dates, statistics, or official claims.
 - When certainty is unclear, label the claim as uncertain instead of making it sound final.`;
@@ -33,7 +35,8 @@ export const BASE_SHORTS_RULES = `Base Shorts Engine Rules:
 export const GPT_IMAGE_2_KOREAN_TEXT_RULES = `GPT-image-2 visual-only rules:
 - Do not ask GPT-image to render Korean/English titles, captions, subtitles, source labels, black title bands, lower thirds, logos, URLs, or readable UI text.
 - Generate only the central comic/meme/situation artwork.
-- Leave mobile-safe negative space near the top and bottom because the video compositor will add title/caption/source overlays.
+- Prefer central 16:9-friendly artwork or evidence images inside the vertical canvas.
+- Leave mobile-safe negative space near the top and bottom because the video compositor will add title/subtitle/source overlays.
 - Put exact claims, URLs, and detailed source notes in structured metadata and narration.`;
 
 export function buildCombinedPrompt(rulepack: ShortsRulepack, section: keyof ShortsRulepack): string {

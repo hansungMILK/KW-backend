@@ -3,16 +3,27 @@
 Put only licensed or royalty-free BGM files in this directory.
 
 The current checked-in MP3 files are project-generated procedural instrumental loops.
-They are intentionally simple and copyright-safe. Replace them later with
-commercially licensed tracks if the channel needs stronger music quality.
+They are intentionally simple and copyright-safe fallbacks.
+
+For production Shorts, add project-owned Suno-generated instrumental templates here.
+Only add Suno files that were generated under a plan/license that grants the project
+commercial use rights. Do not add random YouTube Music downloads.
 
 The backend currently looks for these filenames:
 
-- `warm-storytelling-loop.mp3`
-- `cinematic-tension-loop.mp3`
-- `fast-explainer-loop.mp3`
-- `quirky-office-loop.mp3`
-- `futuristic-tech-loop.mp3`
+- `warm-education-suno.mp3` (fallback: `warm-storytelling-loop.mp3`)
+- `cinematic-tension-suno.mp3` (fallback: `cinematic-tension-loop.mp3`)
+- `fast-explainer-suno.mp3` (fallback: `fast-explainer-loop.mp3`)
+- `quirky-office-suno.mp3` (fallback: `quirky-office-loop.mp3`)
+- `futuristic-tech-suno.mp3` (fallback: `futuristic-tech-loop.mp3`)
 - `neutral-documentary-loop.mp3`
 
-Do not add copyrighted YouTube Music downloads unless you have explicit rights to use them in generated videos.
+Recommended Suno prompt directions:
+
+- `warm-education-suno.mp3`: warm Korean educational documentary bed, soft pulse, light piano, no vocals.
+- `cinematic-tension-suno.mp3`: dark documentary tension bed, low drums, suspense strings, no vocals.
+- `fast-explainer-suno.mp3`: fast Korean explainer loop, clean beat, light percussion, no vocals.
+- `quirky-office-suno.mp3`: quirky office psychology explainer bed, subtle marimba/pluck, no vocals.
+- `futuristic-tech-suno.mp3`: futuristic tech explainer bed, soft synth pulse, no vocals.
+
+Keep BGM instrumental. Narration must stay louder than music.

@@ -32,6 +32,7 @@ export const mediaVideoBlock: BlockExecutor = {
             sceneNumber?: number;
             durationSec?: number;
             caption?: string;
+            narration?: string;
             visualText?: string;
             sourceLabel?: string;
         };
@@ -46,7 +47,7 @@ export const mediaVideoBlock: BlockExecutor = {
                 url: img.url as string,
                 durationSec: durationForImage(img, rawScenes),
                 title: typeof metadata?.title === 'string' ? metadata.title : undefined,
-                caption: img.visualText || img.caption,
+                caption: subtitleForImage(img, rawScenes),
                 sourceLabel: img.sourceLabel || sourceLabelForImage(img, rawScenes),
             }));
 
@@ -191,4 +192,12 @@ function sourceLabelForImage(
 ): string | undefined {
     const matchingScene = scenes.find(scene => scene.sceneNumber === image.sceneNumber);
     return matchingScene?.sourceLabel;
+}
+
+function subtitleForImage(
+    image: { sceneNumber?: number; caption?: string; visualText?: string },
+    scenes: Array<{ sceneNumber?: number; narration?: string; caption?: string; visualText?: string }>
+): string | undefined {
+    const matchingScene = scenes.find(scene => scene.sceneNumber === image.sceneNumber);
+    return matchingScene?.narration || matchingScene?.caption || image.caption || image.visualText;
 }

@@ -38,7 +38,7 @@ provider:
         SHORTS_BGM_MODE: ${env:SHORTS_BGM_MODE, 'catalog'}
         SHORTS_BGM_REQUIRED: ${env:SHORTS_BGM_REQUIRED, 'false'}
         SHORTS_BGM_ASSETS_DIR: ${env:SHORTS_BGM_ASSETS_DIR, 'assets/bgm'}
-        SHORTS_BGM_VOLUME: ${env:SHORTS_BGM_VOLUME, '0.07'}
+        SHORTS_BGM_VOLUME: ${env:SHORTS_BGM_VOLUME, '0.05'}
         ORCHESTRATOR_MODE: ${env:ORCHESTRATOR_MODE, 'openai'}
         AI_PROVIDER: ${env:AI_PROVIDER, 'openai'}
         ALLOW_PAID_OPENAI: ${env:ALLOW_PAID_OPENAI, 'false'}

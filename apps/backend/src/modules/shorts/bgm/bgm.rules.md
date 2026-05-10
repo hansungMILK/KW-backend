@@ -21,5 +21,6 @@ Background music is part of the final MP4 composition, not a separate mock step.
 
 - Narration is primary.
 - BGM must sit below narration.
-- Default BGM volume should stay around 0.07.
+- Default BGM volume should stay around 0.04-0.06 when narration is present.
 - Avoid vocal music unless the content explicitly needs it and the license allows it.
+- Prefer loopable instrumental beds with minimal melody. Information Shorts need tension and pace, not a song competing with TTS.

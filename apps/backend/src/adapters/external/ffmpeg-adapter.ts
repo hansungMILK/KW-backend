@@ -198,6 +198,10 @@ function buildArgs(
 function resolveOverlayFontFile(): string | undefined {
     const candidates = [
         process.env.FFMPEG_FONT_FILE,
+        '/opt/fonts/Pretendard-Black.otf',
+        '/opt/fonts/BlackHanSans-Regular.ttf',
+        '/opt/fonts/NotoSansKR-Black.otf',
+        '/opt/fonts/NotoSansCJKkr-Black.otf',
         '/System/Library/Fonts/AppleSDGothicNeo.ttc',
         '/System/Library/Fonts/Supplemental/AppleGothic.ttf',
         '/opt/fonts/NotoSansCJKkr-Regular.otf',
@@ -259,7 +263,7 @@ function buildOverlaySvg(image: { title?: string; caption?: string; sourceLabel?
     const titleLines =
         FFMPEG_OVERLAY_MODE === 'all' ? splitOverlayLines(compactOverlayText(image.title, 24), 12, 2) : [];
     const captionLines =
-        FFMPEG_OVERLAY_MODE === 'all' ? splitOverlayLines(compactOverlayText(image.caption, 36), 15, 2) : [];
+        FFMPEG_OVERLAY_MODE === 'all' ? splitOverlayLines(compactOverlayText(image.caption, 78), 18, 3) : [];
     const sourceLabel = compactOverlayText(image.sourceLabel, 36);
     const titleText = titleLines
         .map((line, index) => {
@@ -269,7 +273,7 @@ function buildOverlaySvg(image: { title?: string; caption?: string; sourceLabel?
         })
         .join('\n');
     const captionText = captionLines
-        .map((line, index) => svgText(line, 540, 1728 + index * 78, 66, '#ffffff', 7))
+        .map((line, index) => svgText(line, 540, 1652 + index * 82, 62, '#ffffff', 7))
         .join('\n');
     const sourceText = sourceLabel ? svgText(sourceLabel, 540, 1888, 30, 'rgba(255,255,255,0.78)', 2) : '';
 
@@ -277,7 +281,7 @@ function buildOverlaySvg(image: { title?: string; caption?: string; sourceLabel?
   ${FFMPEG_OVERLAY_MODE === 'all' ? '<rect x="0" y="0" width="1080" height="360" fill="black"/>' : ''}
   ${
       FFMPEG_OVERLAY_MODE === 'all'
-          ? '<rect x="0" y="1660" width="1080" height="260" fill="black"/>'
+          ? '<rect x="0" y="1588" width="1080" height="332" fill="black"/>'
           : sourceLabel
             ? '<rect x="0" y="1828" width="1080" height="92" fill="rgba(0,0,0,0.34)"/>'
             : ''
@@ -318,7 +322,7 @@ function buildDrawtextOverlayFilter(
 
     const filters: string[] = [];
     const sourceLabel = compactOverlayText(image.sourceLabel, 36);
-    const captionLines = splitOverlayLines(compactOverlayText(image.caption, 36), 15, 2);
+    const captionLines = splitOverlayLines(compactOverlayText(image.caption, 78), 18, 3);
     const titleLines = splitOverlayLines(compactOverlayText(image.title, 24), 12, 2);
     const font = escapeDrawtext(fontFile);
 
@@ -334,10 +338,10 @@ function buildDrawtextOverlayFilter(
     }
 
     if (FFMPEG_OVERLAY_MODE === 'all' && captionLines.length > 0) {
-        filters.push('drawbox=x=0:y=h-260:w=w:h=260:color=black:t=fill');
+        filters.push('drawbox=x=0:y=h-332:w=w:h=332:color=black:t=fill');
         captionLines.forEach((line, index) => {
             filters.push(
-                `drawtext=fontfile='${font}':text='${escapeDrawtext(line)}':x=(w-text_w)/2:y=h-${208 - index * 78}:fontsize=66:fontcolor=white:borderw=5:bordercolor=black`
+                `drawtext=fontfile='${font}':text='${escapeDrawtext(line)}':x=(w-text_w)/2:y=h-${270 - index * 82}:fontsize=62:fontcolor=white:borderw=5:bordercolor=black`
             );
         });
     }
@@ -419,9 +423,9 @@ async function resolveBackgroundMusicPath(
 }
 
 function resolveBackgroundMusicVolume(backgroundMusic: VideoCompositionRequest['backgroundMusic']): number {
-    if (!backgroundMusic || typeof backgroundMusic !== 'object') return 0.07;
+    if (!backgroundMusic || typeof backgroundMusic !== 'object') return 0.05;
     const volume = backgroundMusic.volume;
-    if (typeof volume !== 'number' || !Number.isFinite(volume)) return 0.07;
+    if (typeof volume !== 'number' || !Number.isFinite(volume)) return 0.05;
     return Math.min(0.3, Math.max(0, volume));
 }
 
