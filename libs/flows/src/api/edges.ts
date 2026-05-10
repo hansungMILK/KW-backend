@@ -32,37 +32,5 @@ export const getEdge = async (id: string): Promise<EdgeView> => {
     return response.data;
 };
 
-/**
- * @deprecated Use useEdgeSync (→ upsertFlow) instead (P2 migration)
- * Create new edge
- * POST /edges/0
- */
-export const createEdge = async (body: EdgeBody): Promise<EdgeView> => {
-    _log('> createEdge()', body);
-    const response = await api.post<EdgeView>('/edges/0', body);
-    return response.data;
-};
-
-/**
- * @deprecated Use useEdgeSync (→ upsertFlow) instead (P2 migration)
- * Update existing edge
- * POST /edges/:id
- */
-export const updateEdge = async (id: string, body: EdgeBody): Promise<EdgeView> => {
-    _log(`> updateEdge(${id})`, body);
-    const response = await api.post<EdgeView>(`/edges/${id}`, body);
-    return response.data;
-};
-
-/**
- * @deprecated Deletion is now handled via saveFlow (auto-save) instead (P2 migration)
- * Delete edge
- * DELETE /edges/:id
- */
-export const deleteEdge = async (id: string): Promise<void> => {
-    _log(`> deleteEdge(${id})`);
-    await api.delete(`/edges/${id}`);
-};
-
 // Re-export types
 export type { EdgeView, EdgeBody } from '../types';

@@ -1,9 +1,8 @@
 import { useMutation } from '@tanstack/react-query';
 
-import { upsertEdge, upsertFlow } from '../../api';
+import { upsertFlow } from '../../api';
 
-import type { NodeView, SaveFlowView, UpsertNodeResult } from '../../types';
-import type { EdgeData } from '@lemoncloud/eureka-flows-api';
+import type { NodeView, SaveFlowView } from '../../types';
 import type { UseMutationResult } from '@tanstack/react-query';
 
 interface UpsertNodeVariables {
@@ -51,20 +50,3 @@ export const useCreateNodeMutation = (): UseMutationResult<SaveFlowView, Error, 
     });
 };
 
-interface CreateEdgeVariables {
-    flowId: string;
-    edge: EdgeData;
-}
-
-/**
- * @deprecated Use useEdgeSync hook instead for edge creation
- * Edge creation should use POST /flows/:id/upsert with { nodes: [], edges: [...] }
- */
-export const useCreateEdgeMutation = (): UseMutationResult<UpsertNodeResult, Error, CreateEdgeVariables> => {
-    return useMutation({
-        mutationFn: ({ flowId, edge }: CreateEdgeVariables) => upsertEdge(flowId, edge),
-        onError: (error: Error) => {
-            console.error('[useCreateEdgeMutation] Failed to create edge:', error);
-        },
-    });
-};

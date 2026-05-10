@@ -3,14 +3,12 @@ import { api, withRetry } from '@flows/web-core';
 import type {
     ApiListResult,
     DataPacket,
-    NodeBody,
     NodeView,
     PortData,
     PortDataResponse,
     S3ImageInfo,
     UpsertNodeResult,
 } from '../types';
-import type { EdgeData } from '@lemoncloud/eureka-flows-api';
 
 const _log = console.log.bind(console, '[nodes-api]');
 
@@ -63,55 +61,6 @@ export const getNode = async (id: string): Promise<NodeView> => {
 export const getPortData = async (portId: string, direction: 'in' | 'out'): Promise<PortDataResponse> => {
     _log(`> getPortData(${portId}, direction=${direction})`);
     const response = await api.get<PortDataResponse>(`/nodes/${portId}/port`, { params: { direction } });
-    return response.data;
-};
-
-/**
- * @deprecated Use upsertFlow() with { nodes: [body], edges: [] } instead (P2 migration)
- * Create new node
- * POST /nodes/0
- *
- * Required fields: name, flowId, blockId
- */
-export const createNode = async (body: NodeBody): Promise<NodeView> => {
-    _log('> createNode()', body);
-
-    if (!body.name) throw new Error('Node name is required');
-    if (!body.flowId) throw new Error('Node flowId is required');
-    if (!body.blockId) throw new Error('Node blockId is required');
-
-    const response = await api.post<NodeView>('/nodes/0', body);
-    return response.data;
-};
-
-/**
- * @deprecated Use upsertFlow() with { nodes: [{ id, ...body }], edges: [] } instead (P2 migration)
- * Upsert node (create or update)
- * POST /nodes/:id/upsert?flowId=<flowId>
- *
- * @see eureka-flows-api #0.26.129
- */
-export const upsertNode = async (id: string, flowId: string, body: Partial<NodeView>): Promise<UpsertNodeResult> => {
-    _log(`> upsertNode(${id}, flowId=${flowId})`, body);
-    // Send body directly - server expects { config?, output?, ...nodeFields }
-    // NOT wrapped in { nodes: [...] } format
-    const response = await api.post<UpsertNodeResult>(`/nodes/${id}/upsert`, body, { params: { flowId } });
-    return response.data;
-};
-
-/**
- * @deprecated Use upsertFlow() from flows.ts instead for edge operations
- * Edge creation should use POST /flows/:id/upsert with { nodes: [], edges: [...] }
- *
- * This function incorrectly calls /nodes/0/upsert which only supports { config, output } body format.
- */
-export const upsertEdge = async (flowId: string, edge: EdgeData): Promise<UpsertNodeResult> => {
-    console.warn('[DEPRECATED] upsertEdge() is deprecated. Use upsertFlow() for edge operations.');
-    _log(`> upsertEdge(flowId=${flowId})`, edge);
-    // This is incorrect - /nodes/:id/upsert only supports { config, output } format
-    // Edge operations should use POST /flows/:id/upsert with { nodes: [], edges: [...] }
-    const body = { edges: [edge] };
-    const response = await api.post<UpsertNodeResult>('/nodes/0/upsert', body, { params: { flowId } });
     return response.data;
 };
 
