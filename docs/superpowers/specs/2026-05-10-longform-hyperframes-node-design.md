@@ -541,6 +541,18 @@ Pass behavior:
         "reviewedBy": null,
         "reviewedAt": null
     },
+    "lineage": {
+        "attempt": 1,
+        "supersedes": null,
+        "supersededBy": null
+    },
+    "paidExecution": {
+        "estimatedCostUsd": 0,
+        "estimatedCostShownAt": null,
+        "paidExecutionApprovedAt": null,
+        "paidExecutionStartedAt": null,
+        "providerCalls": []
+    },
     "approvedAt": null
 }
 ```
@@ -555,6 +567,8 @@ Required fields:
 - content
 - validation
 - review
+- lineage
+- paidExecution
 - approvedAt
 
 Allowed status values:
@@ -563,10 +577,12 @@ Allowed status values:
 - `needs_user_input`
 - `blocked`
 - `approved`
+- `needs_review`
 - `running`
 - `completed`
 - `failed`
 - `rejected`
+- `cancelled`
 - `superseded`
 
 Allowed review decisions:
@@ -576,7 +592,94 @@ Allowed review decisions:
 - `reject`
 - `request_changes`
 
-## 10. Imported Rulepack Mapping
+## 10. Production State Rules
+
+### Request Changes and Plan Lineage
+
+Plan artifacts are immutable once shown to the user.
+
+When the user selects `request_changes`:
+
+- the existing plan artifact content is preserved;
+- the existing artifact status becomes `superseded`;
+- the existing artifact records `lineage.supersededBy`;
+- a new plan attempt is created;
+- the new artifact records `lineage.supersedes`;
+- the new artifact receives the user's structured review feedback as input;
+- downstream paid/render nodes remain blocked until the new plan is reviewed and approved.
+
+When the user selects `reject`:
+
+- the plan artifact status becomes `rejected`;
+- reject reason is appended to `validation.issues`;
+- downstream paid/render nodes remain blocked;
+- the run ends as `CANCELLED`, `REVIEW_REJECTED`, or the nearest existing terminal run status supported by the backend.
+
+The system must not overwrite a previous script plan in place. Audit, retry, and cost review depend on being able to inspect older attempts.
+
+### Gate B Failure State Model
+
+Gate B can fail in the middle. The state must explain whether the user should retry, fix the plan, supply configuration, or cancel.
+
+| Situation                                             | Node/artifact status | User meaning                                           | Next action                                 |
+| ----------------------------------------------------- | -------------------- | ------------------------------------------------------ | ------------------------------------------- |
+| Missing provider key or disabled paid execution       | `blocked`            | Production cannot start safely                         | Add key or enable paid execution            |
+| Estimated cost exceeds cap before paid call           | `blocked`            | Cost boundary prevented execution                      | Lower scope or raise cap                    |
+| TTS provider request fails after starting             | `failed`             | Provider/runtime failed                                | Retry same approved plan                    |
+| TTS succeeds but timing cannot map script to scenes   | `needs_review`       | Script/timing structure needs user or model correction | Request changes or regenerate timing        |
+| Scene contract missing required field                 | `needs_review`       | Plan is not renderable yet                             | Fix/regenerate scene contract               |
+| Tool routing has no executable primary route          | `needs_review`       | Scene has no valid render path                         | Fix route or mark scene manual              |
+| Hyperframes compose fails because contract is invalid | `needs_review`       | Input contract must be corrected                       | Fix contract or request changes             |
+| Hyperframes renderer crashes                          | `failed`             | Renderer/runtime failed                                | Retry render after logs are inspected       |
+| Render succeeds but `ffprobe` finds no audio stream   | `failed`             | MP4 is invalid                                         | Fix audio/render pipeline                   |
+| Render succeeds but `ffprobe` finds no video stream   | `failed`             | MP4 is invalid                                         | Fix render pipeline                         |
+| User cancels during Gate B                            | `cancelled`          | User stopped production                                | Stop downstream work and preserve artifacts |
+
+Gate B is not complete unless `longform-qa` passes and `longform-package` returns a final MP4 URL.
+
+### Paid Execution Boundary
+
+Approval and paid execution are separate events.
+
+Required audit fields:
+
+- `estimatedCostUsd`
+- `estimatedCostShownAt`
+- `approvedAt`
+- `paidExecutionApprovedAt`
+- `paidExecutionStartedAt`
+- `providerCalls[]`
+
+Provider call log shape:
+
+```json
+{
+    "provider": "elevenlabs",
+    "operation": "tts",
+    "runId": "run-id",
+    "nodeId": "node-longform-tts",
+    "startedAt": "2026-05-10T00:00:00.000Z",
+    "completedAt": null,
+    "estimatedCostUsd": 0.12,
+    "actualCostUsd": null,
+    "status": "running",
+    "errorCode": null,
+    "errorMessage": null
+}
+```
+
+Rules:
+
+- Gate A must have no paid provider calls.
+- `estimatedCostShownAt` is recorded when the user sees the cost estimate.
+- `approvedAt` records the user's content/plan approval.
+- `paidExecutionApprovedAt` records explicit permission to start paid work.
+- `paidExecutionStartedAt` is set immediately before the first paid provider call.
+- each paid provider call appends one `providerCalls[]` entry.
+- if a provider call fails, the call log remains attached to the artifact/run.
+- retry creates a new provider call entry; it does not erase the failed call.
+
+## 11. Imported Rulepack Mapping
 
 | sun_tube source                     | eureka-flow target                                               |
 | ----------------------------------- | ---------------------------------------------------------------- |
@@ -587,7 +690,7 @@ Allowed review decisions:
 | project templates                   | artifact envelope and longform package manifest                  |
 | hype/Codex skills                   | backend prompt/rulepack text, not runtime skills                 |
 
-## 11. Orchestrator Detection
+## 12. Orchestrator Detection
 
 The orchestrator should produce a longform proposal when the user explicitly asks for:
 
@@ -611,7 +714,7 @@ It should not produce a longform proposal for:
 
 If the request is ambiguous, the proposal may proceed with assumptions, but must include clarifying questions in artifact output.
 
-## 12. Backend Touchpoints
+## 13. Backend Touchpoints
 
 Expected backend surfaces:
 
@@ -624,6 +727,9 @@ Expected backend surfaces:
 - approval gate invariant
 - user review persistence
 - review feedback retry/supersede flow
+- plan lineage persistence
+- Gate B failure state mapping
+- paid execution boundary and provider call audit log
 - TTS provider adapter
 - SRT/timing generator
 - Hyperframes composition adapter
@@ -633,7 +739,7 @@ Expected backend surfaces:
 
 This MVP should avoid changing existing shorts rulepacks and media blocks unless integration requires shared provider adapters.
 
-## 13. Frontend Touchpoints
+## 14. Frontend Touchpoints
 
 Expected frontend surfaces:
 
@@ -643,13 +749,16 @@ Expected frontend surfaces:
 - node detail panel displays artifact envelope content
 - longform-plan output has pass / reject / request changes controls
 - review decision and feedback are visible in node detail
+- previous and superseded plan attempts are inspectable
+- Gate B failures show retry/fix/cancel guidance
+- paid execution state is visible separately from approval state
 - approval gate status is visible
 - TTS/render nodes are blocked until approval
 - final MP4 asset is visible in node output or asset list
 
 No new full video editor UI is required for the first production MVP, but a review surface for script/scene artifacts is required.
 
-## 14. UAT Matrix
+## 15. UAT Matrix
 
 ### UAT 1. Chat classification
 
@@ -722,6 +831,8 @@ Expected:
 - user can request changes with feedback
 - reject prevents TTS/render execution
 - request changes supersedes the previous plan artifact
+- previous plan attempt remains inspectable
+- new plan attempt links back to the superseded plan
 
 ### UAT 6. TTS and timing
 
@@ -759,7 +870,21 @@ Expected:
 - package returns final video URL
 - package includes title candidates, description draft, thumbnail direction
 
-### UAT 10. Shorts regression
+### UAT 10. Gate B failure and paid boundary
+
+Expected:
+
+- Gate A has no paid provider calls
+- estimated cost is shown before approval
+- approval is recorded separately from paid execution start
+- first provider call records `paidExecutionStartedAt`
+- failed provider call remains in `providerCalls[]`
+- TTS failure is `failed`, not completed
+- scene contract issue is `needs_review`, not render failure
+- missing API key or disabled paid execution is `blocked`
+- user cancellation during Gate B preserves artifacts and stops downstream work
+
+### UAT 11. Shorts regression
 
 Expected:
 
@@ -767,7 +892,7 @@ Expected:
 - existing shorts block catalog remains available
 - no longform changes break `search -> content -> data -> analysis -> media-image + media-tts -> media-video -> integration`
 
-## 15. Acceptance Criteria
+## 16. Acceptance Criteria
 
 The MVP is complete only when all are true.
 
@@ -780,6 +905,10 @@ The MVP is complete only when all are true.
 - user can review script/scene plan in frontend.
 - user can pass, reject, or request changes.
 - rejected or superseded plans cannot trigger downstream paid/render nodes.
+- request changes preserves previous plan artifact and creates a linked new attempt.
+- Gate B failures map to `blocked`, `needs_review`, `failed`, or `cancelled` consistently.
+- approval state and paid execution start are logged separately.
+- every paid provider call is recorded without erasing failed attempts.
 - approval gate is enforced by backend logic.
 - TTS audio is generated after approval.
 - SRT/timing artifact is generated after TTS.
@@ -792,22 +921,25 @@ The MVP is complete only when all are true.
 - Gate B passes on at least one real sample topic before production MVP is called complete.
 - existing shorts UAT remains green.
 
-## 16. Rollout Plan
+## 17. Rollout Plan
 
 1. Commit this revised production MVP design spec.
 2. User reviews the spec.
 3. After approval, write an implementation plan.
 4. Implement topic profile and proposal path.
-5. Implement user-review and approval-gate invariants.
-6. Run Gate A no-paid foundation UAT.
-7. Implement approval-gated TTS/SRT path.
-8. Implement scene contract and routing validators.
-9. Implement minimal Hyperframes composition/render adapter.
-10. Implement ffprobe QA and package node.
-11. Run limited paid Gate B production smoke with safety cap.
-12. Verify existing shorts flow after longform changes.
+5. Implement plan lineage and request-changes supersede model.
+6. Implement user-review and approval-gate invariants.
+7. Run Gate A no-paid foundation UAT.
+8. Implement paid boundary logging.
+9. Implement approval-gated TTS/SRT path.
+10. Implement Gate B failure state mapping.
+11. Implement scene contract and routing validators.
+12. Implement minimal Hyperframes composition/render adapter.
+13. Implement ffprobe QA and package node.
+14. Run limited paid Gate B production smoke with safety cap.
+15. Verify existing shorts flow after longform changes.
 
-## 17. Explicit Deferrals
+## 18. Explicit Deferrals
 
 These belong to later phases.
 
