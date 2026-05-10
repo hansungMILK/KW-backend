@@ -1,4 +1,4 @@
-# Longform Hyperframes Node Design
+# Longform Hyperframes Production MVP Design
 
 작성일: 2026-05-10
 대상 브랜치: `min-longform`
@@ -7,16 +7,35 @@
 
 ## 1. Product Boundary
 
-이번 작업의 이름은 **longform artifact MVP**다.
+이번 작업의 이름은 **longform production MVP**다.
 
-이 MVP는 최종 롱폼 MP4 생성 MVP가 아니다. 목표는 사용자가 자연어로 롱폼 유튜브 제작을 요청했을 때, eureka-flow가 `sun_tube`식 제작 철학과 계약을 노드 그래프로 번역하고, 승인 전 단계까지 필요한 제작 artifact를 쌓을 수 있음을 증명하는 것이다.
+이전 `longform artifact MVP`는 기획 artifact와 approval gate까지만 증명하는 범위였다. 이 문서는 그 범위를 올려, 1차 MVP부터 TTS, SRT/timing, Hyperframes composition, MP4 render, QA, package까지 포함한다.
 
-성공 기준은 다음 네 가지다.
+단, `sun_tube` 원칙처럼 모든 주제를 같은 분량과 같은 구조로 만들지 않는다. Longform production MVP는 다음 방식으로 동작해야 한다.
 
-1. 채팅 요청이 longform proposal로 분류된다.
-2. proposal 승인 후 longform 노드들이 캔버스에 배치된다.
-3. 각 노드 output으로 제작 artifact가 확인된다.
-4. 승인 전에는 TTS, SRT, Hyperframes render, paid API 실행으로 넘어가지 않는다.
+```text
+user topic
+-> topic classification
+-> recommended production profile
+-> MVP safety cap
+-> proposal
+-> approval
+-> TTS/SRT
+-> scene contracts
+-> tool routing
+-> Hyperframes composition
+-> MP4 render
+-> QA
+-> package
+```
+
+핵심 원칙:
+
+- 주제마다 content pattern, production mode, scene count, length band, route mix가 달라진다.
+- 1차 MVP는 길이와 비용 폭주를 막기 위해 safety cap을 적용한다.
+- 사용자가 승인하기 전에는 TTS, SRT, render, paid API를 실행하지 않는다.
+- 최종 결과는 placeholder가 아니라 실제 audio/video stream이 있는 MP4여야 한다.
+- 기존 쇼츠 파이프라인은 회귀하면 안 된다.
 
 ## 2. Source System
 
@@ -28,68 +47,93 @@
 - Scene contract: `https://raw.githubusercontent.com/kwmin122/sun_tube/main/SCENE_CONTRACT_SYSTEM.md`
 - Motion graphics quality: `https://raw.githubusercontent.com/kwmin122/sun_tube/main/MOTION_GRAPHICS_QUALITY_SYSTEM.md`
 
-이 repo를 eureka-flow 제품 런타임으로 복사하지 않는다. 가져올 것은 제작 철학, artifact 계약, gate 순서, tool routing 기준이다.
+가져올 것은 repo 전체가 아니라 제작 시스템이다.
 
-`sun_tube` 기준 production flow:
+`sun_tube`에서 확인한 핵심 원칙:
 
-```text
-topic
--> topic classification
--> research-pack.md
--> creative-brief.md
--> draft-scene-packets.md
--> script + scene contract in plan.md
--> user approval
--> ElevenLabs TTS + SRT
--> timed-scene-packets.md
--> scene-contracts.md
--> scene tool routing
--> asset-plan.md / design-context.md
--> asset / visual / motion / audio work by scene
--> Hyperframes assembly
--> snapshot / pre-render QA
--> render
--> rendered-frame video review
--> final QA
--> packaging
+- 고정 비디오 템플릿이 아니다.
+- 참고 영상 구조는 pattern library이지 복붙 스크립트가 아니다.
+- 영상 구조는 research 이후 content needs에 따라 고른다.
+- topic type별 기본 pattern이 다르다.
+- production mode는 topic과 timeline에 따라 고른다.
+- scene마다 primary tool route를 고른다.
+- Hyperframes는 최종 TTS-driven motion composition의 기본 조립 장소다.
+
+## 3. MVP Safety Cap
+
+주제별로 production profile은 달라지지만, 첫 production MVP에는 안전 상한이 필요하다.
+
+Default cap:
+
+- maximum duration: 5 minutes
+- preferred duration band: 2-5 minutes
+- maximum scenes: 8 scenes
+- preferred scenes: 5-8 scenes
+- route execution: `hyperframes`, `script/ffmpeg`, `tts`, `srt/timing`
+- route planning only: `video-use`, `capture`, `imagegen`, `manual`
+- paid execution: approval 이후에만 허용
+
+사용자가 더 긴 영상을 요청하면:
+
+- proposal은 요청 길이를 기록한다.
+- production profile은 원래 권장 길이를 계산한다.
+- MVP cap 때문에 축소되는 경우 assumptions에 명시한다.
+- 예: `"사용자는 10분을 요청했지만 현재 production MVP는 5분/8 scenes cap으로 축소합니다."`
+
+## 4. Topic-dependent Production Profiles
+
+Longform은 분량 고정이 아니라 topic profile 기반이다.
+
+### Profile Fields
+
+```json
+{
+    "topicType": "ai-tool-product",
+    "contentPattern": "problem-cause-fix",
+    "productionMode": "demo-led",
+    "lengthBand": { "recommendedMinSec": 180, "recommendedMaxSec": 300 },
+    "sceneCount": { "recommended": 7, "max": 8 },
+    "routeMix": {
+        "primary": "hyperframes",
+        "support": ["capture", "script/ffmpeg"],
+        "plannedOnly": ["video-use", "imagegen"]
+    },
+    "assetBias": ["ui-screenshot", "workflow-diagram", "docs"],
+    "assumptions": [],
+    "mvpCapApplied": true
+}
 ```
 
-eureka-flow 1차 MVP는 이 중 approval 이전과 scene/tool planning artifact까지만 구현 대상으로 삼는다.
+### Topic Type Mapping
 
-## 3. Non-goals
+| Topic type             | Default pattern                     | Production mode | Typical asset bias                       |
+| ---------------------- | ----------------------------------- | --------------- | ---------------------------------------- |
+| open-source repo       | Claim -> Proof -> Explanation       | evidence-led    | README, docs, CLI screenshots, diagrams  |
+| AI tool/product        | Problem -> Cause -> Fix             | demo-led        | UI screenshots, workflow diagrams, demos |
+| controversy/commentary | Original Claim -> Counter-Evidence  | quote-led       | clips, articles, posts, quote cards      |
+| market/news            | Timeline / Data Story               | evidence-led    | articles, charts, public statements      |
+| tutorial               | Demo Walkthrough                    | demo-led        | screen recordings, UI highlights         |
+| concept explainer      | Myth -> Correction or Diagram-first | motion-only     | diagrams, analogies, minimal b-roll      |
+| company/person story   | Case Study                          | documentary-led | interviews, archive, press, timeline     |
 
-이번 MVP에서 제외한다.
+### MVP Route Rule
 
-- 최종 MP4 렌더
-- Hyperframes composition 실제 생성
-- ElevenLabs 또는 OpenAI TTS 호출
-- SRT 생성
-- 유료 OpenAI/외부 API 호출
-- `sun_tube` repo 전체 복사
-- Codex skill을 백엔드 런타임에서 직접 실행
-- 사용자가 승인하지 않은 상태에서 asset/render 실행
-- 기존 쇼츠 플로우 교체 또는 회귀
+In the first production MVP:
 
-## 4. Proposed Node Graph
+- `hyperframes` can execute.
+- `script/ffmpeg` can execute for render/probe/package.
+- `tts` and `srt/timing` can execute after approval.
+- `capture`, `video-use`, `imagegen`, and `manual` are represented in route plans but not fully executed unless separately approved later.
 
-1차 MVP graph:
+This keeps the first production MVP real enough to create MP4 while avoiding a full `sun_tube` automation port.
+
+## 5. Proposed Node Graph
+
+Production MVP graph:
 
 ```text
 longform-intake
--> longform-research
--> longform-brief
--> longform-draft-scenes
--> longform-plan
--> approval-gate
--> longform-scene-contract
--> longform-tool-routing
--> longform-package
-```
-
-2차 이후 확장 graph:
-
-```text
-longform-intake
+-> longform-topic-profile
 -> longform-research
 -> longform-brief
 -> longform-draft-scenes
@@ -99,13 +143,15 @@ longform-intake
 -> longform-timing
 -> longform-scene-contract
 -> longform-tool-routing
--> longform-assets
 -> hyperframes-compose
+-> hyperframes-render
 -> longform-qa
 -> longform-package
 ```
 
-## 5. Node Responsibilities
+The graph is intentionally longer than the shorts graph. Longform is not "more scenes"; it is a staged production workflow.
+
+## 6. Node Responsibilities
 
 ### longform-intake
 
@@ -117,37 +163,63 @@ Output:
 - targetViewer
 - outputFormat: `youtube-longform`
 - requestedLengthBand
+- requestedStyle
 - tone
 - assumptions
 - missingInputs
 
-### longform-research
+### longform-topic-profile
 
-역할: no-paid UAT에서는 실제 웹 리서치처럼 보이면 안 된다. 1차 output은 factual research 결과가 아니라 research draft다.
+역할: 주제별 production profile을 고른다.
 
 Output:
 
-- research-pack draft
+- topicType
+- contentPattern
+- productionMode
+- lengthBand
+- sceneCount
+- routeMix
+- assetBias
 - assumptions
-- candidate queries
-- source-needed list
-- source priority
-- risk notes
+- mvpCapApplied
 
-1차에서는 공식 출처나 웹 검색 결과를 날조하지 않는다. 실제 factual research adapter는 2차로 분리한다.
+이 노드는 `sun_tube`의 "topic마다 구조를 고른다"는 원칙을 eureka-flow에 고정하는 핵심 노드다.
+
+### longform-research
+
+역할: 제작에 필요한 material lead를 만든다.
+
+1차 production MVP에서는 두 모드가 있다.
+
+- no-paid/local UAT: research draft만 생성한다.
+- paid/real mode: configured research adapter가 있는 경우 source-backed research-pack을 생성한다.
+
+No-paid output은 실제 웹 리서치처럼 보이면 안 된다.
+
+Output:
+
+- research-pack
+- sourceCandidates
+- sourceNeededList
+- candidateQueries
+- assumptions
+- riskNotes
+- factualityStatus: `draft` | `source-backed`
 
 ### longform-brief
 
-역할: 주제의 관점, 길이, 구조, tone, production mode를 정한다.
+역할: 영상의 각도와 제작 방향을 정한다.
 
 Output:
 
-- creative-brief
-- selected pattern
-- production mode
-- material bias
-- viewer promise
-- narrative risk
+- creativeBrief
+- selectedPattern
+- productionMode
+- materialBias
+- viewerPromise
+- narrativeRisk
+- visualDirection
 
 ### longform-draft-scenes
 
@@ -155,12 +227,12 @@ Output:
 
 Output:
 
-- draft-scene-packets
-- scene purpose
-- scene role
-- material direction
-- visual intent
-- likely tool route candidates
+- draftScenePackets
+- scenePurpose
+- sceneRole
+- materialDirection
+- visualIntent
+- likelyRouteCandidates
 
 ### longform-plan
 
@@ -168,12 +240,13 @@ Output:
 
 Output:
 
-- plan draft
-- scene table
-- rough narration
-- draft scene contract fields
-- approval summary
-- blocked questions
+- planDraft
+- scriptDraft
+- sceneTable
+- roughNarration
+- draftSceneContractFields
+- approvalSummary
+- blockedQuestions
 
 ### approval-gate
 
@@ -181,10 +254,45 @@ Output:
 
 규칙:
 
-- `plan_approved !== true`면 TTS, timing, render, external paid work로 넘어갈 수 없다.
+- `plan_approved !== true`면 TTS, SRT, timing, render, external paid work로 넘어갈 수 없다.
 - UI 버튼만으로 gate를 표현하지 않는다.
 - backend executor가 gate를 검사해야 한다.
-- 1차 MVP에 TTS/render 노드가 없어도 gate contract는 먼저 둔다.
+- frontend가 우회 호출을 해도 backend가 차단해야 한다.
+- 승인 이벤트는 artifact envelope의 `approvedAt`과 run metadata에 남아야 한다.
+
+### longform-tts
+
+역할: 승인된 script를 음성으로 생성한다.
+
+Provider policy:
+
+- 첫 MVP는 하나의 configured provider만 요구한다.
+- ElevenLabs가 설정되어 있으면 Korean narration provider로 우선 사용한다.
+- 기존 backend TTS provider를 사용할 수 있으면 fallback 또는 alternative로 둔다.
+- provider가 없으면 `MISSING_API_KEYS` 계열 오류로 사전 차단한다.
+
+Output:
+
+- audioAsset
+- voiceProvider
+- voiceModel
+- narrationMap
+- durationSec
+- costEstimate
+
+### longform-timing
+
+역할: TTS 결과를 scene timing과 caption timing으로 변환한다.
+
+Output:
+
+- srtAsset
+- timedScenePackets
+- sceneStartEnd
+- captionBehavior
+- motionBeatTiming
+
+1차 MVP는 full subtitle editor를 만들지 않는다. TTS duration과 scene table을 기준으로 deterministic timing을 만들고, provider가 word/segment timing을 제공하면 그것을 사용한다.
 
 ### longform-scene-contract
 
@@ -204,6 +312,7 @@ Output:
 - evidenceFrame
 - implementationMarkers
 - routeHints
+- timing
 
 ### longform-tool-routing
 
@@ -218,23 +327,74 @@ Output:
 - `script/ffmpeg`
 - `manual`
 
-1차 MVP에서는 route를 실제 실행하지 않고 artifact로만 남긴다.
+1차 production MVP에서는 `hyperframes` route만 실제 composition으로 진행한다. 나머지 route는 route plan과 blocked/planned status로 남긴다.
 
-### longform-package
+### hyperframes-compose
 
-역할: 승인 전 artifact bundle을 정리한다.
+역할: scene contracts와 timed scene packets를 Hyperframes composition input으로 변환한다.
 
 Output:
 
-- artifact manifest
-- next actions
-- gate status
-- UAT summary
-- blocked production steps
+- compositionManifest
+- compositionHtml
+- compositionAssets
+- sceneMarkers
+- captionTracks
+- blockedRoutes
 
-## 6. Artifact Contract
+1차 MVP는 asset-heavy documentary composition을 만들지 않는다. 텍스트, SVG/HTML diagram, kinetic type, simple cards, timing-driven captions 중심으로 만든다.
 
-모든 longform 노드 output은 단순 JSON이 아니라 artifact envelope를 따른다.
+### hyperframes-render
+
+역할: Hyperframes composition을 MP4로 렌더한다.
+
+Output:
+
+- videoAsset
+- renderLog
+- renderDurationMs
+- width
+- height
+- fps
+- audioStreamPresent
+- videoStreamPresent
+
+Placeholder MP4는 실패로 본다. `ffprobe` 기준 audio/video stream이 있어야 한다.
+
+### longform-qa
+
+역할: render 결과와 production state를 검사한다.
+
+Minimum checks:
+
+- MP4 exists
+- ffprobe passes
+- audio stream present
+- video stream present
+- duration is within accepted profile range
+- rendered scene count matches scene contract count
+- captions do not knowingly exceed safe zone metadata
+- blocked routes are disclosed
+- existing shorts flow is not modified by this run
+
+### longform-package
+
+역할: 최종 결과를 사용자가 받을 수 있는 package로 정리한다.
+
+Output:
+
+- finalVideoUrl
+- titleCandidates
+- descriptionDraft
+- thumbnailDirection
+- sourceNotes
+- productionSummary
+- blockedEnhancements
+- artifactManifest
+
+## 7. Artifact Contract
+
+모든 longform 노드 output은 artifact envelope를 따른다.
 
 ```json
 {
@@ -272,26 +432,30 @@ Allowed status values:
 - `needs_user_input`
 - `blocked`
 - `approved`
+- `running`
+- `completed`
+- `failed`
 - `superseded`
 
-## 7. Imported Rulepack Mapping
+## 8. Imported Rulepack Mapping
 
-| sun_tube source                     | eureka-flow target                                           |
-| ----------------------------------- | ------------------------------------------------------------ |
-| `CONTENT_FACTORY_PIPELINE.md`       | `base-longform.rules.md`, node graph policy                  |
-| `TOOL_ROUTING_PIPELINE.md`          | `longform-tool-routing` rules and route enum                 |
-| `SCENE_CONTRACT_SYSTEM.md`          | scene contract schema and validator                          |
-| `MOTION_GRAPHICS_QUALITY_SYSTEM.md` | future `longform-qa` and `hyperframes-compose` quality rules |
-| project templates                   | artifact envelope and longform package manifest              |
-| hype/Codex skills                   | backend prompt/rulepack text, not runtime skills             |
+| sun_tube source                     | eureka-flow target                                               |
+| ----------------------------------- | ---------------------------------------------------------------- |
+| `CONTENT_FACTORY_PIPELINE.md`       | `base-longform.rules.md`, topic profile rules, node graph policy |
+| `TOOL_ROUTING_PIPELINE.md`          | `longform-tool-routing` rules and route enum                     |
+| `SCENE_CONTRACT_SYSTEM.md`          | scene contract schema and validator                              |
+| `MOTION_GRAPHICS_QUALITY_SYSTEM.md` | `longform-qa`, `hyperframes-compose`, render review rules        |
+| project templates                   | artifact envelope and longform package manifest                  |
+| hype/Codex skills                   | backend prompt/rulepack text, not runtime skills                 |
 
-## 8. Orchestrator Detection
+## 9. Orchestrator Detection
 
 The orchestrator should produce a longform proposal when the user explicitly asks for:
 
 - 롱폼
 - 유튜브 영상
 - YouTube longform
+- 3분 영상
 - 5분 영상
 - 10분 영상
 - 다큐/해설 영상
@@ -308,33 +472,41 @@ It should not produce a longform proposal for:
 
 If the request is ambiguous, the proposal may proceed with assumptions, but must include clarifying questions in artifact output.
 
-## 9. Backend Touchpoints
+## 10. Backend Touchpoints
 
 Expected backend surfaces:
 
-- block catalog entries for `longform-*`
-- block executor registration for artifact-only nodes
-- orchestrator prompt update for longform proposal examples
-- response parser compatibility for new optional metadata
+- block catalog entries for `longform-*` and `hyperframes-*`
+- block executor registration for production MVP nodes
+- orchestrator prompt update for longform production proposal examples
+- response parser compatibility for longform metadata
 - artifact envelope validators
+- topic profile selector
 - approval gate invariant
+- TTS provider adapter
+- SRT/timing generator
+- Hyperframes composition adapter
+- render adapter
+- ffprobe QA adapter
 - run output persistence through existing node output path
 
-This MVP should avoid changing media-image, media-tts, media-video, and existing shorts rulepacks unless regression evidence demands it.
+This MVP should avoid changing existing shorts rulepacks and media blocks unless integration requires shared provider adapters.
 
-## 10. Frontend Touchpoints
+## 11. Frontend Touchpoints
 
 Expected frontend surfaces:
 
-- proposal card shows longform block list
+- proposal card shows longform production block list
+- proposal card shows estimated cost and safety cap assumptions
 - canvas renders longform nodes
 - node detail panel displays artifact envelope content
 - approval gate status is visible
-- blocked production steps are understandable
+- TTS/render nodes are blocked until approval
+- final MP4 asset is visible in node output or asset list
 
-No new full editor UI is required for the first MVP.
+No new full video editor UI is required for the first production MVP.
 
-## 11. UAT Matrix
+## 12. UAT Matrix
 
 ### UAT 1. Chat classification
 
@@ -357,46 +529,82 @@ AI 에이전트의 미래에 대한 롱폼 유튜브 만들어줘
 
 Expected:
 
-- longform proposal created
-- no paid API call
-- no TTS/render node execution
+- longform production proposal created
+- topic profile selected
+- production mode, length band, scene count, route mix visible
+- no paid execution before approval
 
-### UAT 2. Canvas graph
+### UAT 2. Topic-dependent profile
+
+Inputs:
+
+```text
+오픈소스 CLI 도구 소개 롱폼 만들어줘
+AI 서비스 사용법 튜토리얼 롱폼 만들어줘
+최근 AI 시장 변화 뉴스 롱폼 만들어줘
+```
 
 Expected:
 
-- proposal approval places longform nodes on canvas
+- different content patterns are selected
+- different production modes are selected
+- different asset bias is selected
+- MVP safety cap is applied consistently
+
+### UAT 3. Canvas graph
+
+Expected:
+
+- proposal approval places production longform nodes on canvas
 - node labels are not `unknown`
-- edges follow the MVP graph order
+- edges follow the production MVP graph order
 - existing shorts proposal still works
-
-### UAT 3. Artifact output
-
-Expected:
-
-- each node returns artifact envelope
-- `artifactType` and `schemaVersion` exist
-- `validation.approved` exists
-- `approvedAt` exists and is null until approval
 
 ### UAT 4. Approval gate
 
 Expected:
 
-- `plan_approved !== true` blocks TTS/render/premium production steps
-- blocked state is visible in node output
+- `plan_approved !== true` blocks TTS/SRT/render/premium production steps
 - backend enforces the block even if frontend tries to bypass it
+- approval updates artifact envelope and run metadata
 
-### UAT 5. Research honesty
+### UAT 5. TTS and timing
 
 Expected:
 
-- no-paid mode produces `research-pack draft`
-- source-needed list is explicit
-- output does not pretend live web research happened
-- factual claims are marked as assumptions unless sourced
+- approved script generates audio asset
+- timing node creates SRT or timing artifact
+- timed scene packets map narration to scene start/end
+- missing API key blocks before paid execution
 
-### UAT 6. Shorts regression
+### UAT 6. Scene contract and routing
+
+Expected:
+
+- every scene has required contract fields
+- every scene has primary route
+- non-executed routes are marked `planned` or `blocked`, not silently ignored
+- missing primary screen object blocks composition
+
+### UAT 7. Hyperframes compose and render
+
+Expected:
+
+- Hyperframes composition artifact is generated
+- MP4 render completes
+- output is not placeholder
+- `ffprobe` finds video stream
+- `ffprobe` finds audio stream
+
+### UAT 8. QA and package
+
+Expected:
+
+- QA reports duration, stream presence, scene count, and known blocked routes
+- package returns final video URL
+- package includes title candidates, description draft, thumbnail direction
+
+### UAT 9. Shorts regression
 
 Expected:
 
@@ -404,37 +612,51 @@ Expected:
 - existing shorts block catalog remains available
 - no longform changes break `search -> content -> data -> analysis -> media-image + media-tts -> media-video -> integration`
 
-## 12. Acceptance Criteria
+## 13. Acceptance Criteria
 
 The MVP is complete only when all are true.
 
 - `min-longform` contains a committed design and implementation plan before code work starts.
-- longform proposal can be generated without paid calls.
+- longform production proposal can be generated.
+- topic-dependent production profile is selected.
+- MVP safety cap is applied and disclosed.
 - longform nodes can be placed on the canvas.
-- artifact envelopes are visible through existing node output UI/API.
-- approval gate is enforced by backend logic, not only UI state.
-- research node is honest about no-paid draft status.
+- approval gate is enforced by backend logic.
+- TTS audio is generated after approval.
+- SRT/timing artifact is generated after TTS.
+- scene contracts pass required field validation.
+- tool routing exists for every scene.
+- Hyperframes composition is generated.
+- MP4 render produces real audio/video streams.
+- QA blocks placeholder or invalid MP4.
+- package exposes final MP4 URL and upload metadata.
 - existing shorts UAT remains green.
 
-## 13. Rollout Plan
+## 14. Rollout Plan
 
-1. Commit this design spec.
+1. Commit this revised production MVP design spec.
 2. User reviews the spec.
 3. After approval, write an implementation plan.
-4. Implement artifact-only longform nodes.
-5. Run no-paid UAT.
-6. Add limited paid or external adapters only after artifact flow passes.
+4. Implement topic profile and proposal path.
+5. Implement approval-gated TTS/SRT path.
+6. Implement scene contract and routing validators.
+7. Implement minimal Hyperframes composition/render adapter.
+8. Implement ffprobe QA and package node.
+9. Run no-paid classification/canvas UAT.
+10. Run limited paid production smoke with safety cap.
+11. Verify existing shorts flow after longform changes.
 
-## 14. Explicit Deferrals
+## 15. Explicit Deferrals
 
 These belong to later phases.
 
-- ElevenLabs TTS adapter
-- SRT timing generation
-- Hyperframes composition worker
-- rendered-frame QA
-- final MP4 packaging
-- thumbnail generation
-- source capture automation
-- `video-use` processing integration
+- full `sun_tube` quality automation
+- all route execution
+- full `video-use` processing integration
+- browser capture automation
 - imagegen route execution
+- documentary asset pipeline
+- renderer comparison
+- rendered-frame director review
+- thumbnail image generation
+- upload/publish automation
