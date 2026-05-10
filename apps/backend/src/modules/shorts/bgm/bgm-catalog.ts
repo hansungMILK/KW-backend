@@ -9,6 +9,7 @@ export type ShortsBgmMood =
     | 'warm-storytelling'
     | 'quirky-office'
     | 'futuristic-tech'
+    | 'horror-dark'
     | 'neutral-documentary';
 
 export interface ShortsBgmTrack {
@@ -50,23 +51,22 @@ export const SHORTS_BGM_CATALOG: ShortsBgmTrack[] = [
     },
     {
         id: 'ytal-cinematic-tension-01',
-        title: 'Dark Toys',
-        filename: 'ytal-cinematic-tension-dark-toys.mp3',
+        title: 'Cinematic Tension Candidate',
+        filename: 'ytal-cinematic-tension-candidate.mp3',
         mood: 'cinematic-tension',
-        tags: ['news', 'history', 'war', 'incident', 'mystery', 'documentary'],
+        tags: ['news', 'history', 'war', 'incident', 'documentary'],
         source: YOUTUBE_AUDIO_LIBRARY_SOURCE,
         license: YOUTUBE_AUDIO_LIBRARY_LICENSE,
-        attribution: 'SYBS',
     },
     {
         id: 'ytal-fast-explainer-01',
-        title: 'ROUSE',
-        filename: 'ytal-fast-explainer-rouse.mp3',
+        title: 'Happy Boy Theme',
+        filename: 'ytal-fast-explainer-happy-boy-theme.mp3',
         mood: 'fast-explainer',
         tags: ['tips', 'how-to', 'product', 'shorts', 'explainer'],
         source: YOUTUBE_AUDIO_LIBRARY_SOURCE,
         license: YOUTUBE_AUDIO_LIBRARY_LICENSE,
-        attribution: 'Density & Time',
+        attribution: 'Kevin MacLeod',
     },
     {
         id: 'ytal-quirky-office-01',
@@ -87,6 +87,16 @@ export const SHORTS_BGM_CATALOG: ShortsBgmTrack[] = [
         source: YOUTUBE_AUDIO_LIBRARY_SOURCE,
         license: YOUTUBE_AUDIO_LIBRARY_LICENSE,
         attribution: 'Geographer',
+    },
+    {
+        id: 'ytal-horror-dark-01',
+        title: 'Dark Toys',
+        filename: 'ytal-horror-dark-dark-toys.mp3',
+        mood: 'horror-dark',
+        tags: ['horror', 'scary', 'ghost', 'haunted', 'nightmare', 'creepy'],
+        source: YOUTUBE_AUDIO_LIBRARY_SOURCE,
+        license: YOUTUBE_AUDIO_LIBRARY_LICENSE,
+        attribution: 'SYBS',
     },
     {
         id: 'warm-education-suno-01',

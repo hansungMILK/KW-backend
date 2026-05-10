@@ -11,15 +11,23 @@ describe('selectBgmForShorts', () => {
             'fast-explainer',
             'quirky-office',
             'futuristic-tech',
+            'horror-dark',
         ]);
     });
 
-    it('uses the cinematic Suno template catalog slot with the safe fallback loop when Suno files are not installed yet', () => {
+    it('does not use Dark Toys for ordinary history or news documentary topics', () => {
         const selection = selectBgmForShorts({ requestText: '한국 역사 충격 사건 쇼츠 만들어줘' });
 
         expect(selection?.track.id).toBe('cinematic-tension-suno-01');
         expect(selection?.track.filename).toBe('cinematic-tension-loop.mp3');
         expect(selection?.track.title).toContain('Fallback Loop');
         expect(selection?.track.license).toContain('Project-owned generated asset');
+    });
+
+    it('uses Dark Toys only for scary horror topics', () => {
+        const selection = selectBgmForShorts({ requestText: '무서운 괴담 쇼츠 만들어줘' });
+
+        expect(selection?.track.id).toBe('ytal-horror-dark-01');
+        expect(selection?.track.filename).toBe('ytal-horror-dark-dark-toys.mp3');
     });
 });

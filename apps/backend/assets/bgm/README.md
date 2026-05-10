@@ -14,10 +14,11 @@ from YouTube Studio Audio Library, verify the visible license screen, then save
 the MP3 files with these exact filenames:
 
 - `ytal-warm-education-lovely-afternoon-breeze.mp3` — Lovely Afternoon Breeze / The 126ers
-- `ytal-cinematic-tension-dark-toys.mp3` — Dark Toys / SYBS
-- `ytal-fast-explainer-rouse.mp3` — ROUSE / Density & Time
+- `ytal-cinematic-tension-candidate.mp3` — add a non-horror cinematic/news track later
+- `ytal-fast-explainer-happy-boy-theme.mp3` — Happy Boy Theme / Kevin MacLeod
 - `ytal-quirky-office-funhouse.mp3` — Funhouse / Bad Snacks
 - `ytal-futuristic-tech-after-all.mp3` — After All / Geographer
+- `ytal-horror-dark-dark-toys.mp3` — Dark Toys / SYBS; only for horror/scary topics
 
 Candidate metadata is tracked in `youtube-audio-library-candidates.json`.
 

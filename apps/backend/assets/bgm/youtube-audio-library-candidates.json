@@ -15,22 +15,22 @@
         },
         {
             "theme": "cinematic-tension",
-            "filename": "ytal-cinematic-tension-dark-toys.mp3",
-            "title": "Dark Toys",
-            "artist": "SYBS",
+            "filename": "ytal-cinematic-tension-candidate.mp3",
+            "title": "TBD",
+            "artist": "TBD",
             "genre": "Cinematic",
-            "mood": "Dark",
-            "durationSec": 173,
-            "intendedUse": "news, history, incidents, mystery, documentary shorts"
+            "mood": "Dramatic",
+            "durationSec": null,
+            "intendedUse": "news, history, incidents, documentary shorts; do not use Dark Toys here"
         },
         {
             "theme": "fast-explainer",
-            "filename": "ytal-fast-explainer-rouse.mp3",
-            "title": "ROUSE",
-            "artist": "Density & Time",
-            "genre": "Dance & Electronic",
-            "mood": "Inspirational",
-            "durationSec": 216,
+            "filename": "ytal-fast-explainer-happy-boy-theme.mp3",
+            "title": "Happy Boy Theme",
+            "artist": "Kevin MacLeod",
+            "genre": "Pop",
+            "mood": "Happy",
+            "durationSec": null,
             "intendedUse": "tips, reviews, product, comparison, explainer shorts"
         },
         {
@@ -52,6 +52,16 @@
             "mood": "Calm",
             "durationSec": 187,
             "intendedUse": "AI, developer tools, automation, technology shorts"
+        },
+        {
+            "theme": "horror-dark",
+            "filename": "ytal-horror-dark-dark-toys.mp3",
+            "title": "Dark Toys",
+            "artist": "SYBS",
+            "genre": "Cinematic",
+            "mood": "Dark",
+            "durationSec": 173,
+            "intendedUse": "horror, scary, ghost, haunted, nightmare shorts only"
         }
     ]
 }

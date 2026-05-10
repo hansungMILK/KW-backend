@@ -48,6 +48,9 @@ function classifyBgmMood(input: {
     if (/(입시|수능|정시|수시|학생부|대학|고3|학부모|원서|내신|교육)/.test(haystack)) {
         return 'warm-storytelling';
     }
+    if (/(공포|무서|귀신|괴담|호러|오싹|소름|저주|악몽|심령|괴물|좀비)/.test(haystack)) {
+        return 'horror-dark';
+    }
     if (/(전쟁|역사|국제|사건|충격|미스터리|군사|정치|범죄|폭로)/.test(haystack)) {
         return 'cinematic-tension';
     }
