@@ -1,8 +1,8 @@
 import { useMutation } from '@tanstack/react-query';
 
-import { upsertEdge, upsertNode } from '../../api';
+import { upsertEdge, upsertFlow } from '../../api';
 
-import type { NodeView, UpsertNodeResult } from '../../types';
+import type { NodeView, SaveFlowView, UpsertNodeResult } from '../../types';
 import type { EdgeData } from '@lemoncloud/eureka-flows-api';
 import type { UseMutationResult } from '@tanstack/react-query';
 
@@ -14,16 +14,15 @@ interface UpsertNodeVariables {
 
 /**
  * Mutation hook for upserting a node (create or update)
- * POST /nodes/:id/upsert?flowId=<flowId>
+ * POST /flows/:flowId/upsert with { nodes: [{ id, ...body }], edges: [] }
  *
- * New unified endpoint for node operations.
- * - id="0" with no body.id → create new node
- * - id="0" with body.id → upsert by body.id
- * - id=<nodeId> → upsert existing node
+ * Migrated from POST /nodes/:id/upsert to flow-level upsert (P2).
+ * This keeps the same call interface so useNodeSync does not need to change.
  */
-export const useUpsertNodeMutation = (): UseMutationResult<UpsertNodeResult, Error, UpsertNodeVariables> => {
+export const useUpsertNodeMutation = (): UseMutationResult<SaveFlowView, Error, UpsertNodeVariables> => {
     return useMutation({
-        mutationFn: ({ id, flowId, body }: UpsertNodeVariables) => upsertNode(id, flowId, body),
+        mutationFn: ({ id, flowId, body }: UpsertNodeVariables) =>
+            upsertFlow(flowId, { nodes: [{ id, ...body }], edges: [] }),
         onError: (error: Error, { id }) => {
             console.error(`[useUpsertNodeMutation] Failed to upsert node ${id}:`, error);
         },
@@ -37,19 +36,15 @@ interface CreateNodeVariables {
 
 /**
  * Mutation hook for creating a new node with server-assigned ID
- * POST /nodes/0/upsert?flowId=<flowId>
+ * POST /flows/:flowId/upsert with { nodes: [body], edges: [] }
  *
- * Server assigns the node ID and returns it in the response.
- * Use this for optimistic UI pattern:
- * 1. Create node in UI with temp ID
- * 2. Call this mutation
- * 3. Replace temp ID with server-assigned ID from response
- *
- * @returns UpsertNodeResult with nodes$$[0].id containing server-assigned ID
+ * Migrated from POST /nodes/0/upsert to flow-level upsert (P2).
+ * Server assigns the node ID and returns it in response.nodes[0].id.
  */
-export const useCreateNodeMutation = (): UseMutationResult<UpsertNodeResult, Error, CreateNodeVariables> => {
+export const useCreateNodeMutation = (): UseMutationResult<SaveFlowView, Error, CreateNodeVariables> => {
     return useMutation({
-        mutationFn: ({ flowId, body }: CreateNodeVariables) => upsertNode('0', flowId, body),
+        mutationFn: ({ flowId, body }: CreateNodeVariables) =>
+            upsertFlow(flowId, { nodes: [body], edges: [] }),
         onError: (error: Error) => {
             console.error('[useCreateNodeMutation] Failed to create node:', error);
         },
@@ -64,8 +59,6 @@ interface CreateEdgeVariables {
 /**
  * @deprecated Use useEdgeSync hook instead for edge creation
  * Edge creation should use POST /flows/:id/upsert with { nodes: [], edges: [...] }
- *
- * This hook incorrectly uses upsertEdge() which calls the wrong API endpoint.
  */
 export const useCreateEdgeMutation = (): UseMutationResult<UpsertNodeResult, Error, CreateEdgeVariables> => {
     return useMutation({

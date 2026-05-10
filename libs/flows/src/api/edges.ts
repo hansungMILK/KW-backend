@@ -33,6 +33,7 @@ export const getEdge = async (id: string): Promise<EdgeView> => {
 };
 
 /**
+ * @deprecated Use useEdgeSync (→ upsertFlow) instead (P2 migration)
  * Create new edge
  * POST /edges/0
  */
@@ -43,6 +44,7 @@ export const createEdge = async (body: EdgeBody): Promise<EdgeView> => {
 };
 
 /**
+ * @deprecated Use useEdgeSync (→ upsertFlow) instead (P2 migration)
  * Update existing edge
  * POST /edges/:id
  */
@@ -53,6 +55,7 @@ export const updateEdge = async (id: string, body: EdgeBody): Promise<EdgeView> 
 };
 
 /**
+ * @deprecated Deletion is now handled via saveFlow (auto-save) instead (P2 migration)
  * Delete edge
  * DELETE /edges/:id
  */

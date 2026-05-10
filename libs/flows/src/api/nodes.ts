@@ -67,6 +67,7 @@ export const getPortData = async (portId: string, direction: 'in' | 'out'): Prom
 };
 
 /**
+ * @deprecated Use upsertFlow() with { nodes: [body], edges: [] } instead (P2 migration)
  * Create new node
  * POST /nodes/0
  *
@@ -84,21 +85,11 @@ export const createNode = async (body: NodeBody): Promise<NodeView> => {
 };
 
 /**
+ * @deprecated Use upsertFlow() with { nodes: [{ id, ...body }], edges: [] } instead (P2 migration)
  * Upsert node (create or update)
  * POST /nodes/:id/upsert?flowId=<flowId>
  *
  * @see eureka-flows-api #0.26.129
- *
- * Request body format: { config?, output?, blockId?, position?, ... }
- * Response format: NodeData (direct object with id)
- *
- * - id="0" → create new node (server assigns ID)
- * - id=<nodeId> → update existing node
- *
- * @param id - Node ID or "0" for auto-assign
- * @param flowId - Flow ID (required)
- * @param body - Node data: { config, output, blockId, position, ... }
- * @returns NodeData with server-assigned or existing ID
  */
 export const upsertNode = async (id: string, flowId: string, body: Partial<NodeView>): Promise<UpsertNodeResult> => {
     _log(`> upsertNode(${id}, flowId=${flowId})`, body);
@@ -137,15 +128,9 @@ export interface PortNodeBody {
 }
 
 /**
+ * @deprecated Use upsertFlow() with { nodes: [body], edges: [] } instead (P2 migration)
  * Upsert port node (save input/output port data)
  * POST /nodes/0/upsert?flowId=<flowId>
- *
- * Used to save port data before node execution.
- * Server's hydrateInputs() reads from these port nodes.
- *
- * @param flowId - Flow ID (required)
- * @param body - Port node data
- * @returns UpsertNodeResult
  */
 export const upsertPortNode = async (flowId: string, body: PortNodeBody): Promise<UpsertNodeResult> => {
     _log(`> upsertPortNode(flowId=${flowId})`, body);
