@@ -365,19 +365,19 @@ function normalizeContentOutput(parsed: unknown, input: unknown, presetId: strin
 function normalizeScene(scene: Record<string, unknown>, index: number, title: string): Record<string, unknown> {
     const sceneNumber = typeof scene['sceneNumber'] === 'number' ? scene['sceneNumber'] : index + 1;
     const imageSlot = typeof scene['imageSlot'] === 'string' ? scene['imageSlot'] : `[Image #${sceneNumber}]`;
-    const caption = typeof scene['caption'] === 'string' ? compactPromptText(scene['caption'], 22) : '';
+    const caption = typeof scene['caption'] === 'string' ? compactPromptText(stripMarkdown(scene['caption']), 22) : '';
     const visual = isRecord(scene['visual']) ? scene['visual'] : {};
     const topTitle =
         typeof scene['topTitle'] === 'string'
-            ? compactPromptText(scene['topTitle'], 18)
+            ? compactPromptText(stripMarkdown(scene['topTitle']), 18)
             : typeof visual['topTitle'] === 'string'
-              ? compactPromptText(visual['topTitle'], 18)
+              ? compactPromptText(stripMarkdown(visual['topTitle']), 18)
               : compactPromptText(title, 18);
     const mainCaption =
         typeof visual['mainCaption'] === 'string'
-            ? compactPromptText(visual['mainCaption'], 18)
+            ? compactPromptText(stripMarkdown(visual['mainCaption']), 18)
             : typeof scene['visualText'] === 'string'
-              ? compactPromptText(scene['visualText'], 18)
+              ? compactPromptText(stripMarkdown(scene['visualText']), 18)
               : compactPromptText(caption, 18);
     const sourceRefs = Array.isArray(scene['sourceRefs']) ? scene['sourceRefs'] : [];
     const claimType = normalizeClaimType(scene['claimType'], scene, sourceRefs);
@@ -421,6 +421,7 @@ function storyBeatForIndex(index: number): string {
 }
 
 function normalizeClaimType(input: unknown, scene: Record<string, unknown>, sourceRefs: unknown[]): string {
+    if (input === 'fact' && sourceRefs.length === 0 && isQuestionOnlyScene(scene)) return 'opinion';
     if (input === 'fact' || input === 'hypothetical' || input === 'opinion' || input === 'joke') return input;
     if (sourceRefs.length > 0) return 'fact';
 
@@ -429,6 +430,14 @@ function normalizeClaimType(input: unknown, scene: Record<string, unknown>, sour
         .join(' ');
     if (/\d{4}|\d+월|\d+일|\d+%|\d+등급|\d+점/.test(text)) return 'fact';
     return 'opinion';
+}
+
+function isQuestionOnlyScene(scene: Record<string, unknown>): boolean {
+    const text = [scene['caption'], scene['visualText'], scene['narration']]
+        .filter((value): value is string => typeof value === 'string')
+        .join(' ');
+    if (!/[?？]|\bwhy\b|왜|뭐|무엇|어떻게|정말/.test(text)) return false;
+    return !/\d{4}|\d+월|\d+일|\d+%|\d+등급|\d+점/.test(text);
 }
 
 function isRecord(input: unknown): input is Record<string, unknown> {
@@ -450,6 +459,14 @@ function compactPromptText(value: string, maxChars: number): string {
     const compact = value.replace(/\s+/g, ' ').trim();
     if (compact.length <= maxChars) return compact;
     return `${compact.slice(0, Math.max(1, maxChars - 1)).trim()}...`;
+}
+
+function stripMarkdown(value: string): string {
+    return value
+        .replace(/\*\*/g, '')
+        .replace(/__/g, '')
+        .replace(/[`*_~]/g, '')
+        .trim();
 }
 
 function extractSources(input: unknown): Array<Record<string, unknown>> {

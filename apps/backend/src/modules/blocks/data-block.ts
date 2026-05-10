@@ -219,19 +219,26 @@ function normalizeContent(input: unknown): BlockExecutorResult {
                 : typeof visual?.['topTitle'] === 'string'
                   ? visual['topTitle']
                   : undefined;
-        const caption = typeof scene.caption === 'string' ? scene.caption : '';
+        const caption = typeof scene.caption === 'string' ? stripMarkdown(scene.caption) : '';
         const narration = typeof scene.narration === 'string' ? scene.narration : '';
         const imagePrompt = typeof scene.imagePrompt === 'string' ? scene.imagePrompt : '';
         const visualText =
             typeof scene.visualText === 'string'
-                ? scene.visualText
+                ? stripMarkdown(scene.visualText)
                 : typeof visual?.['mainCaption'] === 'string'
-                  ? visual['mainCaption']
+                  ? stripMarkdown(visual['mainCaption'])
                   : caption.length > 0
                     ? caption
                     : undefined;
         const sourceRefs = Array.isArray(scene.sourceRefs) ? scene.sourceRefs : [];
-        const claimType = isClaimType(scene.claimType) ? scene.claimType : inferClaimType(scene, sourceRefs);
+        const claimType =
+            scene.claimType === 'fact' &&
+            sourceRefs.length === 0 &&
+            isQuestionOnlyScene({ ...scene, caption, narration })
+                ? 'opinion'
+                : isClaimType(scene.claimType)
+                  ? scene.claimType
+                  : inferClaimType(scene, sourceRefs);
         const durationSec = typeof scene.durationSec === 'number' ? scene.durationSec : 5;
 
         // Derive per-scene keywords: prefer upstream list sliced per scene,
@@ -323,4 +330,20 @@ function inferClaimType(scene: RawScene, sourceRefs: unknown[]): 'fact' | 'opini
         .join(' ');
     if (/\d{4}|\d+월|\d+일|\d+%|\d+등급|\d+점/.test(text)) return 'fact';
     return 'opinion';
+}
+
+function isQuestionOnlyScene(scene: RawScene): boolean {
+    const text = [scene.caption, scene.visualText, scene.narration]
+        .filter((value): value is string => typeof value === 'string')
+        .join(' ');
+    if (!/[?？]|왜|뭐|무엇|어떻게|정말/.test(text)) return false;
+    return !/\d{4}|\d+월|\d+일|\d+%|\d+등급|\d+점/.test(text);
+}
+
+function stripMarkdown(value: string): string {
+    return value
+        .replace(/\*\*/g, '')
+        .replace(/__/g, '')
+        .replace(/[`*_~]/g, '')
+        .trim();
 }

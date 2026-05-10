@@ -306,14 +306,28 @@ function isRecord(input: unknown): input is Record<string, unknown> {
 
 async function runAIReview(scenes: NormalizedScene[], ruleIssues: Issue[], analysisPrompt: string): Promise<Issue[]> {
     const narrationSummary = scenes
-        .map(s => `씬 ${String(s.sceneNumber ?? '?')}: ${String(s.narration ?? '')}`)
+        .map(s => {
+            const sourceRefs = Array.isArray(s.sourceRefs) ? s.sourceRefs.join(', ') : '';
+            return [
+                `씬 ${String(s.sceneNumber ?? '?')}`,
+                `claimType=${String(s.claimType ?? 'unknown')}`,
+                `sourceRefs=${sourceRefs || 'none'}`,
+                `narration=${String(s.narration ?? '')}`,
+            ].join(' | ');
+        })
         .join('\n');
 
     let response;
     try {
         response = await openaiAdapter.chatJson({
             systemPrompt: `${ANALYSIS_SYSTEM_PROMPT}\n\n${analysisPrompt}`,
-            userMessage: `다음 씬 나레이션을 검토해주세요:\n\n${narrationSummary}`,
+            userMessage: [
+                '다음 씬 나레이션을 검토해주세요.',
+                'claimType=fact이고 sourceRefs가 none이면 출처 누락으로 봅니다.',
+                'sourceRefs가 있으면 해당 씬은 출처 연결이 있는 것으로 간주하고, 출처 누락이라고 단정하지 마세요.',
+                '',
+                narrationSummary,
+            ].join('\n'),
             maxTokens: 512,
         });
     } catch (err) {

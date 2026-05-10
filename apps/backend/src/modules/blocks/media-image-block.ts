@@ -255,22 +255,27 @@ export const mediaImageBlock: BlockExecutor = {
                     style: 'realistic',
                     signal,
                 });
+                throwIfAborted(signal);
                 await throwIfCancelled(context);
 
                 // 2. Fetch the temporary image URL and upload to S3
                 let imageBuffer = generated.imageBuffer;
                 if (!imageBuffer && generated.imageUrl) {
+                    throwIfAborted(signal);
                     const imageResponse = await fetch(generated.imageUrl, { signal });
                     if (!imageResponse.ok) {
                         throw new Error(`Failed to fetch generated image: ${imageResponse.status}`);
                     }
                     imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
                 }
+                throwIfAborted(signal);
                 if (!imageBuffer) throw new Error('Image provider returned no downloadable image');
                 await throwIfCancelled(context);
 
                 const s3Key = `${batchPrefix}/scene-${String(scene.sceneNumber).padStart(3, '0')}.png`;
+                throwIfAborted(signal);
                 await putObject(s3Key, imageBuffer, generated.contentType);
+                throwIfAborted(signal);
                 await throwIfCancelled(context);
 
                 if (activeSceneAttempts.get(scene.sceneNumber) !== attemptId) {
@@ -413,24 +418,44 @@ export const mediaImageBlock: BlockExecutor = {
         const { controller: batchController, cleanup: cleanupBatchController } = createLinkedAbortController(
             context?.abortSignal
         );
-        const settledResults = await runWithConcurrency(
-            scenePrompts,
-            IMAGE_SCENE_CONCURRENCY,
-            async scene => {
-                await throwIfCancelled(context);
-                throwIfAborted(batchController.signal);
+        const settledResults = await Promise.race([
+            runWithConcurrency(
+                scenePrompts,
+                IMAGE_SCENE_CONCURRENCY,
+                async scene => {
+                    await throwIfCancelled(context);
+                    throwIfAborted(batchController.signal);
 
-                try {
-                    return await generateSceneImageWithRetries(scene, batchController.signal);
-                } catch (err) {
-                    if (!isCancellationError(context, err) && !batchController.signal.aborted) {
-                        batchController.abort(err instanceof Error ? err : new Error(String(err)));
+                    try {
+                        return await generateSceneImageWithRetries(scene, batchController.signal);
+                    } catch (err) {
+                        if (!isCancellationError(context, err) && !batchController.signal.aborted) {
+                            batchController.abort(err instanceof Error ? err : new Error(String(err)));
+                        }
+                        throw err;
                     }
-                    throw err;
-                }
-            },
-            { shouldStop: () => batchController.signal.aborted }
-        ).finally(cleanupBatchController);
+                },
+                { shouldStop: () => batchController.signal.aborted }
+            ),
+            rejectOnAbort(batchController.signal),
+        ]).finally(cleanupBatchController);
+
+        throwIfAborted(batchController.signal);
+
+        const missingIndexes: number[] = [];
+        for (let index = 0; index < settledResults.length; index += 1) {
+            if (!Object.hasOwn(settledResults, index)) {
+                missingIndexes.push(index);
+            }
+        }
+        if (missingIndexes.length > 0) {
+            throw new Error(
+                `media-image stopped before ${missingIndexes.length} scene(s) completed: ${missingIndexes
+                    .map(index => scenePrompts[index]?.sceneNumber ?? index + 1)
+                    .join(', ')}`
+            );
+        }
+
         const generatedResults: Array<{
             image: ImageResult;
             asset: NonNullable<BlockExecutorResult['assets']>[number];
@@ -488,9 +513,24 @@ function isCancellationError(context: BlockExecutorContext | undefined, err: unk
 
 function throwIfAborted(signal: AbortSignal): void {
     if (!signal.aborted) return;
-    const reason = signal.reason;
-    if (reason instanceof Error) throw reason;
-    throw new Error(typeof reason === 'string' && reason ? reason : 'media-image batch aborted');
+    throw abortReasonToError(signal.reason, 'media-image batch aborted');
+}
+
+function rejectOnAbort(signal: AbortSignal): Promise<never> {
+    if (signal.aborted) return Promise.reject(abortReasonToError(signal.reason, 'media-image batch aborted'));
+
+    return new Promise((_, reject) => {
+        const onAbort = (): void => {
+            signal.removeEventListener('abort', onAbort);
+            reject(abortReasonToError(signal.reason, 'media-image batch aborted'));
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+    });
+}
+
+function abortReasonToError(reason: unknown, fallback: string): Error {
+    if (reason instanceof Error) return reason;
+    return new Error(typeof reason === 'string' && reason ? reason : fallback);
 }
 
 function createLinkedAbortController(parentSignal?: AbortSignal): {
