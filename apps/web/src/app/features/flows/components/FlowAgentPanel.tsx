@@ -2,7 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 
 import { Send, X } from 'lucide-react';
 
+import { approveProposal, sendMessage as sendMessageApi } from '@flows/flows';
+
+import type { ProposalApproveResult } from '@flows/flows';
+
 interface BlockSuggestion {
+    proposalId?: string;
     count: number;
     blocks: string[];
     estimatedCost: string;
@@ -19,46 +24,13 @@ interface Message {
 interface FlowAgentPanelProps {
     open: boolean;
     onClose: () => void;
+    flowId?: string | null;
+    onApprove?: (result: ProposalApproveResult) => void;
+    /** @deprecated use onApprove instead */
     onCreateBlocks?: (blocks: string[]) => void;
 }
 
-const MOCK_RESPONSES: Record<string, { reply: string; suggestion?: BlockSuggestion }> = {
-    default: {
-        reply: '워크플로우를 구성하는 데 도움을 드릴게요. 어떤 결과물을 만들고 싶으신가요?',
-    },
-};
-
-const getMockResponse = (input: string): { reply: string; suggestion?: BlockSuggestion } => {
-    const lower = input.toLowerCase();
-    if (lower.includes('쇼츠') || lower.includes('영상') || lower.includes('동영상')) {
-        return {
-            reply: '해당 영상을 워크플로우를 이용하여 제작할게요.',
-            suggestion: {
-                count: 6,
-                blocks: [
-                    '트렌드 분석 → 스크립트 생성',
-                    '→ 이미지 생성 + 음성 생성',
-                    '→ 콘텐츠 다운로드',
-                    '→ 다운로드 결과',
-                ],
-                estimatedCost: '1,300원',
-            },
-        };
-    }
-    if (lower.includes('이미지') || lower.includes('그림')) {
-        return {
-            reply: '이미지 생성 워크플로우를 구성할게요.',
-            suggestion: {
-                count: 3,
-                blocks: ['트렌드 분석 → 이미지 생성', '→ 콘텐츠 다운로드'],
-                estimatedCost: '500원',
-            },
-        };
-    }
-    return MOCK_RESPONSES.default;
-};
-
-export const FlowAgentPanel = ({ open, onClose, onCreateBlocks }: FlowAgentPanelProps) => {
+export const FlowAgentPanel = ({ open, onClose, flowId, onApprove, onCreateBlocks }: FlowAgentPanelProps) => {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [isThinking, setIsThinking] = useState(false);
@@ -73,7 +45,7 @@ export const FlowAgentPanel = ({ open, onClose, onCreateBlocks }: FlowAgentPanel
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
-    const sendMessage = () => {
+    const sendMessage = async () => {
         const text = input.trim();
         if (!text || isThinking) return;
 
@@ -82,34 +54,78 @@ export const FlowAgentPanel = ({ open, onClose, onCreateBlocks }: FlowAgentPanel
         setInput('');
         setIsThinking(true);
 
-        // thinking indicator
         const thinkingMsg: Message = { id: crypto.randomUUID(), role: 'agent', thinking: true };
         setMessages(prev => [...prev, thinkingMsg]);
 
-        setTimeout(() => {
-            const { reply, suggestion } = getMockResponse(text);
+        try {
+            if (!flowId) {
+                // TODO: flowId is required - remove this fallback when FlowEditorPage always provides it
+                throw new Error('flowId is required to send a message');
+            }
+
+            const result = await sendMessageApi(flowId, { message: text });
+
             setMessages(prev => {
                 const withoutThinking = prev.filter(m => !m.thinking);
-                const replyMsg: Message = { id: crypto.randomUUID(), role: 'agent', text: reply };
-                const msgs = [...withoutThinking, replyMsg];
-                if (suggestion) {
-                    const suggestionMsg: Message = {
+                const msgs: Message[] = [...withoutThinking];
+
+                if (result.message) {
+                    msgs.push({ id: crypto.randomUUID(), role: 'agent', text: result.message });
+                }
+
+                if (result.proposal) {
+                    msgs.push({
                         id: crypto.randomUUID(),
                         role: 'agent',
-                        suggestion,
-                    };
-                    msgs.push(suggestionMsg);
+                        suggestion: {
+                            proposalId: result.proposal.id,
+                            count: result.proposal.blocks.length,
+                            blocks: result.proposal.blocks.map(b => b.label),
+                            estimatedCost: result.proposal.estimatedCost ?? '미정',
+                        },
+                    });
                 }
+
                 return msgs;
             });
+        } catch (err) {
+            console.error('[FlowAgentPanel] sendMessage failed:', err);
+            setMessages(prev => {
+                const withoutThinking = prev.filter(m => !m.thinking);
+                return [
+                    ...withoutThinking,
+                    {
+                        id: crypto.randomUUID(),
+                        role: 'agent' as const,
+                        text: '요청 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.',
+                    },
+                ];
+            });
+        } finally {
             setIsThinking(false);
-        }, 1200);
+        }
+    };
+
+    const handleApprove = async (suggestion: BlockSuggestion) => {
+        if (!suggestion.proposalId) {
+            // TODO: proposalId not available - backend API not ready, fallback to onCreateBlocks
+            onCreateBlocks?.(suggestion.blocks);
+            return;
+        }
+        try {
+            const result = await approveProposal(suggestion.proposalId);
+            onApprove?.(result);
+        } catch (err) {
+            console.error('[FlowAgentPanel] approveProposal failed:', err);
+            // TODO: fallback when backend not ready
+            onCreateBlocks?.(suggestion.blocks);
+        }
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            sendMessage();
+            void sendMessage();
         }
     };
 
@@ -145,7 +161,8 @@ export const FlowAgentPanel = ({ open, onClose, onCreateBlocks }: FlowAgentPanel
                     }
 
                     if (msg.suggestion) {
-                        const { count, blocks, estimatedCost } = msg.suggestion;
+                        const suggestion = msg.suggestion;
+                        const { count, blocks, estimatedCost } = suggestion;
                         return (
                             <div key={msg.id} className="flex items-start gap-2">
                                 <div className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center shrink-0 mt-0.5">
@@ -166,7 +183,7 @@ export const FlowAgentPanel = ({ open, onClose, onCreateBlocks }: FlowAgentPanel
                                     <div className="flex gap-2 mt-1">
                                         <button
                                             className="flex-1 text-[11px] py-1.5 rounded-md bg-muted-foreground/10 hover:bg-muted-foreground/20 text-foreground transition-colors border border-border"
-                                            onClick={() => onCreateBlocks?.(blocks)}
+                                            onClick={() => void handleApprove(suggestion)}
                                         >
                                             블록 나열
                                         </button>
@@ -220,7 +237,7 @@ export const FlowAgentPanel = ({ open, onClose, onCreateBlocks }: FlowAgentPanel
                         style={{ maxHeight: '80px' }}
                     />
                     <button
-                        onClick={sendMessage}
+                        onClick={() => void sendMessage()}
                         disabled={!input.trim() || isThinking}
                         className="w-6 h-6 rounded-full bg-foreground flex items-center justify-center shrink-0 disabled:opacity-30 transition-opacity"
                     >

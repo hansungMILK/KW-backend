@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { EXECUTE_FUNCTIONS, getNode, getPortData, useBlocks, useCanvasStore, useFlows } from '@flows/flows';
+import type { ProposalApproveResult } from '@flows/flows';
+import type { NodeEventMessage, RunEventMessage } from '@flows/socket';
 import { ApiKeyDialog } from '@flows/shared';
 import { useInitFlowSocket } from '@flows/socket';
 import { useWebCoreStore } from '@flows/web-core';
@@ -281,6 +283,40 @@ export const FlowEditorPage = () => {
     const lastLocalUpdateTimestampRef = useRef<number | null>(null);
     const getLastLocalUpdateTimestamp = useCallback(() => lastLocalUpdateTimestampRef.current, []);
 
+    const handleApprove = useCallback(async (result: ProposalApproveResult) => {
+        if (!canvasRef.current) return;
+        if (result.nodes?.length || result.edges?.length) {
+            const current = canvasRef.current.getWorkflow();
+            await canvasRef.current.loadWorkflow({
+                ...current,
+                nodes: [...(current.nodes ?? []), ...(result.nodes ?? [])],
+                edges: [...(current.edges ?? current.connections ?? []), ...(result.edges ?? [])],
+            });
+        }
+    }, []);
+
+    const handleRunUpdate = useCallback((type: RunEventMessage['type']) => {
+        if (type === 'run.started') showNotification('실행 중...', 'success');
+        if (type === 'run.completed') showNotification('실행 완료', 'success');
+        if (type === 'run.failed') showNotification('실행 실패', 'error');
+    }, []);
+
+    const handleNodeEvent = useCallback(
+        (type: NodeEventMessage['type'], nodeId: string, progress?: number) => {
+            if (!canvasRef.current) return;
+            if (type === 'node.started') {
+                canvasRef.current.updateNodeFromServer(nodeId, { state: 'RUNNING', status: 'RUNNING', executionStats: { startTime: Date.now(), duration: 0, progress: 0 } });
+            } else if (type === 'node.progress') {
+                canvasRef.current.updateNodeFromServer(nodeId, { executionStats: { progress: progress ?? 0 } });
+            } else if (type === 'node.completed') {
+                canvasRef.current.updateNodeFromServer(nodeId, { state: 'COMPLETED', status: 'COMPLETED' });
+            } else if (type === 'node.failed') {
+                canvasRef.current.updateNodeFromServer(nodeId, { state: 'ERROR', status: 'ERROR' });
+            }
+        },
+        []
+    );
+
     // Initialize WebSocket connection when channelId is available
     const {
         isConnected: isSocketConnected,
@@ -295,6 +331,8 @@ export const FlowEditorPage = () => {
         onFlowUpdate: handleFlowUpdate,
         onNodeReload: handleNodeUpdate,
         onPortUpdate: handlePortUpdate,
+        onRunUpdate: handleRunUpdate,
+        onNodeEvent: handleNodeEvent,
     });
 
     const [isAppReady, setIsAppReady] = useState(false);
@@ -744,7 +782,12 @@ export const FlowEditorPage = () => {
              * - open: 패널 열림 여부 전달
              * - onClose: X 버튼 클릭 시 패널을 닫는 함수 전달
              */}
-            <FlowAgentPanel open={isAgentOpen} onClose={() => setIsAgentOpen(false)} />
+            <FlowAgentPanel
+                open={isAgentOpen}
+                onClose={() => setIsAgentOpen(false)}
+                flowId={currentFlowId}
+                onApprove={handleApprove}
+            />
 
             {/*
              * [추가] Flow Agent 실행 버튼 (채팅 버튼)

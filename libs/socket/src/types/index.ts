@@ -117,9 +117,66 @@ export interface PortUpdateMessage {
 }
 
 /**
+ * Proposal created notification from WebSocket (orchestrator flow)
+ * Received when the agent creates a proposal in response to a user message
+ */
+export interface ProposalCreatedMessage {
+    type: 'proposal.created';
+    id: string;
+    flowId?: string;
+    timestamp?: number;
+    blocks?: Array<{ type: string; label: string }>;
+    estimatedCost?: string;
+}
+
+/**
+ * Run lifecycle event notification from WebSocket
+ */
+export interface RunEventMessage {
+    type: 'run.started' | 'run.completed' | 'run.failed';
+    id: string;
+    flowId?: string;
+    timestamp?: number;
+    error?: string;
+}
+
+/**
+ * Node lifecycle event from orchestrator run (distinct from NodeUpdateMessage)
+ * node.progress includes progress 0-100
+ */
+export interface NodeEventMessage {
+    type: 'node.started' | 'node.progress' | 'node.completed' | 'node.failed';
+    id: string;
+    flowId?: string;
+    timestamp?: number;
+    progress?: number;
+    error?: string;
+}
+
+/**
+ * Asset created notification from WebSocket
+ * Received when a run produces an output asset (image, audio, video)
+ */
+export interface AssetCreatedMessage {
+    type: 'asset.created';
+    id: string;
+    flowId?: string;
+    timestamp?: number;
+    assetType?: 'image' | 'audio' | 'video' | string;
+    url?: string;
+}
+
+/**
  * Union type for socket data messages
  */
-export type SocketDataMessage = FlowUpdateMessage | NodeUpdateMessage | PortUpdateMessage;
+export type SocketDataMessage =
+    | FlowUpdateMessage
+    | NodeUpdateMessage
+    | PortUpdateMessage
+    | ProposalCreatedMessage
+    | RunEventMessage
+    | NodeEventMessage
+    | AssetCreatedMessage;
 
 /**
  * Raw WebSocket message wrapper from server

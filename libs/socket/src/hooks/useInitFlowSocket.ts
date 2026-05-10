@@ -5,7 +5,17 @@ import { useWebCoreStore } from '@flows/web-core';
 import { useWebSocketWorker } from './useWebSocketWorker';
 import { useWebSocketStore } from '../stores/useWebSocketStore';
 
-import type { FlowUpdateMessage, NodeState, NodeUpdateMessage, PortUpdateMessage, WebSocketMessage } from '../types';
+import type {
+    AssetCreatedMessage,
+    FlowUpdateMessage,
+    NodeEventMessage,
+    NodeState,
+    NodeUpdateMessage,
+    PortUpdateMessage,
+    ProposalCreatedMessage,
+    RunEventMessage,
+    WebSocketMessage,
+} from '../types';
 
 const WS_ENDPOINT = import.meta.env.VITE_WS_ENDPOINT || '';
 
@@ -61,6 +71,35 @@ export const isPortUpdateMessage = (data: unknown): data is PortUpdateMessage =>
     if (typeof data !== 'object' || data === null) return false;
     const msg = data as Record<string, unknown>;
     return msg['type'] === 'node/port' && typeof msg['id'] === 'string';
+};
+
+export const isProposalCreatedMessage = (data: unknown): data is ProposalCreatedMessage => {
+    if (typeof data !== 'object' || data === null) return false;
+    const msg = data as Record<string, unknown>;
+    return msg['type'] === 'proposal.created' && typeof msg['id'] === 'string';
+};
+
+export const isRunEventMessage = (data: unknown): data is RunEventMessage => {
+    if (typeof data !== 'object' || data === null) return false;
+    const msg = data as Record<string, unknown>;
+    const type = msg['type'];
+    return (type === 'run.started' || type === 'run.completed' || type === 'run.failed') && typeof msg['id'] === 'string';
+};
+
+export const isNodeEventMessage = (data: unknown): data is NodeEventMessage => {
+    if (typeof data !== 'object' || data === null) return false;
+    const msg = data as Record<string, unknown>;
+    const type = msg['type'];
+    return (
+        (type === 'node.started' || type === 'node.progress' || type === 'node.completed' || type === 'node.failed') &&
+        typeof msg['id'] === 'string'
+    );
+};
+
+export const isAssetCreatedMessage = (data: unknown): data is AssetCreatedMessage => {
+    if (typeof data !== 'object' || data === null) return false;
+    const msg = data as Record<string, unknown>;
+    return msg['type'] === 'asset.created' && typeof msg['id'] === 'string';
 };
 
 /**
@@ -175,6 +214,14 @@ export interface UseInitFlowSocketOptions {
     onNodeReload?: (info: NodeUpdateInfo) => void;
     /** Callback when port update notification is received - should fetch port data */
     onPortUpdate?: (info: PortUpdateInfo) => void;
+    /** Callback when agent creates a proposal in response to a user message */
+    onProposalCreated?: (proposalId: string, flowId?: string) => void;
+    /** Callback when a run lifecycle event is received (started/completed/failed) */
+    onRunUpdate?: (type: RunEventMessage['type'], runId: string, flowId?: string, error?: string) => void;
+    /** Callback when a node event is received from an orchestrator run */
+    onNodeEvent?: (type: NodeEventMessage['type'], nodeId: string, progress?: number, flowId?: string) => void;
+    /** Callback when a run produces an output asset */
+    onAssetCreated?: (assetId: string, assetType?: string, url?: string, flowId?: string) => void;
 }
 
 /**
@@ -201,7 +248,18 @@ export interface UseInitFlowSocketOptions {
  * });
  */
 export const useInitFlowSocket = (options: UseInitFlowSocketOptions = {}) => {
-    const { channelId, currentFlowId, getLastLocalUpdateTimestamp, onFlowUpdate, onNodeReload, onPortUpdate } = options;
+    const {
+        channelId,
+        currentFlowId,
+        getLastLocalUpdateTimestamp,
+        onFlowUpdate,
+        onNodeReload,
+        onPortUpdate,
+        onProposalCreated,
+        onRunUpdate,
+        onNodeEvent,
+        onAssetCreated,
+    } = options;
 
     const apiKey = useWebCoreStore(state => state.apiKey);
     const setId = useWebSocketStore(state => state.setId);
@@ -319,6 +377,35 @@ export const useInitFlowSocket = (options: UseInitFlowSocketOptions = {}) => {
                 return;
             }
 
+            // Handle orchestrator events (proposal.created, run.*, node.*, asset.created)
+            if (isProposalCreatedMessage(data)) {
+                if (!data.flowId || data.flowId === currentFlowId) {
+                    onProposalCreated?.(data.id, data.flowId);
+                }
+                return;
+            }
+
+            if (isRunEventMessage(data)) {
+                if (!data.flowId || data.flowId === currentFlowId) {
+                    onRunUpdate?.(data.type, data.id, data.flowId, data.error);
+                }
+                return;
+            }
+
+            if (isNodeEventMessage(data)) {
+                if (!data.flowId || data.flowId === currentFlowId) {
+                    onNodeEvent?.(data.type, data.id, data.progress, data.flowId);
+                }
+                return;
+            }
+
+            if (isAssetCreatedMessage(data)) {
+                if (!data.flowId || data.flowId === currentFlowId) {
+                    onAssetCreated?.(data.id, data.assetType, data.url, data.flowId);
+                }
+                return;
+            }
+
             // Handle port update notification (type: 'node/port')
             // Triggered when port data (input/output) changes
             // Used for real-time data synchronization between browser tabs
@@ -357,6 +444,10 @@ export const useInitFlowSocket = (options: UseInitFlowSocketOptions = {}) => {
         onFlowUpdate,
         onNodeReload,
         onPortUpdate,
+        onProposalCreated,
+        onRunUpdate,
+        onNodeEvent,
+        onAssetCreated,
     ]);
 
     // Cleanup on unmount
