@@ -1,5 +1,6 @@
 import { ORCHESTRATOR_SYSTEM_PROMPT, PROMPT_VERSION, buildUserPrompt } from './prompt-templates';
 import { parseClaudeResponse } from './response-parser';
+import { compileWorkflowPlan } from './workflow-compiler';
 import { claudeAdapter } from '../../adapters/ai/claude-adapter';
 import { env } from '../../config/env';
 import { traceService } from '../../services/trace-service';
@@ -12,6 +13,11 @@ import type { Orchestrator, ProposalResult } from './types';
 const MODEL = env.anthropicDefaultModel;
 
 const COST_ESTIMATES: Record<AllowedBlockType, number> = {
+    'input-text': 0,
+    'input-image': 0,
+    'output-preview': 0,
+    'buffer-delay': 0,
+    'text-transform': 0,
     search: 0.02,
     content: 0.15,
     data: 0.01,
@@ -73,8 +79,22 @@ export const claudeOrchestrator: Orchestrator = {
                 return buildFallbackProposal(`AI 응답을 처리할 수 없습니다. 다시 시도해주세요. (${parseResult.error})`);
             }
 
+            const compileResult = compileWorkflowPlan(parseResult.data);
+            if (!compileResult.ok) {
+                await traceService.record(flowId, null, 'ERROR', 'Claude workflow plan rejected', {
+                    error: compileResult.error,
+                    promptVersion: PROMPT_VERSION,
+                    outputType: parseResult.data.plan.outputType,
+                    selectedBlocks: parseResult.data.plan.selectedBlocks.map(block => block.blockType),
+                });
+
+                return buildFallbackProposal(
+                    `워크플로우 계획이 요청과 맞지 않습니다. 다시 시도해주세요. (${compileResult.error})`
+                );
+            }
+
             // 4. Convert to ProposalResult
-            const { data } = parseResult;
+            const { data } = compileResult;
             const nodes = data.blocks.map((block, i) => ({
                 id: generateNumericId(),
                 blockId: `blk-${block.type}`,
@@ -107,6 +127,7 @@ export const claudeOrchestrator: Orchestrator = {
                 blockCount: nodes.length,
                 edgeCount: edges.length,
                 estimatedCost: total,
+                plan: data.plan,
                 latencyMs: Date.now() - startMs,
             });
 

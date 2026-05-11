@@ -12,6 +12,11 @@ import { log } from '../../utils/logger';
 // ============================================================================
 
 export const ALLOWED_BLOCK_TYPES = [
+    'input-text',
+    'input-image',
+    'output-preview',
+    'buffer-delay',
+    'text-transform',
     'search',
     'content',
     'media-image',
@@ -35,7 +40,32 @@ const EdgeSchema = z.object({
     to: z.number().int().min(0),
 });
 
+const WorkflowPlanSchema = z.object({
+    goal: z.string().min(1),
+    outputType: z.enum(['text', 'data', 'image', 'audio', 'video', 'automation', 'mixed']),
+    planType: z.enum(['one-shot', 'pipeline', 'scheduled', 'interactive']),
+    requiredCapabilities: z.array(z.string()).default([]),
+    selectedBlocks: z
+        .array(
+            z.object({
+                blockType: z.enum(ALLOWED_BLOCK_TYPES),
+                reason: z.string().min(1),
+            })
+        )
+        .min(1),
+    rejectedBlocks: z
+        .array(
+            z.object({
+                blockType: z.enum(ALLOWED_BLOCK_TYPES),
+                reason: z.string().min(1),
+            })
+        )
+        .default([]),
+    assumptions: z.array(z.string()).default([]),
+});
+
 export const ClaudeProposalOutputSchema = z.object({
+    plan: WorkflowPlanSchema,
     blocks: z.array(BlockSchema).min(1),
     edges: z.array(EdgeSchema),
     estimatedCostUsd: z.number().min(0),

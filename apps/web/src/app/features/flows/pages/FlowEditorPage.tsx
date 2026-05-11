@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { EXECUTE_FUNCTIONS, getPortData, useBlocks, useCanvasStore, useFlows } from '@flows/flows';
+import { Loader2, Play } from 'lucide-react';
+
+import { EXECUTE_FUNCTIONS, createFlowRun, getPortData, useBlocks, useCanvasStore, useFlows } from '@flows/flows';
 import { ApiKeyDialog } from '@flows/shared';
 import { useInitFlowSocket } from '@flows/socket';
 import { useWebCoreStore } from '@flows/web-core';
@@ -292,6 +294,7 @@ export const FlowEditorPage = () => {
     const [isApiKeyDialogOpen, setIsApiKeyDialogOpen] = useState(false);
     const [isHelpDialogOpen, setIsHelpDialogOpen] = useState(false);
     const [isAgentOpen, setIsAgentOpen] = useState(false);
+    const [isWorkflowRunning, setIsWorkflowRunning] = useState(false);
     const [helpDialogTab, setHelpDialogTab] = useState<HelpTab>('gettingStarted');
     const [agentBtnPos, setAgentBtnPos] = useState<{ x: number; y: number } | null>(null);
     const agentBtnDragRef = useRef<{ mouseX: number; mouseY: number; btnX: number; btnY: number } | null>(null);
@@ -496,6 +499,33 @@ export const FlowEditorPage = () => {
     const handleAddNode = useCallback((type: string) => {
         canvasRef.current?.addNode(type);
     }, []);
+
+    const handleRunWorkflow = async () => {
+        if (!canvasRef.current || isWorkflowRunning) return;
+
+        setIsWorkflowRunning(true);
+        try {
+            const data = canvasRef.current.getWorkflow();
+            lastLocalUpdateTimestampRef.current = Date.now();
+            const result = await saveCurrentFlow(data);
+            if (!result.success || !result.id) {
+                showNotification('워크플로우 저장 후 실행할 수 없습니다.', 'error');
+                return;
+            }
+
+            if (result.id !== currentFlowId) {
+                updateUrl(result.id, window.location.hash.replace('#', ''));
+            }
+
+            await createFlowRun(result.id);
+            showNotification('워크플로우 실행을 시작했습니다.', 'success');
+        } catch (error) {
+            console.error('[FlowEditor] Failed to start flow run:', error);
+            showNotification(error instanceof Error ? error.message : '워크플로우 실행 실패', 'error');
+        } finally {
+            setIsWorkflowRunning(false);
+        }
+    };
 
     const handleApproveProposal = useCallback(async (nodes: unknown[], edges: unknown[]) => {
         if (!canvasRef.current || (!nodes.length && !edges.length)) return;
@@ -757,6 +787,18 @@ export const FlowEditorPage = () => {
                 flowId={currentFlowId}
                 onApproveProposal={handleApproveProposal}
             />
+
+            {/* Full Workflow Run Button */}
+            <button
+                type="button"
+                onClick={() => void handleRunWorkflow()}
+                disabled={isWorkflowRunning || isLoading}
+                className="absolute bottom-20 left-1/2 -translate-x-1/2 z-30 inline-flex items-center gap-2 rounded-xl border border-primary/40 bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-floating transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                title="전체 워크플로우 실행"
+            >
+                {isWorkflowRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                <span>{isWorkflowRunning ? '실행 요청 중' : '워크플로우 실행'}</span>
+            </button>
 
             {/* Flow Agent Button */}
             {!isAgentOpen && (

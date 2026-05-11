@@ -1,0 +1,122 @@
+import { describe, expect, it } from 'vitest';
+
+import { compileWorkflowPlan } from './workflow-compiler';
+
+describe('compileWorkflowPlan', () => {
+    it('rejects video blocks when the workflow plan is text-only', () => {
+        const result = compileWorkflowPlan({
+            plan: {
+                goal: '링크 내용을 요약한다',
+                outputType: 'text',
+                planType: 'one-shot',
+                requiredCapabilities: ['source.collect', 'text.generate'],
+                selectedBlocks: [
+                    { blockType: 'search', reason: '링크 내용을 수집한다' },
+                    { blockType: 'content', reason: '요약문을 작성한다' },
+                    { blockType: 'media-video', reason: '불필요한 영상 합성' },
+                ],
+                rejectedBlocks: [],
+                assumptions: [],
+            },
+            blocks: [
+                { type: 'search', label: '링크 내용 수집', config: {} },
+                { type: 'content', label: '요약 작성', config: {} },
+                { type: 'media-video', label: '영상 합성', config: {} },
+            ],
+            edges: [
+                { from: 0, to: 1 },
+                { from: 1, to: 2 },
+            ],
+            estimatedCostUsd: 0.2,
+            summary: '링크를 요약합니다.',
+        });
+
+        expect(result.ok).toBe(false);
+        if (!result.ok) expect(result.error).toContain('media-video');
+    });
+
+    it('accepts a generic shorts video pipeline when video capability is required', () => {
+        const result = compileWorkflowPlan({
+            plan: {
+                goal: '링크 내용을 쇼츠 영상으로 만든다',
+                outputType: 'video',
+                planType: 'pipeline',
+                requiredCapabilities: [
+                    'source.collect',
+                    'text.generate',
+                    'data.structure',
+                    'quality.review',
+                    'image.generate',
+                    'audio.tts',
+                    'video.compose',
+                    'metadata.generate',
+                ],
+                selectedBlocks: [
+                    { blockType: 'search', reason: '근거를 수집한다' },
+                    { blockType: 'content', reason: '대본을 작성한다' },
+                    { blockType: 'data', reason: '장면 데이터를 구조화한다' },
+                    { blockType: 'analysis', reason: '품질을 검수한다' },
+                    { blockType: 'media-image', reason: '장면 이미지를 만든다' },
+                    { blockType: 'media-tts', reason: '나레이션을 만든다' },
+                    { blockType: 'media-video', reason: '영상으로 합성한다' },
+                    { blockType: 'integration', reason: '메타데이터를 만든다' },
+                ],
+                rejectedBlocks: [],
+                assumptions: [],
+            },
+            blocks: [
+                { type: 'search', label: '자료 수집', config: {} },
+                { type: 'content', label: '대본 생성', config: { scenes: 12 } },
+                { type: 'data', label: '데이터 정규화', config: {} },
+                { type: 'analysis', label: '품질 검수', config: {} },
+                { type: 'media-image', label: '이미지 생성', config: { count: 12 } },
+                { type: 'media-tts', label: '음성 생성', config: {} },
+                { type: 'media-video', label: '영상 합성', config: {} },
+                { type: 'integration', label: '메타데이터 생성', config: {} },
+            ],
+            edges: [
+                { from: 0, to: 1 },
+                { from: 1, to: 2 },
+                { from: 2, to: 3 },
+                { from: 3, to: 4 },
+                { from: 3, to: 5 },
+                { from: 4, to: 6 },
+                { from: 5, to: 6 },
+                { from: 6, to: 7 },
+            ],
+            estimatedCostUsd: 0.9,
+            summary: '쇼츠 영상을 만듭니다.',
+        });
+
+        expect(result.ok).toBe(true);
+    });
+
+    it('rejects video composition without both image and tts upstream edges', () => {
+        const result = compileWorkflowPlan({
+            plan: {
+                goal: '쇼츠 영상 생성',
+                outputType: 'video',
+                planType: 'pipeline',
+                requiredCapabilities: ['image.generate', 'audio.tts', 'video.compose'],
+                selectedBlocks: [
+                    { blockType: 'media-image', reason: '이미지 생성' },
+                    { blockType: 'media-tts', reason: '음성 생성' },
+                    { blockType: 'media-video', reason: '영상 합성' },
+                ],
+                rejectedBlocks: [],
+                assumptions: [],
+            },
+            blocks: [
+                { type: 'media-image', label: '이미지 생성', config: {} },
+                { type: 'media-tts', label: '음성 생성', config: {} },
+                { type: 'media-video', label: '영상 합성', config: {} },
+            ],
+            edges: [{ from: 0, to: 2 }],
+            estimatedCostUsd: 0.4,
+            summary: '쇼츠 영상을 만듭니다.',
+        });
+
+        expect(result.ok).toBe(false);
+        if (!result.ok) expect(result.error).toContain('media-tts');
+    });
+});

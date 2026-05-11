@@ -83,6 +83,18 @@ Requirements:
 Do not create a Shorts/video plan. Do not add TTS, video, SEO, or distribution steps.
 Respond with JSON only — no markdown fences, no extra text.`;
 
+const GENERIC_TEXT_SYSTEM_PROMPT = `You are a Korean content writer inside a general workflow automation engine.
+Given upstream research or user input, produce the requested text/data output without forcing a Shorts scene contract.
+
+Respond with JSON only — no markdown fences, no extra text:
+{
+  "text": "final Korean text",
+  "content": "same final Korean text",
+  "value": "same final Korean text",
+  "mode": "text",
+  "sources": []
+}`;
+
 // ── Dummy (mock mode) ─────────────────────────────────────────────────────────
 
 function dummyContent(): BlockExecutorResult {
@@ -254,11 +266,12 @@ export const contentBlock: BlockExecutor = {
         const userMessage = buildUserMessage(input);
         const rulepack = selectShortsRulepack(input);
         const singleImageMode = isSingleImageMode(input, config);
+        const genericTextMode = isGenericTextMode(input, config);
 
         log.info('[content-block] Starting AI script generation', {
             messageLength: userMessage.length,
             presetId: rulepack.id,
-            mode: singleImageMode ? 'single-image' : 'shorts',
+            mode: singleImageMode ? 'single-image' : genericTextMode ? 'text' : 'shorts',
         });
 
         const directorPrompt = `${SCRIPT_WRITER_RULES}\n\n${SCRIPT_OUTPUT_RULES}\n\n${SHORTS_DIRECTOR_RULES}\n\n${DIRECTOR_OUTPUT_RULES}`;
@@ -266,7 +279,9 @@ export const contentBlock: BlockExecutor = {
             model: env.openaiModel,
             systemPrompt: singleImageMode
                 ? `${SINGLE_IMAGE_SYSTEM_PROMPT}\n\n${directorPrompt}\n\n${rulepack.imagePrompt}`
-                : `${CONTENT_SYSTEM_PROMPT}\n\n${buildCombinedPrompt(rulepack, 'contentPrompt')}\n\n${directorPrompt}\n\n${rulepack.sourcePolicy}`,
+                : genericTextMode
+                  ? GENERIC_TEXT_SYSTEM_PROMPT
+                  : `${CONTENT_SYSTEM_PROMPT}\n\n${buildCombinedPrompt(rulepack, 'contentPrompt')}\n\n${directorPrompt}\n\n${rulepack.sourcePolicy}`,
             userMessage,
             maxTokens: 4096,
         });
@@ -276,6 +291,15 @@ export const contentBlock: BlockExecutor = {
             parsed = JSON.parse(response.content);
         } catch {
             throw new Error(`[content-block] OpenAI returned non-JSON response (length=${response.content.length})`);
+        }
+
+        if (genericTextMode) {
+            const normalizedText = normalizeGenericTextOutput(parsed, input);
+            log.info('[content-block] Text generation complete', {
+                textLength: typeof normalizedText.text === 'string' ? normalizedText.text.length : 0,
+                latencyMs: response.latencyMs,
+            });
+            return { output: normalizedText, durationMs: Date.now() - start };
         }
 
         const normalized = normalizeContentOutput(parsed, input, rulepack.id);
@@ -323,6 +347,53 @@ function isSingleImageMode(input: unknown, config?: Record<string, unknown>): bo
     const sceneCount = Number(config?.['scenes'] ?? inputScenes);
 
     return modeText.includes('single-image') || modeText.includes('image-only') || sceneCount === 1;
+}
+
+function isGenericTextMode(input: unknown, config?: Record<string, unknown>): boolean {
+    const values: unknown[] = [
+        config?.['mode'],
+        config?.['type'],
+        config?.['format'],
+        config?.['outputType'],
+        config?.['scenario'],
+    ];
+    if (input && typeof input === 'object' && !Array.isArray(input)) {
+        const obj = input as Record<string, unknown>;
+        values.push(obj['mode'], obj['type'], obj['format'], obj['outputType'], obj['scenario']);
+    }
+
+    const modeText = values
+        .filter((value): value is string => typeof value === 'string')
+        .join(' ')
+        .toLowerCase();
+
+    return ['text', 'summary', 'summarize', 'explain', 'write', 'rewrite', 'translate'].some(mode =>
+        modeText.includes(mode)
+    );
+}
+
+function normalizeGenericTextOutput(parsed: unknown, input: unknown): Record<string, unknown> {
+    const obj = isRecord(parsed) ? parsed : {};
+    const text =
+        typeof obj['text'] === 'string'
+            ? obj['text']
+            : typeof obj['content'] === 'string'
+              ? obj['content']
+              : typeof obj['value'] === 'string'
+                ? obj['value']
+                : typeof parsed === 'string'
+                  ? parsed
+                  : JSON.stringify(parsed);
+
+    const sources = extractSources(input);
+    return {
+        ...obj,
+        text,
+        content: typeof obj['content'] === 'string' ? obj['content'] : text,
+        value: typeof obj['value'] === 'string' ? obj['value'] : text,
+        mode: typeof obj['mode'] === 'string' ? obj['mode'] : 'text',
+        sources: Array.isArray(obj['sources']) && obj['sources'].length > 0 ? obj['sources'] : sources,
+    };
 }
 
 function normalizeContentOutput(parsed: unknown, input: unknown, presetId: string): unknown {
