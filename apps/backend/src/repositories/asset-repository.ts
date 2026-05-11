@@ -1,4 +1,4 @@
-import { GetCommand, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { DeleteCommand, GetCommand, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 
 import { TableNames, USE_REAL_DYNAMO, getDocClient, memDb } from '../adapters/aws/dynamodb';
 
@@ -21,6 +21,23 @@ export const assetRepo = {
         }
         const result = await getDocClient().send(new GetCommand({ TableName: TABLE, Key: { assetId } }));
         return (result.Item as Asset) ?? null;
+    },
+
+    async delete(assetId: string): Promise<void> {
+        if (!USE_REAL_DYNAMO) {
+            memDb.delete(TABLE, assetId);
+            return;
+        }
+        await getDocClient().send(new DeleteCommand({ TableName: TABLE, Key: { assetId } }));
+    },
+
+    async updateStatus(assetId: string, status: Asset['status']): Promise<Asset> {
+        const asset = await this.get(assetId);
+        if (!asset) throw new Error(`Asset ${assetId} not found`);
+
+        const updated: Asset = { ...asset, status };
+        await this.put(updated);
+        return updated;
     },
 
     async listByRun(runId: string): Promise<Asset[]> {

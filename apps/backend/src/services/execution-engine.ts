@@ -2,12 +2,13 @@ import { blockExecutor } from './block-executor';
 import { traceService } from './trace-service';
 import { wsService } from './websocket-service';
 import { broadcastNodePortUpdated } from './ws-flow-events-service';
-import { getPublicUrl, publicUrlFromS3Uri, putObject } from '../adapters/aws/s3';
+import { deleteObject, getPublicUrl, publicUrlFromS3Uri, putObject } from '../adapters/aws/s3';
 import { assetRepo } from '../repositories/asset-repository';
 import { runRepo } from '../repositories/run-repository';
 import { generateNumericId } from '../utils/id-generator';
 
 import type { BlockExecutorResult } from '../modules/blocks/types';
+import type { Asset } from '@flows/contracts';
 
 /**
  * Execution engine — handles async run/node execution.
@@ -17,6 +18,13 @@ import type { BlockExecutorResult } from '../modules/blocks/types';
  */
 
 const NODE_CANCEL_POLL_MS = 1000;
+
+type PersistedNodeAsset = {
+    assetId: string;
+    assetType: string;
+    publicUrl: string;
+    s3Key?: string;
+};
 
 function createExecutionCancelledError(message = 'Run cancelled during node execution'): Error {
     const error = new Error(message);
@@ -362,6 +370,8 @@ export const executionEngine = {
         }
 
         const persistedAssetKeys = new Set<string>();
+        const persistedAssets: PersistedNodeAsset[] = [];
+        const pendingReportedAssets: NonNullable<BlockExecutorResult['assets']> = [];
         let lastProgress = 0;
         const abortController = new AbortController();
         let cancelPoller: ReturnType<typeof setInterval> | undefined;
@@ -446,20 +456,22 @@ export const executionEngine = {
             }
         };
 
-        const persistAsset = async (asset: NonNullable<BlockExecutorResult['assets']>[number]): Promise<void> => {
-            if (!runForNode) return;
+        const persistAsset = async (
+            asset: NonNullable<BlockExecutorResult['assets']>[number]
+        ): Promise<PersistedNodeAsset | null> => {
+            if (!runForNode) return null;
             await ensureNodeActive();
 
             const metadataKey = typeof asset.metadata?.['s3Key'] === 'string' ? asset.metadata['s3Key'] : undefined;
             const dataKey = typeof asset.data === 'string' ? asset.data : undefined;
             const dedupeKey = metadataKey ?? dataKey;
-            if (dedupeKey && persistedAssetKeys.has(dedupeKey)) return;
+            if (dedupeKey && persistedAssetKeys.has(dedupeKey)) return null;
 
             const assetId = generateNumericId();
             const publicUrl = await resolveAssetPublicUrl(asset, runId, nodeId);
             await ensureNodeActive();
 
-            await assetRepo.put({
+            const assetRecord: Asset = {
                 assetId,
                 runId,
                 runNodeId: nodeId,
@@ -468,23 +480,60 @@ export const executionEngine = {
                 mimeType: asset.mimeType,
                 publicUrl,
                 metadata: asset.metadata ?? {},
+                status: 'PENDING',
                 createdAt: new Date().toISOString(),
-            });
+            };
+            await assetRepo.put(assetRecord);
+
+            const persisted: PersistedNodeAsset = {
+                assetId,
+                assetType: asset.assetType.toLowerCase(),
+                publicUrl,
+                ...(typeof assetRecord.metadata?.['s3Key'] === 'string'
+                    ? { s3Key: assetRecord.metadata['s3Key'] }
+                    : {}),
+            };
+            persistedAssets.push(persisted);
 
             if (dedupeKey) persistedAssetKeys.add(dedupeKey);
             await ensureNodeActive();
 
+            return persisted;
+        };
+
+        const rollbackAssets = async (assets: PersistedNodeAsset[]): Promise<void> => {
+            for (const asset of [...assets].reverse()) {
+                try {
+                    await assetRepo.delete(asset.assetId);
+                    if (asset.s3Key) await deleteObject(asset.s3Key);
+                } catch (err) {
+                    try {
+                        await traceService.record(
+                            runId,
+                            nodeId,
+                            'ERROR',
+                            `Asset rollback failed for ${asset.assetId}: ${err instanceof Error ? err.message : String(err)}`
+                        );
+                    } catch {
+                        /* non-fatal */
+                    }
+                }
+            }
+        };
+
+        const broadcastAssetCreated = async (asset: PersistedNodeAsset): Promise<void> => {
+            if (!runForNode) return;
             try {
                 await wsService.broadcastToFlow(runForNode.flowId, {
                     type: 'asset.created',
-                    id: assetId,
+                    id: asset.assetId,
                     runId,
                     flowId: runForNode.flowId,
                     nodeId,
-                    assetId,
-                    assetType: asset.assetType.toLowerCase(),
-                    url: publicUrl,
-                    publicUrl,
+                    assetId: asset.assetId,
+                    assetType: asset.assetType,
+                    url: asset.publicUrl,
+                    publicUrl: asset.publicUrl,
                     timestamp: Date.now(),
                 });
             } catch {
@@ -509,7 +558,9 @@ export const executionEngine = {
                     abortSignal: abortController.signal,
                     isCancelled,
                     onProgress: broadcastProgress,
-                    onAsset: persistAsset,
+                    onAsset: async asset => {
+                        pendingReportedAssets.push(asset);
+                    },
                 }
             );
             void executionPromise.catch(() => {
@@ -575,19 +626,38 @@ export const executionEngine = {
             // Save assets produced by this node before reporting completion.
             // If persistence fails, the node must fail instead of emitting a
             // completed event with missing downloadable outputs.
-            if (assets && assets.length > 0 && runForNode) {
-                for (const asset of assets) {
-                    await ensureNodeActive();
-                    await persistAsset(asset);
+            const assetsToPublish = [...pendingReportedAssets, ...(assets ?? [])];
+            if (assetsToPublish.length > 0 && runForNode) {
+                try {
+                    for (const asset of assetsToPublish) {
+                        await ensureNodeActive();
+                        await persistAsset(asset);
+                    }
+                    for (const asset of persistedAssets) {
+                        await ensureNodeActive();
+                        await assetRepo.updateStatus(asset.assetId, 'PUBLISHED');
+                    }
+                } catch (err) {
+                    await rollbackAssets(persistedAssets);
+                    throw err;
                 }
             }
 
             await ensureNodeActive();
-            await runRepo.updateRunNodeStatus(runId, nodeId, 'COMPLETED', {
-                completedAt: new Date().toISOString(),
-                progress: 100,
-                outputPayload: { ...output, durationMs },
-            });
+            try {
+                const completedResult = await runRepo.updateRunNodeStatus(runId, nodeId, 'COMPLETED', {
+                    completedAt: new Date().toISOString(),
+                    progress: 100,
+                    outputPayload: { ...output, durationMs },
+                });
+                if (!completedResult.ok) {
+                    if (await isCancelled()) throw createExecutionCancelledError();
+                    throw new Error(completedResult.error);
+                }
+            } catch (err) {
+                await rollbackAssets(persistedAssets);
+                throw err;
+            }
 
             // Broadcast node.completed + record trace
             if (runForNode) {
@@ -605,6 +675,9 @@ export const executionEngine = {
                     /* non-fatal */
                 }
             }
+            for (const asset of persistedAssets) {
+                await broadcastAssetCreated(asset);
+            }
             try {
                 await traceService.record(runId, nodeId, 'STATUS', `Node ${nodeId} completed`);
             } catch {
@@ -615,6 +688,7 @@ export const executionEngine = {
             }
         } catch (err: unknown) {
             if (isExecutionCancelledError(err) || abortController.signal.aborted || (await isCancelled())) {
+                await rollbackAssets(persistedAssets);
                 await markNodeCancelled();
                 try {
                     await traceService.record(runId, nodeId, 'STATUS', `Node ${nodeId} cancelled`);
@@ -626,6 +700,7 @@ export const executionEngine = {
 
             const errorMessage = err instanceof Error ? err.message : String(err);
             console.error(`[execution-engine] node ${nodeId} failed:`, errorMessage);
+            await rollbackAssets(persistedAssets);
 
             const failedResult = await runRepo.updateRunNodeStatus(runId, nodeId, 'FAILED', {
                 errorCode: 'EXECUTION_ERROR',

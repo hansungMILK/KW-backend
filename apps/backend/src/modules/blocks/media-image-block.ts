@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 
 import { runWithConcurrency } from './concurrency';
 import { imageAdapter } from '../../adapters/ai/image-adapter';
-import { getPublicUrl, putObject } from '../../adapters/aws/s3';
+import { deleteObject, getPublicUrl, putObject } from '../../adapters/aws/s3';
 import { env } from '../../config/env';
 import { traceService } from '../../services/trace-service';
 import { sourceRefsToLabel } from '../shorts/rulepacks/base-shorts-rulepack';
@@ -204,6 +204,7 @@ export const mediaImageBlock: BlockExecutor = {
 
         // Unique prefix for this execution batch
         const batchPrefix = `media/images/${randomUUID()}`;
+        const batchId = batchPrefix.split('/').pop() ?? batchPrefix;
 
         type ImageResult = {
             sceneNumber: number;
@@ -225,6 +226,38 @@ export const mediaImageBlock: BlockExecutor = {
 
         let completedScenes = 0;
         const totalScenes = scenePrompts.length;
+        const traceBase = {
+            batchId,
+            concurrency: IMAGE_SCENE_CONCURRENCY,
+            expectedSceneCount: totalScenes,
+            provider: 'openai',
+            model: env.openaiImageModel,
+        } as const;
+
+        const recordImageTrace = async (
+            event: string,
+            traceType: 'STATUS' | 'ERROR',
+            data?: Record<string, unknown>
+        ): Promise<void> => {
+            try {
+                await traceService.record(
+                    context?.runId ?? 'pending',
+                    context?.nodeId ?? null,
+                    traceType,
+                    `media-image:${event}`,
+                    {
+                        event,
+                        ...traceBase,
+                        assetCountSoFar: completedScenes,
+                        ...data,
+                    }
+                );
+            } catch {
+                /* traceService is already non-fatal */
+            }
+        };
+
+        await recordImageTrace('batch.started', 'STATUS');
 
         const reportSceneComplete = async (sceneNumber: number): Promise<void> => {
             await throwIfCancelled(context);
@@ -237,23 +270,72 @@ export const mediaImageBlock: BlockExecutor = {
         };
 
         const activeSceneAttempts = new Map<number, string>();
+        const recordedTimeoutAttempts = new Set<string>();
+        const uploadedKeys = new Set<string>();
+
+        const cleanupUploadedKeys = async (): Promise<void> => {
+            for (const key of [...uploadedKeys].reverse()) {
+                try {
+                    await deleteObject(key);
+                    uploadedKeys.delete(key);
+                } catch (err) {
+                    await recordImageTrace('storage.cleanup.failed', 'ERROR', {
+                        s3Key: key,
+                        errorMessage: err instanceof Error ? err.message : String(err),
+                    });
+                }
+            }
+        };
+
+        const recordSceneTimeoutOnce = async (
+            sceneNumber: number,
+            attempt: number,
+            durationMs: number,
+            errorMessage: string
+        ): Promise<void> => {
+            const key = `${sceneNumber}:${attempt}`;
+            if (recordedTimeoutAttempts.has(key)) return;
+            recordedTimeoutAttempts.add(key);
+            await recordImageTrace('scene.timeout', 'ERROR', {
+                sceneNumber,
+                attempt,
+                durationMs,
+                errorCode: 'IMAGE_TIMEOUT',
+                errorMessage,
+            });
+        };
 
         const generateSceneImage = async (
             scene: (typeof scenePrompts)[number],
             attemptId: string,
+            attempt: number,
             signal: AbortSignal
         ): Promise<{ image: ImageResult; asset: NonNullable<BlockExecutorResult['assets']>[number] }> => {
             const sceneStart = Date.now();
             try {
                 await throwIfCancelled(context);
+                await recordImageTrace('scene.started', 'STATUS', {
+                    sceneNumber: scene.sceneNumber,
+                    attempt,
+                });
 
                 // 1. Generate image via the configured OpenAI image model.
+                await recordImageTrace('scene.openai.requested', 'STATUS', {
+                    sceneNumber: scene.sceneNumber,
+                    attempt,
+                });
+                const openAiStart = Date.now();
                 const generated = await imageAdapter.generate({
                     prompt: scene.prompt,
                     width: 1080,
                     height: 1920,
                     style: 'realistic',
                     signal,
+                });
+                await recordImageTrace('scene.openai.completed', 'STATUS', {
+                    sceneNumber: scene.sceneNumber,
+                    attempt,
+                    durationMs: Date.now() - openAiStart,
                 });
                 throwIfAborted(signal);
                 await throwIfCancelled(context);
@@ -274,7 +356,19 @@ export const mediaImageBlock: BlockExecutor = {
 
                 const s3Key = `${batchPrefix}/scene-${String(scene.sceneNumber).padStart(3, '0')}.png`;
                 throwIfAborted(signal);
+                await recordImageTrace('scene.upload.started', 'STATUS', {
+                    sceneNumber: scene.sceneNumber,
+                    attempt,
+                });
+                const uploadStart = Date.now();
                 await putObject(s3Key, imageBuffer, generated.contentType);
+                uploadedKeys.add(s3Key);
+                await recordImageTrace('scene.upload.completed', 'STATUS', {
+                    sceneNumber: scene.sceneNumber,
+                    attempt,
+                    durationMs: Date.now() - uploadStart,
+                    s3Key,
+                });
                 throwIfAborted(signal);
                 await throwIfCancelled(context);
 
@@ -319,24 +413,13 @@ export const mediaImageBlock: BlockExecutor = {
                     },
                 };
 
-                // Record per-image trace (non-fatal)
-                try {
-                    await traceService.record(
-                        context?.runId ?? 'pending',
-                        context?.nodeId ?? null,
-                        'STATUS',
-                        `media-image: scene ${scene.sceneNumber} generated`,
-                        {
-                            sceneNumber: scene.sceneNumber,
-                            s3Key,
-                            durationMs,
-                        }
-                    );
-                } catch {
-                    /* non-fatal */
-                }
+                await recordImageTrace('scene.completed', 'STATUS', {
+                    sceneNumber: scene.sceneNumber,
+                    attempt,
+                    durationMs,
+                    s3Key,
+                });
 
-                await context?.onAsset?.(asset);
                 await throwIfCancelled(context);
                 await reportSceneComplete(scene.sceneNumber);
 
@@ -347,16 +430,18 @@ export const mediaImageBlock: BlockExecutor = {
                 }
 
                 const msg = err instanceof Error ? err.message : String(err);
+                const errorCode = classifyImageError(err);
                 console.error(`[media-image-block] scene ${scene.sceneNumber} failed: ${msg}`);
-                try {
-                    await traceService.record(
-                        context?.runId ?? 'pending',
-                        context?.nodeId ?? null,
-                        'ERROR',
-                        `media-image: scene ${scene.sceneNumber} failed: ${msg}`
-                    );
-                } catch {
-                    /* non-fatal */
+                if (errorCode === 'IMAGE_TIMEOUT') {
+                    await recordSceneTimeoutOnce(scene.sceneNumber, attempt, Date.now() - sceneStart, msg);
+                } else {
+                    await recordImageTrace('scene.failed', 'ERROR', {
+                        sceneNumber: scene.sceneNumber,
+                        attempt,
+                        durationMs: Date.now() - sceneStart,
+                        errorCode,
+                        errorMessage: msg,
+                    });
                 }
                 throw new Error(`media-image scene ${scene.sceneNumber} failed: ${msg}`);
             }
@@ -375,7 +460,8 @@ export const mediaImageBlock: BlockExecutor = {
                 const attemptId = randomUUID();
                 activeSceneAttempts.set(scene.sceneNumber, attemptId);
                 const { controller, cleanup } = createLinkedAbortController(parentSignal);
-                const attemptPromise = generateSceneImage(scene, attemptId, controller.signal);
+                const attemptStart = Date.now();
+                const attemptPromise = generateSceneImage(scene, attemptId, attempt, controller.signal);
                 const timeoutMessage = `media-image scene ${scene.sceneNumber} timed out after ${Math.round(
                     IMAGE_SCENE_TIMEOUT_MS / 1000
                 )} seconds`;
@@ -399,6 +485,14 @@ export const mediaImageBlock: BlockExecutor = {
                     }
 
                     lastError = err;
+                    if (classifyImageError(err) === 'IMAGE_TIMEOUT') {
+                        await recordSceneTimeoutOnce(
+                            scene.sceneNumber,
+                            attempt,
+                            Date.now() - attemptStart,
+                            err instanceof Error ? err.message : String(err)
+                        );
+                    }
 
                     if (attempt < IMAGE_SCENE_MAX_ATTEMPTS) {
                         console.warn(
@@ -418,27 +512,48 @@ export const mediaImageBlock: BlockExecutor = {
         const { controller: batchController, cleanup: cleanupBatchController } = createLinkedAbortController(
             context?.abortSignal
         );
-        const settledResults = await Promise.race([
-            runWithConcurrency(
-                scenePrompts,
-                IMAGE_SCENE_CONCURRENCY,
-                async scene => {
-                    await throwIfCancelled(context);
-                    throwIfAborted(batchController.signal);
+        let settledResults: PromiseSettledResult<{
+            image: ImageResult;
+            asset: NonNullable<BlockExecutorResult['assets']>[number];
+        }>[];
+        try {
+            settledResults = await Promise.race([
+                runWithConcurrency(
+                    scenePrompts,
+                    IMAGE_SCENE_CONCURRENCY,
+                    async scene => {
+                        await throwIfCancelled(context);
+                        throwIfAborted(batchController.signal);
 
-                    try {
-                        return await generateSceneImageWithRetries(scene, batchController.signal);
-                    } catch (err) {
-                        if (!isCancellationError(context, err) && !batchController.signal.aborted) {
-                            batchController.abort(err instanceof Error ? err : new Error(String(err)));
+                        try {
+                            return await generateSceneImageWithRetries(scene, batchController.signal);
+                        } catch (err) {
+                            if (!isCancellationError(context, err) && !batchController.signal.aborted) {
+                                batchController.abort(err instanceof Error ? err : new Error(String(err)));
+                            }
+                            throw err;
                         }
-                        throw err;
-                    }
-                },
-                { shouldStop: () => batchController.signal.aborted }
-            ),
-            rejectOnAbort(batchController.signal),
-        ]).finally(cleanupBatchController);
+                    },
+                    { shouldStop: () => batchController.signal.aborted }
+                ),
+                rejectOnAbort(batchController.signal),
+            ]);
+        } catch (err) {
+            const cancellation = isCancellationError(context, err);
+            await cleanupUploadedKeys();
+            await recordImageTrace(
+                cancellation ? 'batch.cancelled' : 'batch.failed',
+                cancellation ? 'STATUS' : 'ERROR',
+                {
+                    durationMs: Date.now() - start,
+                    errorCode: cancellation ? 'RUN_CANCELLED' : classifyImageError(err),
+                    errorMessage: err instanceof Error ? err.message : String(err),
+                }
+            );
+            throw err;
+        } finally {
+            cleanupBatchController();
+        }
 
         throwIfAborted(batchController.signal);
 
@@ -449,11 +564,18 @@ export const mediaImageBlock: BlockExecutor = {
             }
         }
         if (missingIndexes.length > 0) {
-            throw new Error(
+            const error = new Error(
                 `media-image stopped before ${missingIndexes.length} scene(s) completed: ${missingIndexes
                     .map(index => scenePrompts[index]?.sceneNumber ?? index + 1)
                     .join(', ')}`
             );
+            await recordImageTrace('batch.failed', 'ERROR', {
+                durationMs: Date.now() - start,
+                errorCode: 'IMAGE_BATCH_INCOMPLETE',
+                errorMessage: error.message,
+                missingScenes: missingIndexes.map(index => scenePrompts[index]?.sceneNumber ?? index + 1),
+            });
+            throw error;
         }
 
         const generatedResults: Array<{
@@ -473,9 +595,16 @@ export const mediaImageBlock: BlockExecutor = {
         });
 
         if (failureMessages.length > 0) {
-            throw new Error(
+            const error = new Error(
                 `media-image failed after ${generatedResults.length}/${totalScenes} scenes: ${failureMessages.join('; ')}`
             );
+            await recordImageTrace('batch.failed', 'ERROR', {
+                durationMs: Date.now() - start,
+                errorCode: 'IMAGE_PROVIDER_ERROR',
+                errorMessage: error.message,
+                generatedSceneCount: generatedResults.length,
+            });
+            throw error;
         }
 
         generatedResults.sort((a, b) => a.image.sceneNumber - b.image.sceneNumber);
@@ -484,8 +613,19 @@ export const mediaImageBlock: BlockExecutor = {
         const assets = generatedResults.map(result => result.asset);
 
         if (assets.length === 0) {
-            throw new Error('media-image generated no usable image assets');
+            const error = new Error('media-image generated no usable image assets');
+            await recordImageTrace('batch.failed', 'ERROR', {
+                durationMs: Date.now() - start,
+                errorCode: 'IMAGE_BATCH_INCOMPLETE',
+                errorMessage: error.message,
+            });
+            throw error;
         }
+
+        await recordImageTrace('batch.completed', 'STATUS', {
+            durationMs: Date.now() - start,
+            generatedSceneCount: images.length,
+        });
 
         return {
             output: {
@@ -531,6 +671,17 @@ function rejectOnAbort(signal: AbortSignal): Promise<never> {
 function abortReasonToError(reason: unknown, fallback: string): Error {
     if (reason instanceof Error) return reason;
     return new Error(typeof reason === 'string' && reason ? reason : fallback);
+}
+
+function classifyImageError(err: unknown): string {
+    if (err instanceof BlockCancelledError) return 'RUN_CANCELLED';
+    if (err instanceof Error) {
+        if (err.name === 'TimeoutError' || /timed out|timeout/i.test(err.message)) return 'IMAGE_TIMEOUT';
+        const status = err.message.match(/OpenAI image API error (\d+)/)?.[1];
+        if (status) return `IMAGE_PROVIDER_${status}`;
+        if (/cancelled|aborted/i.test(err.message)) return 'RUN_CANCELLED';
+    }
+    return 'IMAGE_PROVIDER_ERROR';
 }
 
 function createLinkedAbortController(parentSignal?: AbortSignal): {

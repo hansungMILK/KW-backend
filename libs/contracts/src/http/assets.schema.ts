@@ -6,6 +6,7 @@ import { z } from 'zod';
  */
 
 export const AssetTypeSchema = z.enum(['IMAGE', 'AUDIO', 'VIDEO', 'JSON', 'TEXT']);
+export const AssetStatusSchema = z.enum(['PENDING', 'PUBLISHED']);
 
 export const AssetSchema = z.object({
     assetId: z.string(),
@@ -16,6 +17,7 @@ export const AssetSchema = z.object({
     mimeType: z.string(),
     publicUrl: z.string().nullable().optional(),
     metadata: z.record(z.unknown()).optional(),
+    status: AssetStatusSchema,
     createdAt: z.string(),
 });
 

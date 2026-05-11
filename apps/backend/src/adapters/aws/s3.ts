@@ -1,7 +1,7 @@
-import { mkdir, readFile, writeFile } from 'fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'fs/promises';
 import { dirname, extname, join, resolve } from 'path';
 
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 
 import { env, isLocalStage } from '../../config/env';
 
@@ -48,6 +48,18 @@ export const putObject = async (key: string, body: Buffer | string, contentType:
 
     const cmd = new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: body, ContentType: contentType });
     return s3.send(cmd);
+};
+
+export const deleteObject = async (key: string) => {
+    if (isLocalStage) {
+        const filePath = getLocalAssetPath(key);
+        await rm(filePath, { force: true });
+        await rm(`${filePath}.metadata.json`, { force: true });
+        return;
+    }
+
+    const cmd = new DeleteObjectCommand({ Bucket: BUCKET, Key: key });
+    await s3.send(cmd);
 };
 
 export const getLocalAssetPath = (key: string): string => {
