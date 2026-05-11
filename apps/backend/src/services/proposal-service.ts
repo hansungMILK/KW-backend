@@ -1,3 +1,11 @@
+import {
+    GPT_IMAGE_MODEL,
+    estimateGptImage2CostUsd,
+    getImageStylePreset,
+    normalizeImageQuality,
+    normalizeImageStyleId,
+    roundUsd,
+} from '../modules/image-generation/image-style';
 import { type FlowRecord, flowRepo } from '../repositories/flow-repository';
 import { messageRepo } from '../repositories/message-repository';
 import { proposalRepo } from '../repositories/proposal-repository';
@@ -22,6 +30,11 @@ export interface RejectResult {
     proposal: Proposal;
 }
 
+type ApprovalOverrides = {
+    imageStyleId?: string;
+    imageQuality?: 'low' | 'medium' | 'high';
+};
+
 export const proposalService = {
     /**
      * Approve a proposal:
@@ -33,7 +46,8 @@ export const proposalService = {
     async approve(
         proposalId: string,
         decisionNote?: string,
-        layoutType?: string
+        layoutType?: string,
+        overrides?: ApprovalOverrides
     ): Promise<{ ok: true; data: ApproveResult } | { ok: false; error: string; status: number }> {
         const proposal = await proposalRepo.get(proposalId);
         if (!proposal) return { ok: false, error: `Proposal ${proposalId} not found`, status: 404 };
@@ -65,10 +79,19 @@ export const proposalService = {
         }
         // 'vertical' or default: use existing positions (y-spaced by orchestrator)
 
+        const overriddenNodes = applyApprovalOverrides(layoutNodes, overrides);
+        const updatedMetadata = applyApprovalMetadataOverrides(proposal.metadata, overriddenNodes, overrides);
+        const updatedEstimatedCost = applyApprovalEstimatedCostOverrides(
+            proposal.estimatedCost,
+            updatedMetadata,
+            overriddenNodes,
+            overrides
+        );
+
         // Replace flow snapshot with proposal's nodes/edges
         const updatedFlow: FlowRecord = {
             ...flow,
-            nodes: layoutNodes,
+            nodes: overriddenNodes,
             edges: proposal.proposedEdges,
             state: 'READY', // DRAFT → READY on approval
             updatedAt: now,
@@ -80,6 +103,8 @@ export const proposalService = {
             ...proposal,
             status: 'APPROVED',
             decisionReason: decisionNote ?? null,
+            ...(updatedEstimatedCost ? { estimatedCost: updatedEstimatedCost } : {}),
+            ...(updatedMetadata ? { metadata: updatedMetadata } : {}),
             updatedAt: now,
         };
         await proposalRepo.put(updatedProposal);
@@ -141,3 +166,164 @@ export const proposalService = {
         return { ok: true, data: { proposal: updatedProposal } };
     },
 };
+
+function applyApprovalOverrides(
+    nodes: Array<Record<string, unknown>>,
+    overrides: ApprovalOverrides | undefined
+): Array<Record<string, unknown>> {
+    const imageStyleId = normalizeImageStyleId(overrides?.imageStyleId);
+    const imageQuality = overrides?.imageQuality ? normalizeImageQuality(overrides.imageQuality) : undefined;
+    if (!imageStyleId && !imageQuality) return nodes;
+
+    return nodes.map(node => {
+        const blockType = node['blockType'] ?? node['type'];
+        if (blockType !== 'media-image') return node;
+
+        const config =
+            node['config'] && typeof node['config'] === 'object' && !Array.isArray(node['config'])
+                ? (node['config'] as Record<string, unknown>)
+                : {};
+        const preset = imageStyleId ? getImageStylePreset(imageStyleId) : undefined;
+
+        return {
+            ...node,
+            config: {
+                ...config,
+                ...(imageStyleId ? { imageStyleId, imageStyleLabel: preset?.label } : {}),
+                ...(imageQuality ? { imageQuality } : {}),
+            },
+        };
+    });
+}
+
+type ProposalCost = Proposal['estimatedCost'];
+
+type ImageGenerationMetadata = {
+    model?: string;
+    imageStyleId?: string;
+    imageStyleLabel?: string;
+    recommendedStyleId?: string;
+    imageQuality?: 'low' | 'medium' | 'high';
+    sceneCount?: number;
+    imageEstimatedCostUsd?: number;
+    textAndOtherEstimatedCostUsd?: number;
+    estimatedTotalCostUsd?: number;
+    styleOptions?: unknown;
+    qualityOptions?: Array<{
+        id: 'low' | 'medium' | 'high';
+        label?: string;
+        estimatedImageCostUsd?: number;
+    }>;
+};
+
+function applyApprovalMetadataOverrides(
+    metadata: Record<string, unknown> | undefined,
+    nodes: Array<Record<string, unknown>>,
+    overrides: ApprovalOverrides | undefined
+): Record<string, unknown> | undefined {
+    const existingImageGeneration = getImageGenerationMetadata(metadata);
+    const imageNode = findMediaImageNode(nodes);
+    if (!existingImageGeneration && !imageNode) return metadata;
+
+    const sceneCount = readPositiveInt(existingImageGeneration?.sceneCount, getMediaImageSceneCount(imageNode));
+    const imageQuality = normalizeImageQuality(overrides?.imageQuality ?? existingImageGeneration?.imageQuality);
+    const imageStyleId =
+        normalizeImageStyleId(overrides?.imageStyleId ?? existingImageGeneration?.imageStyleId) ??
+        normalizeImageStyleId(existingImageGeneration?.recommendedStyleId) ??
+        'explainer-comic';
+    const preset = getImageStylePreset(imageStyleId);
+    const imageEstimatedCostUsd = estimateGptImage2CostUsd(sceneCount, imageQuality);
+    const textAndOtherEstimatedCostUsd = roundUsd(readNumber(existingImageGeneration?.textAndOtherEstimatedCostUsd, 0));
+    const estimatedTotalCostUsd = roundUsd(imageEstimatedCostUsd + textAndOtherEstimatedCostUsd);
+
+    const imageGeneration: ImageGenerationMetadata = {
+        ...(existingImageGeneration ?? {}),
+        model: GPT_IMAGE_MODEL,
+        imageStyleId,
+        imageStyleLabel: preset.label,
+        imageQuality,
+        sceneCount,
+        imageEstimatedCostUsd,
+        textAndOtherEstimatedCostUsd,
+        estimatedTotalCostUsd,
+        qualityOptions: (['low', 'medium', 'high'] as const).map(quality => ({
+            id: quality,
+            label: quality,
+            estimatedImageCostUsd: estimateGptImage2CostUsd(sceneCount, quality),
+        })),
+    };
+
+    return {
+        ...(metadata ?? {}),
+        imageGeneration,
+    };
+}
+
+function applyApprovalEstimatedCostOverrides(
+    estimatedCost: ProposalCost,
+    metadata: Record<string, unknown> | undefined,
+    nodes: Array<Record<string, unknown>>,
+    overrides: ApprovalOverrides | undefined
+): ProposalCost {
+    if (!estimatedCost && !findMediaImageNode(nodes)) return estimatedCost;
+
+    const imageGeneration = getImageGenerationMetadata(metadata);
+    const imageNode = findMediaImageNode(nodes);
+    const sceneCount = readPositiveInt(imageGeneration?.sceneCount, getMediaImageSceneCount(imageNode));
+    const imageQuality = normalizeImageQuality(overrides?.imageQuality ?? imageGeneration?.imageQuality);
+    const imageEstimatedCostUsd = estimateGptImage2CostUsd(sceneCount, imageQuality);
+
+    if (estimatedCost?.breakdown?.length) {
+        const breakdown = estimatedCost.breakdown.map(item =>
+            item.blockType === 'media-image' ? { ...item, amount: imageEstimatedCostUsd } : item
+        );
+        return {
+            ...estimatedCost,
+            total: roundUsd(breakdown.reduce((sum, item) => sum + item.amount, 0)),
+            breakdown,
+        };
+    }
+
+    if (imageGeneration) {
+        return {
+            currency: estimatedCost?.currency ?? 'USD',
+            total: roundUsd(imageGeneration.estimatedTotalCostUsd ?? imageEstimatedCostUsd),
+        };
+    }
+
+    return estimatedCost;
+}
+
+function getImageGenerationMetadata(
+    metadata: Record<string, unknown> | undefined
+): ImageGenerationMetadata | undefined {
+    const imageGeneration = metadata?.['imageGeneration'];
+    if (!imageGeneration || typeof imageGeneration !== 'object' || Array.isArray(imageGeneration)) return undefined;
+    return imageGeneration as ImageGenerationMetadata;
+}
+
+function findMediaImageNode(nodes: Array<Record<string, unknown>>): Record<string, unknown> | undefined {
+    return nodes.find(node => (node['blockType'] ?? node['type']) === 'media-image');
+}
+
+function getMediaImageSceneCount(node: Record<string, unknown> | undefined): number {
+    const config =
+        node?.['config'] && typeof node['config'] === 'object' && !Array.isArray(node['config'])
+            ? (node['config'] as Record<string, unknown>)
+            : undefined;
+    return readPositiveInt(
+        config?.['count'] ?? config?.['scenes'] ?? config?.['sceneCount'] ?? config?.['frameCount'],
+        12
+    );
+}
+
+function readPositiveInt(value: unknown, fallback: number): number {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed > 0) return Math.floor(parsed);
+    return Math.max(1, Math.floor(fallback));
+}
+
+function readNumber(value: unknown, fallback: number): number {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+}

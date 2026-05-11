@@ -22,6 +22,7 @@ export interface MessageProposal {
     estimatedCost?: string;
     estimatedCostUsd?: number;
     maxRunEstimatedCostUsd?: number;
+    metadata?: Record<string, unknown>;
     description?: string;
 }
 
@@ -77,6 +78,7 @@ const toMessageProposal = (response: MessageCreateResponse): MessageProposal | u
         estimatedCost: formatEstimatedCost(response.proposal.estimatedCost),
         estimatedCostUsd: response.proposal.estimatedCostUsd ?? response.proposal.estimatedCost?.total,
         maxRunEstimatedCostUsd: response.proposal.maxRunEstimatedCostUsd,
+        metadata: response.proposal.metadata,
         description: response.assistantMessage?.content,
     };
 };

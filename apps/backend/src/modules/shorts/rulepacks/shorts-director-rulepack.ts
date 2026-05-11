@@ -10,7 +10,7 @@ export const SHORTS_DIRECTOR_RULES = `Shorts Director Rules:
 - Use exaggerated reaction, clear contrast, simple background, and one visual idea per cut.
 - Scenes should progress as a story: hook -> setup -> escalation -> reveal -> takeaway -> CTA.
 - Use imageSlot values like [Image #1], [Image #2], ... in order.
-- Image prompts must describe only the central artwork. Do not ask GPT-image to draw text, black title bands, subtitles, lower thirds, source labels, logos, URLs, or readable UI text.`;
+- Image prompts must prioritize the central artwork. Short Korean/English in-scene text is allowed when useful, but final title bands, subtitles, lower thirds, source labels, logos, URLs, and watermarks belong to the compositor, not the image frame.`;
 
 export const DIRECTOR_OUTPUT_RULES = `Director Output Contract:
 - style.format must be "vertical-comic-shorts".

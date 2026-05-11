@@ -6,6 +6,9 @@ import { ttsAdapter } from '../../adapters/ai/tts-adapter';
 vi.mock('../../config/env', () => ({
     env: {
         orchestratorMode: 'openai',
+        elevenLabsTtsModel: 'eleven_flash_v2_5',
+        elevenLabsTtsTimeoutMs: 120000,
+        elevenLabsTtsVoiceId: 'pNInz6obpgDQGcFmaJgB',
     },
 }));
 
@@ -54,9 +57,11 @@ describe('mediaTtsBlock', () => {
             },
         });
 
-        expect(ttsAdapter.synthesize).toHaveBeenCalledWith({
-            text: '처음 훅입니다. 두 번째 장면부터 실제 나레이션이 시작됩니다. 마지막 문장입니다.',
-        });
+        expect(ttsAdapter.synthesize).toHaveBeenCalledWith(
+            expect.objectContaining({
+                text: '처음 훅입니다. 두 번째 장면부터 실제 나레이션이 시작됩니다. 마지막 문장입니다.',
+            })
+        );
         expect(result.output).toMatchObject({
             subtitleCues: [
                 {
@@ -78,5 +83,23 @@ describe('mediaTtsBlock', () => {
                 },
             ],
         });
+    });
+
+    it('passes the execution abort signal into the TTS adapter', async () => {
+        const controller = new AbortController();
+
+        await mediaTtsBlock.execute(
+            {
+                normalizedScenes: [{ sceneNumber: 1, narration: '신호 전달 확인 문장입니다.' }],
+            },
+            undefined,
+            {
+                runId: 'run-tts-signal',
+                nodeId: 'node-tts',
+                abortSignal: controller.signal,
+            }
+        );
+
+        expect(ttsAdapter.synthesize).toHaveBeenCalledWith(expect.objectContaining({ signal: controller.signal }));
     });
 });

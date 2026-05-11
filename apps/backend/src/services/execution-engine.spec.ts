@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { blockExecutor } from './block-executor';
 import { executionEngine } from './execution-engine';
@@ -143,6 +143,10 @@ describe('executionEngine asset publication', () => {
                 typeof message === 'object' && message ? String((message as { type?: unknown }).type) : 'unknown';
             sequence.push(`ws:${type}`);
         });
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
     });
 
     it('broadcasts asset.created only after the node is completed', async () => {
@@ -421,6 +425,30 @@ describe('executionEngine asset publication', () => {
         expect(updateRunNodeStatus.mock.calls.some(call => call[2] === 'COMPLETED')).toBe(false);
         expect(broadcastToFlow.mock.calls.some(([, msg]) => (msg as { type?: string }).type === 'asset.created')).toBe(
             false
+        );
+    });
+
+    it('fails a node with NODE_TIMEOUT when block execution never settles', async () => {
+        vi.useFakeTimers();
+        executeBlock.mockImplementationOnce(() => new Promise(() => undefined));
+
+        const execution = executionEngine.handleNodeExecution(run.runId, node.nodeId, 'exec-timeout');
+        await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(180000);
+        await execution;
+
+        expect(sequence).toContain('node.status:FAILED');
+        expect(updateRunNodeStatus).toHaveBeenCalledWith(
+            run.runId,
+            node.nodeId,
+            'FAILED',
+            expect.objectContaining({
+                errorCode: 'NODE_TIMEOUT',
+                errorMessage: expect.stringContaining('media-image execution timed out'),
+            })
+        );
+        expect(broadcastToFlow.mock.calls.some(([, msg]) => (msg as { type?: string }).type === 'node.failed')).toBe(
+            true
         );
     });
 });

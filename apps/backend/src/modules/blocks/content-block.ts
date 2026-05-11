@@ -18,6 +18,8 @@ Given keywords and/or article summaries, generate a complete 10–15 scene, one-
 Requirements:
 - If the user message contains "PRIMARY SOURCE", treat that source as the main brief. Supporting sources may verify or add caveats, but must not replace the primary source's angle.
 - Preserve concrete numbers, conditions, warnings, and key claims from the PRIMARY SOURCE in factual scenes.
+- For URL/article requests, build the script from the article's factual spine: who/what/when, the triggering claim, the disputed action, the response/apology, and what viewers should take away.
+- Do not replace a provided URL's specific story with generic background. If the article mentions names, dates, product names, amounts, or direct allegations, use those exact facts in the narration.
 - title: a short high-impact Korean title that can stay at the top of every frame
 - hook: a punchy opening question or statement (one short sentence, max 32 Korean characters)
 - script: structured script metadata with hook, angle, and cta
@@ -29,7 +31,7 @@ Requirements:
   - topTitle: the same persistent Korean top title for every scene
   - caption: a short bold Korean on-screen subtitle (8–22 Korean characters)
   - narration: Korean voice-over text (one short spoken sentence, 18–42 Korean characters)
-  - imagePrompt: English AI image generation prompt for the central illustration only. Do not ask the image model to draw titles, subtitles, black bands, lower thirds, source labels, logos, or readable Korean/English text.
+  - imagePrompt: English AI image generation prompt for the central illustration only. Final title/subtitle overlays are added by the video compositor, but short in-scene Korean/English signage or document text is allowed when it clarifies the scene.
   - visualText: backward-compatible short Korean main caption string
   - visual: { topTitle, mainCaption, sourceLabel? }
   - claimType: fact|hypothetical|opinion|joke
@@ -145,7 +147,8 @@ function dummyContent(): BlockExecutorResult {
                 sceneNumber: 5,
                 caption: '[dummy] 한 줄 결론',
                 narration: '[dummy] 마지막에는 사용자가 바로 이해할 결론을 남깁니다.',
-                imagePrompt: '[dummy] Final takeaway card visual without readable text, bold Korean shorts style',
+                imagePrompt:
+                    '[dummy] Final takeaway card visual with concise in-scene text allowed, bold Korean shorts style',
                 visualText: '[dummy] 한 줄 결론',
                 sourceRefs: ['source-1'],
                 durationSec: 6,

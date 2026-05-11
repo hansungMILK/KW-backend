@@ -5,6 +5,12 @@ import { imageAdapter } from '../../adapters/ai/image-adapter';
 import { deleteObject, getPublicUrl, putObject } from '../../adapters/aws/s3';
 import { env } from '../../config/env';
 import { traceService } from '../../services/trace-service';
+import {
+    GPT_IMAGE_MODEL,
+    buildGptImage2ScenePrompt,
+    getImageStylePreset,
+    normalizeImageQuality,
+} from '../image-generation/image-style';
 import { sourceRefsToLabel } from '../shorts/rulepacks/base-shorts-rulepack';
 import { selectShortsRulepack } from '../shorts/topic-router';
 
@@ -13,6 +19,7 @@ import type { BlockExecutor, BlockExecutorContext, BlockExecutorResult } from '.
 const IMAGE_SCENE_TIMEOUT_MS = env.openaiImageSceneTimeoutMs;
 const IMAGE_SCENE_MAX_ATTEMPTS = env.openaiImageSceneMaxAttempts;
 const IMAGE_SCENE_CONCURRENCY = env.openaiImageSceneConcurrency;
+const IMAGE_BATCH_TIMEOUT_BUFFER_MS = env.openaiImageBatchTimeoutBufferMs;
 
 class BlockCancelledError extends Error {
     constructor(message = 'Run cancelled during media-image execution') {
@@ -30,7 +37,7 @@ function dummyImageOutput() {
             url: `fake://cdn.example.com/images/scene-${String(index + 1).padStart(3, '0')}-generic-summary.jpg`,
             width: 1080,
             height: 1920,
-            prompt: `[dummy] Generic Korean information explainer comic scene ${index + 1}, clean vertical shorts framing, no readable text`,
+            prompt: `[dummy] Generic Korean information explainer comic scene ${index + 1}, clean vertical shorts framing, concise in-scene text allowed`,
         })),
     };
 }
@@ -42,7 +49,7 @@ export const mediaImageBlock: BlockExecutor = {
 
     async execute(
         input: unknown,
-        _config?: Record<string, unknown>,
+        config?: Record<string, unknown>,
         context?: BlockExecutorContext
     ): Promise<BlockExecutorResult> {
         const start = Date.now();
@@ -104,7 +111,9 @@ export const mediaImageBlock: BlockExecutor = {
             sceneTopTitle?.topTitle ??
             (typeof metadata?.title === 'string' ? metadata.title : undefined) ??
             (typeof inp?.title === 'string' ? inp.title : undefined) ??
-            '입시 정보 핵심 정리';
+            '핵심 이슈 정리';
+        const imageStyle = getImageStylePreset(config?.['imageStyleId'] ?? config?.['style']);
+        const imageQuality = normalizeImageQuality(config?.['imageQuality'] ?? env.openaiImageQuality);
 
         if (rawScenes.length === 0) {
             throw new Error('media-image requires upstream scenes or normalizedScenes in real execution mode');
@@ -133,7 +142,16 @@ export const mediaImageBlock: BlockExecutor = {
                 visualText: s.visualText ?? caption,
                 sourceRefs: s.sourceRefs ?? [],
                 sourceLabel,
-                prompt: buildShortsFramePrompt(title, caption, s.imagePrompt, sourceLabel, rulepack.imagePrompt),
+                prompt: buildGptImage2ScenePrompt({
+                    styleId: imageStyle.id,
+                    title,
+                    caption,
+                    narration: s.narration,
+                    visualPrompt: s.imagePrompt,
+                    sourceLabel,
+                    presetImageRules: rulepack.imagePrompt,
+                    format: config?.['style'] === 'single-image' ? 'single-image' : 'shorts-frame',
+                }),
             };
         });
 
@@ -159,14 +177,23 @@ export const mediaImageBlock: BlockExecutor = {
             `[media-image-block] generating ${scenePrompts.length} scenes with concurrency ${IMAGE_SCENE_CONCURRENCY}`
         );
 
-        let completedScenes = 0;
         const totalScenes = scenePrompts.length;
+        const batchTimeoutMs = readPositiveInt(
+            config?.['imageBatchTimeoutMs'],
+            calculateImageBatchTimeoutMs(totalScenes, IMAGE_SCENE_CONCURRENCY)
+        );
+        let completedScenes = 0;
+        const completedSceneNumbers = new Set<number>();
         const traceBase = {
             batchId,
             concurrency: IMAGE_SCENE_CONCURRENCY,
+            batchTimeoutMs,
             expectedSceneCount: totalScenes,
             provider: 'openai',
-            model: env.openaiImageModel,
+            model: GPT_IMAGE_MODEL,
+            quality: imageQuality,
+            imageStyleId: imageStyle.id,
+            imageStyleLabel: imageStyle.label,
         } as const;
 
         const recordImageTrace = async (
@@ -192,10 +219,16 @@ export const mediaImageBlock: BlockExecutor = {
             }
         };
 
-        await recordImageTrace('batch.started', 'STATUS');
+        const pendingSceneNumbers = (): number[] =>
+            scenePrompts.map(scene => scene.sceneNumber).filter(sceneNumber => !completedSceneNumbers.has(sceneNumber));
+
+        await recordImageTrace('batch.started', 'STATUS', {
+            timeoutMs: batchTimeoutMs,
+        });
 
         const reportSceneComplete = async (sceneNumber: number): Promise<void> => {
             await throwIfCancelled(context);
+            completedSceneNumbers.add(sceneNumber);
             completedScenes += 1;
             const progress = 25 + (completedScenes / totalScenes) * 60;
             await context?.onProgress?.(
@@ -264,7 +297,8 @@ export const mediaImageBlock: BlockExecutor = {
                     prompt: scene.prompt,
                     width: 1080,
                     height: 1920,
-                    style: 'realistic',
+                    style: imageStyle.id,
+                    quality: imageQuality,
                     signal,
                 });
                 await recordImageTrace('scene.openai.completed', 'STATUS', {
@@ -447,6 +481,19 @@ export const mediaImageBlock: BlockExecutor = {
         const { controller: batchController, cleanup: cleanupBatchController } = createLinkedAbortController(
             context?.abortSignal
         );
+        const batchTimeoutPromise = rejectAfterTimeoutAndAbort(
+            batchController,
+            batchTimeoutMs,
+            `media-image batch timed out after ${Math.round(batchTimeoutMs / 1000)} seconds`,
+            async error => {
+                await recordImageTrace('batch.timeout', 'ERROR', {
+                    durationMs: Date.now() - start,
+                    errorCode: 'IMAGE_TIMEOUT',
+                    errorMessage: error.message,
+                    pendingScenes: pendingSceneNumbers(),
+                });
+            }
+        );
         let settledResults: PromiseSettledResult<{
             image: ImageResult;
             asset: NonNullable<BlockExecutorResult['assets']>[number];
@@ -472,6 +519,7 @@ export const mediaImageBlock: BlockExecutor = {
                     { shouldStop: () => batchController.signal.aborted }
                 ),
                 rejectOnAbort(batchController.signal),
+                batchTimeoutPromise.promise,
             ]);
         } catch (err) {
             const cancellation = isCancellationError(context, err);
@@ -483,10 +531,12 @@ export const mediaImageBlock: BlockExecutor = {
                     durationMs: Date.now() - start,
                     errorCode: cancellation ? 'RUN_CANCELLED' : classifyImageError(err),
                     errorMessage: err instanceof Error ? err.message : String(err),
+                    pendingScenes: pendingSceneNumbers(),
                 }
             );
             throw err;
         } finally {
+            batchTimeoutPromise.cancel();
             cleanupBatchController();
         }
 
@@ -639,43 +689,6 @@ function createLinkedAbortController(parentSignal?: AbortSignal): {
     };
 }
 
-function buildShortsFramePrompt(
-    title: string,
-    caption: string,
-    visualPrompt?: string,
-    sourceLabel?: string,
-    presetImageRules?: string
-): string {
-    const compactRules = compactPromptText(presetImageRules, 180);
-    void title;
-    void caption;
-    void sourceLabel;
-
-    const scene = compactPromptText(
-        visualPrompt || 'Korean information explainer scene based on the provided topic, clean comic illustration.',
-        260
-    );
-
-    return [
-        'Create one vertical 9:16 central illustration for a Korean YouTube Shorts video.',
-        'Generate only the main comic/meme/situation artwork. Do not draw any Korean or English text.',
-        'Do not include black title bands, subtitles, captions, lower thirds, source labels, logos, URLs, or readable UI/document text.',
-        'Leave safe negative space near the top and bottom because the video compositor will add title/caption/source overlays.',
-        'Use clean viral Korean Shorts visual style, high contrast, simple background, expressive characters, and mobile-safe framing.',
-        compactRules,
-        `Scene: ${scene}`,
-    ]
-        .filter(Boolean)
-        .join(' ');
-}
-
-function compactPromptText(value: string | undefined, maxLength: number): string {
-    if (!value) return '';
-    const compact = value.replace(/\s+/g, ' ').trim();
-    if (compact.length <= maxLength) return compact;
-    return `${compact.slice(0, maxLength - 1)}...`;
-}
-
 function cleanSourceLabel(value: string | undefined): string | undefined {
     if (!value) return undefined;
     const compact = value.replace(/\s+/g, ' ').trim();
@@ -702,4 +715,58 @@ function withTimeoutAndAbort<T>(
     return Promise.race([promise, timeoutPromise]).finally(() => {
         if (timeout) clearTimeout(timeout);
     });
+}
+
+function rejectAfterTimeoutAndAbort(
+    controller: AbortController,
+    timeoutMs: number,
+    message: string,
+    onTimeout?: (error: Error) => Promise<void>
+): {
+    promise: Promise<never>;
+    cancel: () => void;
+} {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const clear = (): void => {
+        if (!timeout) return;
+        clearTimeout(timeout);
+        timeout = undefined;
+    };
+
+    const promise = new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => {
+            const timeoutError = new Error(message);
+            timeoutError.name = 'TimeoutError';
+            void onTimeout?.(timeoutError).finally(() => {
+                controller.abort(timeoutError);
+                reject(timeoutError);
+            });
+        }, timeoutMs);
+
+        controller.signal.addEventListener('abort', clear, { once: true });
+    }).finally(() => {
+        clear();
+        controller.signal.removeEventListener('abort', clear);
+    });
+
+    return {
+        promise,
+        cancel: clear,
+    };
+}
+
+function calculateImageBatchTimeoutMs(totalScenes: number, concurrency: number): number {
+    const boundedScenes = Math.max(1, totalScenes);
+    const boundedConcurrency = Math.max(1, concurrency);
+    const waves = Math.ceil(boundedScenes / boundedConcurrency);
+    return Math.max(1, waves * IMAGE_SCENE_TIMEOUT_MS + IMAGE_BATCH_TIMEOUT_BUFFER_MS);
+}
+
+function readPositiveInt(value: unknown, fallback: number): number {
+    if (typeof value === 'number' && Number.isFinite(value)) return Math.max(1, Math.floor(value));
+    if (typeof value === 'string' && value.trim()) {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) return Math.max(1, Math.floor(parsed));
+    }
+    return fallback;
 }

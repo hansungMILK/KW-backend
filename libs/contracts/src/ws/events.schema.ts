@@ -194,6 +194,7 @@ export const WsProposalCreatedSchema = z.object({
     estimatedCost: z.number().optional(),
     estimatedCostUsd: z.number().optional(),
     maxRunEstimatedCostUsd: z.number().optional(),
+    metadata: z.record(z.unknown()).optional(),
     description: z.string().optional(),
     approvalRequired: z.boolean(),
     timestamp: z.number(),

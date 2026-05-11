@@ -17,6 +17,43 @@ interface Message {
     proposal?: MessageProposal;
 }
 
+type ImageQuality = 'low' | 'medium' | 'high';
+type ImageStyleId =
+    | 'explainer-comic'
+    | 'animation'
+    | 'photo-real'
+    | 'research-visual'
+    | 'blueprint'
+    | 'newspaper'
+    | 'app-ui'
+    | 'icon-design';
+
+type ImageStyleOption = {
+    id: ImageStyleId;
+    label: string;
+    description?: string;
+};
+
+type ImageGenerationMetadata = {
+    imageGeneration?: {
+        model?: string;
+        recommendedStyleId?: ImageStyleId;
+        imageStyleId?: ImageStyleId;
+        imageStyleLabel?: string;
+        imageQuality?: ImageQuality;
+        sceneCount?: number;
+        imageEstimatedCostUsd?: number;
+        textAndOtherEstimatedCostUsd?: number;
+        estimatedTotalCostUsd?: number;
+        styleOptions?: ImageStyleOption[];
+        qualityOptions?: Array<{
+            id: ImageQuality;
+            label: string;
+            estimatedImageCostUsd?: number;
+        }>;
+    };
+};
+
 interface FlowAgentPanelProps {
     open: boolean;
     onClose: () => void;
@@ -43,6 +80,18 @@ const formatEstimatedCost = (cost: ProposalCreatedMessage['estimatedCost']): str
         return `${currency}${cost.total.toFixed(2)}`;
     }
     return undefined;
+};
+
+const asImageGenerationMetadata = (metadata: unknown): ImageGenerationMetadata['imageGeneration'] | undefined => {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return undefined;
+    const imageGeneration = (metadata as ImageGenerationMetadata).imageGeneration;
+    if (!imageGeneration || typeof imageGeneration !== 'object') return undefined;
+    return imageGeneration;
+};
+
+const formatUsd = (value: unknown): string | undefined => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+    return `$${value.toFixed(value >= 1 ? 2 : 3)}`;
 };
 
 const toUserVisibleAgentError = (error: unknown): string => {
@@ -78,6 +127,8 @@ export const FlowAgentPanel = ({
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [isThinking, setIsThinking] = useState(false);
+    const [proposalImageStyles, setProposalImageStyles] = useState<Record<string, ImageStyleId>>({});
+    const [proposalImageQualities, setProposalImageQualities] = useState<Record<string, ImageQuality>>({});
     const bottomRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const isComposingRef = useRef(false);
@@ -142,6 +193,7 @@ export const FlowAgentPanel = ({
             id: externalProposal.proposalId,
             blocks: externalProposal.blocks ?? [],
             estimatedCost: formatEstimatedCost(externalProposal.estimatedCost),
+            metadata: externalProposal.metadata,
             description: externalProposal.description,
         };
         setMessages(prev =>
@@ -199,7 +251,11 @@ export const FlowAgentPanel = ({
 
     const handleApprove = async (proposal: MessageProposal) => {
         try {
-            const result = await approveProposal(proposal.id);
+            const imageGeneration = asImageGenerationMetadata(proposal.metadata);
+            const result = await approveProposal(proposal.id, {
+                imageStyleId: proposalImageStyles[proposal.id] ?? imageGeneration?.imageStyleId,
+                imageQuality: proposalImageQualities[proposal.id] ?? imageGeneration?.imageQuality,
+            });
             onApproveProposal?.(result.nodes, result.edges);
             setMessages(prev => prev.filter(m => m.proposal?.id !== proposal.id));
         } catch (error) {
@@ -290,7 +346,7 @@ export const FlowAgentPanel = ({
                         <div className="mb-2 font-semibold text-foreground">무엇을 만들까요?</div>
                         <div>자연어로 요청하면 필요한 블록을 제안하고, 승인 후 캔버스에 배치합니다.</div>
                         <div className="mt-2 space-y-1">
-                            <div>예: 입시정보 쇼츠 제작해줘</div>
+                            <div>예: 최신 이슈를 정보전달 쇼츠로 제작해줘</div>
                             <div>예: 바나나가 춤추는 이미지 생성해줘</div>
                             <div>예: 리뷰 요약 자동화 만들어줘</div>
                         </div>
@@ -317,6 +373,21 @@ export const FlowAgentPanel = ({
                         const { blocks, estimatedCost, description } = msg.proposal;
                         if (blocks.length === 0) return null;
                         const proposal = msg.proposal;
+                        const imageGeneration = asImageGenerationMetadata(proposal.metadata);
+                        const selectedStyleId =
+                            proposalImageStyles[proposal.id] ??
+                            imageGeneration?.imageStyleId ??
+                            imageGeneration?.recommendedStyleId;
+                        const selectedQuality =
+                            proposalImageQualities[proposal.id] ?? imageGeneration?.imageQuality ?? 'medium';
+                        const selectedQualityOption = imageGeneration?.qualityOptions?.find(
+                            option => option.id === selectedQuality
+                        );
+                        const totalCost =
+                            typeof selectedQualityOption?.estimatedImageCostUsd === 'number'
+                                ? selectedQualityOption.estimatedImageCostUsd +
+                                  (imageGeneration?.textAndOtherEstimatedCostUsd ?? 0)
+                                : imageGeneration?.estimatedTotalCostUsd;
                         return (
                             <div key={msg.id} className="flex items-start gap-2">
                                 <div className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center shrink-0 mt-0.5">
@@ -332,6 +403,66 @@ export const FlowAgentPanel = ({
                                             <div key={i}>{b.label}</div>
                                         ))}
                                     </div>
+                                    {imageGeneration && (
+                                        <div className="rounded-md border border-border bg-background/40 p-2 space-y-2">
+                                            <div className="text-[11px] font-semibold text-foreground">이미지 설정</div>
+                                            <div className="text-[10px] text-muted-foreground">
+                                                모델: {imageGeneration.model ?? 'gpt-image-2'} · 장면:{' '}
+                                                {imageGeneration.sceneCount ?? 12}장
+                                            </div>
+                                            <div className="flex flex-wrap gap-1">
+                                                {imageGeneration.styleOptions?.map(option => (
+                                                    <button
+                                                        key={option.id}
+                                                        type="button"
+                                                        className={`rounded-full border px-2 py-1 text-[10px] transition-colors ${
+                                                            selectedStyleId === option.id
+                                                                ? 'border-primary bg-primary text-primary-foreground'
+                                                                : 'border-border bg-muted/40 text-muted-foreground hover:text-foreground'
+                                                        }`}
+                                                        title={option.description}
+                                                        onClick={() =>
+                                                            setProposalImageStyles(prev => ({
+                                                                ...prev,
+                                                                [proposal.id]: option.id,
+                                                            }))
+                                                        }
+                                                    >
+                                                        {option.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            <div className="flex gap-1">
+                                                {imageGeneration.qualityOptions?.map(option => (
+                                                    <button
+                                                        key={option.id}
+                                                        type="button"
+                                                        className={`rounded-md border px-2 py-1 text-[10px] transition-colors ${
+                                                            selectedQuality === option.id
+                                                                ? 'border-primary bg-primary/20 text-primary'
+                                                                : 'border-border bg-muted/30 text-muted-foreground hover:text-foreground'
+                                                        }`}
+                                                        onClick={() =>
+                                                            setProposalImageQualities(prev => ({
+                                                                ...prev,
+                                                                [proposal.id]: option.id,
+                                                            }))
+                                                        }
+                                                    >
+                                                        {option.label}
+                                                        {formatUsd(option.estimatedImageCostUsd)
+                                                            ? ` ${formatUsd(option.estimatedImageCostUsd)}`
+                                                            : ''}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            {formatUsd(totalCost) && (
+                                                <div className="text-[10px] text-muted-foreground">
+                                                    선택 기준 예상 총 비용: {formatUsd(totalCost)}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
                                     {estimatedCost && (
                                         <div className="text-muted-foreground">
                                             예상 비용 : {estimatedCost}

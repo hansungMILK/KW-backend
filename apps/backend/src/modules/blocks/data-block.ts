@@ -28,7 +28,7 @@ function dummyData(): BlockExecutorResult {
                 sceneNumber,
                 caption,
                 narration: `[dummy] ${captions[index]}을 짧게 설명하는 정보 전달 문장입니다.`,
-                imagePrompt: `[dummy] Korean explainer comic scene for ${captions[index]}, no readable text`,
+                imagePrompt: `[dummy] Korean explainer comic scene for ${captions[index]}, concise in-scene text allowed`,
                 visualText: caption,
                 sourceRefs: [`source-${Math.min(index + 1, 3)}`],
                 durationSec: 6,

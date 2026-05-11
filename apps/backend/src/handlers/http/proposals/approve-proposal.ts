@@ -22,11 +22,16 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
 
     const body = getBody<Record<string, unknown>>(event) ?? {};
     const bodyParsed = ProposalApproveRequestSchema.safeParse(body);
+    if (!bodyParsed.success) return badRequest('Invalid proposal approval request body');
 
     const result = await proposalService.approve(
         paramsParsed.data.proposalId,
-        bodyParsed.success ? bodyParsed.data.decisionNote : undefined,
-        bodyParsed.success ? bodyParsed.data.layoutType : undefined
+        bodyParsed.data.decisionNote,
+        bodyParsed.data.layoutType,
+        {
+            imageStyleId: bodyParsed.data.imageStyleId,
+            imageQuality: bodyParsed.data.imageQuality,
+        }
     );
 
     if (!result.ok) {

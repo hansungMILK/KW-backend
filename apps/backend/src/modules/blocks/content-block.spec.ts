@@ -66,7 +66,7 @@ describe('contentBlock', () => {
                     topTitle: '마누스 특가',
                     caption: '특가 확인',
                     narration: '마누스 특가 조건을 원문 기준으로 확인합니다.',
-                    imagePrompt: 'comic style AI subscription scene, no readable text',
+                    imagePrompt: 'comic style AI subscription scene, concise in-scene text allowed',
                     visualText: '특가 확인',
                     visual: { topTitle: '마누스 특가', mainCaption: '특가 확인' },
                     claimType: 'fact',
@@ -105,6 +105,7 @@ describe('contentBlock', () => {
 
         const request = vi.mocked(openaiAdapter.chatJson).mock.calls[0]?.[0];
         expect(request?.systemPrompt).toContain('PRIMARY SOURCE');
+        expect(request?.systemPrompt).toContain("article's factual spine");
         expect(request?.userMessage).toContain('PRIMARY SOURCE');
         expect(request?.userMessage).toContain('96% 할인된 연 32,000원');
         expect(request?.userMessage).toContain('primarySource=true');
@@ -123,7 +124,7 @@ describe('contentBlock', () => {
                     topTitle: '우로보로스',
                     caption: '핵심 정리',
                     narration: '국산 하네스 엔지니어링과 우로보로스를 원문 기준으로 봅니다.',
-                    imagePrompt: 'comic style engineering workflow, no readable text',
+                    imagePrompt: 'comic style engineering workflow, concise in-scene text allowed',
                     visualText: '핵심 정리',
                     visual: { topTitle: '우로보로스', mainCaption: '핵심 정리' },
                     claimType: 'fact',

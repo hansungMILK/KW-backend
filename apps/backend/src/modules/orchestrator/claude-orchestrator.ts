@@ -1,11 +1,17 @@
 import { ORCHESTRATOR_SYSTEM_PROMPT, PROMPT_VERSION, buildUserPrompt } from './prompt-templates';
 import { parseClaudeResponse } from './response-parser';
-import { compileWorkflowPlan } from './workflow-compiler';
+import { compileWorkflowPlan, seedRootBlockInputs } from './workflow-compiler';
 import { claudeAdapter } from '../../adapters/ai/claude-adapter';
 import { env } from '../../config/env';
 import { traceService } from '../../services/trace-service';
 import { generateNumericId } from '../../utils/id-generator';
 import { log } from '../../utils/logger';
+import {
+    buildImageGenerationPreferences,
+    enrichImageNodeConfig,
+    estimateGptImage2CostUsd,
+    roundUsd,
+} from '../image-generation/image-style';
 
 import type { AllowedBlockType } from './response-parser';
 import type { Orchestrator, ProposalResult } from './types';
@@ -22,7 +28,7 @@ const COST_ESTIMATES: Record<AllowedBlockType, number> = {
     content: 0.15,
     data: 0.01,
     analysis: 0.05,
-    'media-image': 0.7,
+    'media-image': 0,
     'media-tts': 0.1,
     'media-video': 0.2,
     integration: 0.02,
@@ -94,7 +100,19 @@ export const claudeOrchestrator: Orchestrator = {
             }
 
             // 4. Convert to ProposalResult
-            const { data } = compileResult;
+            const data = seedRootBlockInputs(compileResult.data, userMessage);
+            const mediaImageBlock = data.blocks.find(block => block.type === 'media-image');
+            const sceneCount = getMediaImageSceneCount(mediaImageBlock?.config);
+            const textAndOtherEstimatedCostUsd = estimateNonImageCostUsd(data.blocks);
+            const imageGeneration = mediaImageBlock
+                ? buildImageGenerationPreferences({
+                      userMessage,
+                      sceneCount,
+                      imageQuality: mediaImageBlock.config?.['imageQuality'] ?? env.openaiImageQuality,
+                      imageStyleId: mediaImageBlock.config?.['imageStyleId'] ?? mediaImageBlock.config?.['style'],
+                      textAndOtherEstimatedCostUsd,
+                  })
+                : undefined;
             const nodes = data.blocks.map((block, i) => ({
                 id: generateNumericId(),
                 blockId: `blk-${block.type}`,
@@ -102,7 +120,10 @@ export const claudeOrchestrator: Orchestrator = {
                 blockType: block.type,
                 position: { x: 300, y: 100 + i * 120 },
                 state: 'IDLE',
-                config: block.config,
+                config:
+                    block.type === 'media-image' && imageGeneration
+                        ? enrichImageNodeConfig(block.config, imageGeneration)
+                        : block.config,
             }));
 
             const edges = data.edges
@@ -117,9 +138,12 @@ export const claudeOrchestrator: Orchestrator = {
 
             const breakdown = data.blocks.map(b => ({
                 blockType: b.type,
-                amount: COST_ESTIMATES[b.type] ?? 0.01,
+                amount:
+                    b.type === 'media-image'
+                        ? estimateGptImage2CostUsd(sceneCount, imageGeneration?.imageQuality)
+                        : (COST_ESTIMATES[b.type] ?? 0.01),
             }));
-            const total = data.estimatedCostUsd || breakdown.reduce((sum, b) => sum + b.amount, 0);
+            const total = imageGeneration?.estimatedTotalCostUsd || data.estimatedCostUsd || sumBreakdown(breakdown);
 
             // Record success trace
             await traceService.record(flowId, null, 'TOOL_RESULT', 'Claude proposal generated', {
@@ -136,9 +160,10 @@ export const claudeOrchestrator: Orchestrator = {
                 proposedEdges: edges,
                 estimatedCost: {
                     currency: 'USD',
-                    total: Math.round(total * 100) / 100,
+                    total: roundUsd(total),
                     breakdown,
                 },
+                metadata: imageGeneration ? { imageGeneration } : undefined,
                 approvalRequired: true,
                 assistantMessage:
                     data.summary ||
@@ -172,4 +197,22 @@ function buildFallbackProposal(errorMessage: string): ProposalResult {
         approvalRequired: false,
         assistantMessage: errorMessage,
     };
+}
+
+function getMediaImageSceneCount(config: Record<string, unknown> | undefined): number {
+    const count = Number(config?.['count'] ?? config?.['scenes'] ?? config?.['sceneCount'] ?? config?.['frameCount']);
+    return Number.isFinite(count) && count > 0 ? Math.floor(count) : 12;
+}
+
+function estimateNonImageCostUsd(blocks: Array<{ type: AllowedBlockType }>): number {
+    return roundUsd(
+        blocks.reduce((sum, block) => {
+            if (block.type === 'media-image') return sum;
+            return sum + (COST_ESTIMATES[block.type] ?? 0.01);
+        }, 0)
+    );
+}
+
+function sumBreakdown(breakdown: Array<{ amount: number }>): number {
+    return roundUsd(breakdown.reduce((sum, item) => sum + item.amount, 0));
 }

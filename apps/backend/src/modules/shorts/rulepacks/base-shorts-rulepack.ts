@@ -33,8 +33,9 @@ export const BASE_SHORTS_RULES = `Base Shorts Engine Rules:
 - When certainty is unclear, label the claim as uncertain instead of making it sound final.`;
 
 export const GPT_IMAGE_2_KOREAN_TEXT_RULES = `GPT-image-2 visual-only rules:
-- Do not ask GPT-image to render Korean/English titles, captions, subtitles, source labels, black title bands, lower thirds, logos, URLs, or readable UI text.
-- Generate only the central comic/meme/situation artwork.
+- Do not rely on GPT-image for the final title band, lower subtitle band, URLs, watermarks, or source overlays; the video compositor owns those overlays.
+- Short Korean/English in-scene signage, labels, screen text, or document text is allowed when it directly supports the scene.
+- Generate the central comic/meme/situation artwork first; text should never be unrelated decoration.
 - Prefer central 16:9-friendly artwork or evidence images inside the vertical canvas.
 - Leave mobile-safe negative space near the top and bottom because the video compositor will add title/subtitle/source overlays.
 - Put exact claims, URLs, and detailed source notes in structured metadata and narration.`;

@@ -86,6 +86,7 @@ export const MessageCreateResponseSchema = z.object({
                 .optional(),
             estimatedCostUsd: z.number().optional(),
             maxRunEstimatedCostUsd: z.number().optional(),
+            metadata: z.record(z.unknown()).optional(),
             proposedNodes: z.array(z.record(z.unknown())),
             proposedEdges: z.array(z.record(z.unknown())),
             approvalRequired: z.boolean(),

@@ -10,6 +10,7 @@ export interface ProposalResult {
         total: number;
         breakdown?: Array<{ blockType: string; amount: number }>;
     };
+    metadata?: Record<string, unknown>;
     approvalRequired: boolean;
     assistantMessage: string;
 }

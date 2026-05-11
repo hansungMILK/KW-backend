@@ -6,6 +6,12 @@ import { env } from '../../config/env';
 import { traceService } from '../../services/trace-service';
 import { generateNumericId } from '../../utils/id-generator';
 import { log } from '../../utils/logger';
+import {
+    buildImageGenerationPreferences,
+    enrichImageNodeConfig,
+    estimateGptImage2CostUsd,
+    roundUsd,
+} from '../image-generation/image-style';
 
 import type { AllowedBlockType } from './response-parser';
 import type { Orchestrator, ProposalResult } from './types';
@@ -20,7 +26,7 @@ const COST_ESTIMATES: Record<AllowedBlockType, number> = {
     content: 0.03,
     data: 0.01,
     analysis: 0.01,
-    'media-image': 0.11,
+    'media-image': 0,
     'media-tts': 0.01,
     'media-video': 0.2,
     integration: 0.01,
@@ -78,6 +84,19 @@ export const openaiOrchestrator: Orchestrator = {
             }
 
             const data = seedRootBlockInputs(compileResult.data, userMessage);
+            const mediaImageBlock = data.blocks.find(block => block.type === 'media-image');
+            const sceneCount = getMediaImageSceneCount(mediaImageBlock?.config);
+            const textAndOtherEstimatedCostUsd = estimateNonImageCostUsd(data.blocks);
+            const imageGeneration = mediaImageBlock
+                ? buildImageGenerationPreferences({
+                      userMessage,
+                      sceneCount,
+                      imageQuality: mediaImageBlock.config?.['imageQuality'] ?? env.openaiImageQuality,
+                      imageStyleId: mediaImageBlock.config?.['imageStyleId'] ?? mediaImageBlock.config?.['style'],
+                      textAndOtherEstimatedCostUsd,
+                  })
+                : undefined;
+
             const nodes = data.blocks.map((block, i) => ({
                 id: generateNumericId(),
                 blockId: `blk-${block.type}`,
@@ -86,7 +105,10 @@ export const openaiOrchestrator: Orchestrator = {
                 type: block.type,
                 position: { x: 300, y: 100 + i * 120 },
                 state: 'IDLE',
-                config: block.config,
+                config:
+                    block.type === 'media-image' && imageGeneration
+                        ? enrichImageNodeConfig(block.config, imageGeneration)
+                        : block.config,
             }));
 
             const edges = data.edges
@@ -101,9 +123,12 @@ export const openaiOrchestrator: Orchestrator = {
 
             const breakdown = data.blocks.map(b => ({
                 blockType: b.type,
-                amount: COST_ESTIMATES[b.type] ?? 0.01,
+                amount:
+                    b.type === 'media-image'
+                        ? estimateGptImage2CostUsd(sceneCount, imageGeneration?.imageQuality)
+                        : (COST_ESTIMATES[b.type] ?? 0.01),
             }));
-            const total = data.estimatedCostUsd || breakdown.reduce((sum, b) => sum + b.amount, 0);
+            const total = imageGeneration?.estimatedTotalCostUsd || data.estimatedCostUsd || sumBreakdown(breakdown);
 
             await traceService.record(flowId, null, 'TOOL_RESULT', 'OpenAI proposal generated', {
                 promptVersion: PROMPT_VERSION,
@@ -119,9 +144,10 @@ export const openaiOrchestrator: Orchestrator = {
                 proposedEdges: edges,
                 estimatedCost: {
                     currency: 'USD',
-                    total: Math.round(total * 100) / 100,
+                    total: roundUsd(total),
                     breakdown,
                 },
+                metadata: imageGeneration ? { imageGeneration } : undefined,
                 approvalRequired: true,
                 assistantMessage:
                     data.summary ||
@@ -149,4 +175,22 @@ function buildFallbackProposal(errorMessage: string): ProposalResult {
         approvalRequired: false,
         assistantMessage: errorMessage,
     };
+}
+
+function getMediaImageSceneCount(config: Record<string, unknown> | undefined): number {
+    const count = Number(config?.['count'] ?? config?.['scenes'] ?? config?.['sceneCount'] ?? config?.['frameCount']);
+    return Number.isFinite(count) && count > 0 ? Math.floor(count) : 12;
+}
+
+function estimateNonImageCostUsd(blocks: Array<{ type: AllowedBlockType }>): number {
+    return roundUsd(
+        blocks.reduce((sum, block) => {
+            if (block.type === 'media-image') return sum;
+            return sum + (COST_ESTIMATES[block.type] ?? 0.01);
+        }, 0)
+    );
+}
+
+function sumBreakdown(breakdown: Array<{ amount: number }>): number {
+    return roundUsd(breakdown.reduce((sum, item) => sum + item.amount, 0));
 }

@@ -3,6 +3,7 @@ import { traceService } from './trace-service';
 import { wsService } from './websocket-service';
 import { broadcastNodePortUpdated } from './ws-flow-events-service';
 import { deleteObject, getPublicUrl, publicUrlFromS3Uri, putObject } from '../adapters/aws/s3';
+import { env } from '../config/env';
 import { assetRepo } from '../repositories/asset-repository';
 import { runRepo } from '../repositories/run-repository';
 import { generateNumericId } from '../utils/id-generator';
@@ -34,6 +35,82 @@ function createExecutionCancelledError(message = 'Run cancelled during node exec
 
 function isExecutionCancelledError(err: unknown): boolean {
     return err instanceof Error && (err.name === 'ExecutionCancelledError' || /cancelled/i.test(err.message));
+}
+
+function createExecutionTimeoutError(blockType: string, timeoutMs: number): Error {
+    const error = new Error(`${blockType} execution timed out after ${Math.round(timeoutMs / 1000)} seconds`);
+    error.name = 'ExecutionTimeoutError';
+    return error;
+}
+
+function isExecutionTimeoutError(err: unknown): boolean {
+    return err instanceof Error && err.name === 'ExecutionTimeoutError';
+}
+
+function createTimeoutWatchdog(
+    blockType: string,
+    timeoutMs: number,
+    onTimeout: (error: Error) => void | Promise<void>
+): { promise: Promise<never>; cancel: () => void } {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let cancelled = false;
+
+    const promise = new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => {
+            if (cancelled) return;
+            const error = createExecutionTimeoutError(blockType, timeoutMs);
+            void onTimeout(error);
+            reject(error);
+        }, timeoutMs);
+    });
+    void promise.catch(() => {
+        /* consumed by the node execution race */
+    });
+
+    return {
+        promise,
+        cancel: () => {
+            cancelled = true;
+            if (timeout) clearTimeout(timeout);
+        },
+    };
+}
+
+function resolveNodeExecutionTimeoutMs(
+    blockType: string,
+    resolvedInput: Record<string, unknown> | null,
+    config?: Record<string, unknown> | null
+): number {
+    if (blockType === 'media-image') {
+        const sceneCount =
+            arrayLength(resolvedInput?.['normalizedScenes']) ??
+            arrayLength(resolvedInput?.['scenes']) ??
+            positiveNumber(config?.['count']) ??
+            1;
+        const waveCount = Math.ceil(sceneCount / Math.max(1, env.openaiImageSceneConcurrency));
+        return Math.max(
+            env.nodeExecutionTimeoutMs,
+            waveCount * env.openaiImageSceneTimeoutMs + env.openaiImageBatchTimeoutBufferMs + 30000
+        );
+    }
+
+    if (blockType === 'media-tts') {
+        return Math.max(env.nodeExecutionTimeoutMs, env.elevenLabsTtsTimeoutMs + 30000);
+    }
+
+    if (blockType === 'media-video') {
+        return Math.max(env.nodeExecutionTimeoutMs, 900000);
+    }
+
+    return env.nodeExecutionTimeoutMs;
+}
+
+function arrayLength(value: unknown): number | undefined {
+    return Array.isArray(value) && value.length > 0 ? value.length : undefined;
+}
+
+function positiveNumber(value: unknown): number | undefined {
+    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined;
 }
 
 // ============================================================================
@@ -393,7 +470,13 @@ export const executionEngine = {
         };
 
         const ensureNodeActive = async (): Promise<void> => {
-            if (abortController.signal.aborted || (await isCancelled())) {
+            if (abortController.signal.aborted) {
+                const reason = abortController.signal.reason;
+                if (isExecutionTimeoutError(reason)) throw reason;
+                abortAsCancelled();
+                throw createExecutionCancelledError();
+            }
+            if (await isCancelled()) {
                 abortAsCancelled();
                 throw createExecutionCancelledError();
             }
@@ -547,6 +630,28 @@ export const executionEngine = {
 
             const resolvedInput = await resolveNodeInput(runId, node);
             await ensureNodeActive();
+            const nodeTimeoutMs = resolveNodeExecutionTimeoutMs(node.blockType, resolvedInput, node.inputPayload);
+            const nodeTimeout = createTimeoutWatchdog(node.blockType, nodeTimeoutMs, async error => {
+                if (!abortController.signal.aborted) abortController.abort(error);
+                try {
+                    await traceService.record(runId, nodeId, 'ERROR', `Node ${nodeId} timed out`, {
+                        event: 'node.timeout',
+                        blockType: node.blockType,
+                        timeoutMs: nodeTimeoutMs,
+                    });
+                } catch {
+                    /* non-fatal */
+                }
+            });
+            try {
+                await traceService.record(runId, nodeId, 'STATUS', `Node ${nodeId} executing`, {
+                    event: 'node.execution.started',
+                    blockType: node.blockType,
+                    timeoutMs: nodeTimeoutMs,
+                });
+            } catch {
+                /* non-fatal */
+            }
             const executionPromise = blockExecutor.execute(
                 node.blockType,
                 resolvedInput,
@@ -566,7 +671,12 @@ export const executionEngine = {
             void executionPromise.catch(() => {
                 /* handled by Promise.race below */
             });
-            const result = await Promise.race([executionPromise, cancelPromise]);
+            let result: BlockExecutorResult;
+            try {
+                result = await Promise.race([executionPromise, cancelPromise, nodeTimeout.promise]);
+            } finally {
+                nodeTimeout.cancel();
+            }
             const { output, durationMs, assets } = result;
 
             await ensureNodeActive();
@@ -687,7 +797,11 @@ export const executionEngine = {
                 await broadcastNodePortUpdated(runForNode.flowId, nodeId, output);
             }
         } catch (err: unknown) {
-            if (isExecutionCancelledError(err) || abortController.signal.aborted || (await isCancelled())) {
+            if (
+                isExecutionCancelledError(err) ||
+                isExecutionCancelledError(abortController.signal.reason) ||
+                (await isCancelled())
+            ) {
                 await rollbackAssets(persistedAssets);
                 await markNodeCancelled();
                 try {
@@ -702,8 +816,9 @@ export const executionEngine = {
             console.error(`[execution-engine] node ${nodeId} failed:`, errorMessage);
             await rollbackAssets(persistedAssets);
 
+            const errorCode = isExecutionTimeoutError(err) ? 'NODE_TIMEOUT' : 'EXECUTION_ERROR';
             const failedResult = await runRepo.updateRunNodeStatus(runId, nodeId, 'FAILED', {
-                errorCode: 'EXECUTION_ERROR',
+                errorCode,
                 errorMessage,
             });
             if (!failedResult.ok) {
@@ -724,7 +839,7 @@ export const executionEngine = {
                         flowId: runForNode.flowId,
                         nodeId,
                         status: 'FAILED',
-                        errorCode: 'EXECUTION_ERROR',
+                        errorCode,
                         errorMessage,
                         timestamp: Date.now(),
                     });

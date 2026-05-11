@@ -92,7 +92,7 @@ const INTENT_ROUTER_EXAMPLES = `Examples:
 - "ㅎㅇ" -> {"action":"chat","reason":"인사"}
 - "뭐 할 수 있어?" -> {"action":"chat","reason":"기능 질문"}
 - "바나나가 춤추는 이미지 생성해줘" -> {"action":"proposal","reason":"이미지 생성 워크플로우 요청"}
-- "입시정보 쇼츠 만들어줘" -> {"action":"proposal","reason":"쇼츠 제작 요청"}
+- "최신 이슈를 정보전달 쇼츠로 만들어줘" -> {"action":"proposal","reason":"쇼츠 제작 요청"}
 - "뉴스 요약 영상 생성해줘" -> {"action":"proposal","reason":"영상 워크플로우 생성 요청"}
 - "이 플로우 실행해줘" -> {"action":"proposal","reason":"실행 요청"}`;
 
@@ -104,7 +104,7 @@ Product reality:
 - Current executable block catalog: ${AVAILABLE_BLOCKS.join(', ')}.
 - The first polished template is Shorts creation: search -> content -> data -> analysis -> media-image + media-tts -> media-video -> integration.
 - Standalone image generation uses the minimal content -> media-image workflow.
-- A one-minute Shorts video is made from 10-15 vertical images, captions, OpenAI TTS, BGM, and FFmpeg MP4 composition.
+- A one-minute Shorts video is made from 10-15 vertical images, captions, ElevenLabs TTS, BGM, and FFmpeg MP4 composition.
 - Do not claim that a workflow, image, audio, or video was created unless the system actually creates it.
 - If the user only greets you, greet back and suggest one concrete next request.
 - If the user asks a vague production request, ask the smallest necessary clarifying question or offer a sensible default.

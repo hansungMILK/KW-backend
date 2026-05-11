@@ -121,6 +121,41 @@ describe('searchBlock', () => {
         });
     });
 
+    it('prefers article body regions over navigation and recommendation text', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(
+                async () =>
+                    new Response(
+                        String.raw`<html><head><meta property="og:title" content="모수 와인 논란" /></head><body>
+                          <nav>오피니언 정치 경제 스포츠 추천 기사</nav>
+                          <article>
+                            <h1>모수 와인 논란</h1>
+                            <div class="article_body fs3" id="article_body" itemprop="articleBody">
+                              <p>안성재 셰프가 모수 서울의 와인 빈티지 바꿔치기 논란에 사과했습니다.</p>
+                              <p>고객은 2000년 빈티지를 주문했지만 2005년 빈티지를 받았다고 주장했습니다.</p>
+                              <p>소믈리에는 실수를 알고도 즉시 알리지 않았고, 이후 직무에서 배제됐습니다.</p>
+                            </div>
+                            <aside>추천 기사와 광고 영역입니다.</aside>
+                          </article>
+                        </body></html>`,
+                        { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } }
+                    )
+            )
+        );
+
+        const result = await searchBlock.execute({
+            query: '모수 논란 https://www.joongang.co.kr/article/25426209',
+        });
+
+        const article = (result.output['articles'] as Array<Record<string, unknown>>)[0];
+        expect(article['fullText']).toContain('안성재 셰프가 모수 서울의 와인 빈티지 바꿔치기 논란에 사과했습니다');
+        expect(article['fullText']).toContain('2000년 빈티지');
+        expect(article['fullText']).not.toContain('오피니언 정치 경제');
+        expect(article['fullText']).not.toContain('추천 기사와 광고');
+        expect(article['keyClaims']).toEqual(expect.arrayContaining([expect.stringContaining('2000년 빈티지')]));
+    });
+
     it('keeps web search for broad topics without a URL', async () => {
         const result = await searchBlock.execute({ query: 'KTX 예매가 어려워진 이유' });
 

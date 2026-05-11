@@ -127,6 +127,9 @@ export interface ProposalCreatedMessage {
     proposalId: string;
     blocks?: Array<{ type: string; label: string }>;
     estimatedCost?: string | number | { currency?: string; total?: number };
+    estimatedCostUsd?: number;
+    maxRunEstimatedCostUsd?: number;
+    metadata?: Record<string, unknown>;
     description?: string;
 }
 

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { compileWorkflowPlan, seedRootBlockInputs } from './workflow-compiler';
+import {
+    buildImageGenerationPreferences,
+    enrichImageNodeConfig,
+    estimateGptImage2CostUsd,
+} from '../image-generation/image-style';
 
 describe('compileWorkflowPlan', () => {
     it('rejects video blocks when the workflow plan is text-only', () => {
@@ -177,5 +182,42 @@ describe('compileWorkflowPlan', () => {
         );
 
         expect(seeded.blocks[0].config.query).toBe('KTX 예매 어려운 이유');
+    });
+
+    it('estimates gpt-image-2 vertical shorts image cost by scene count and quality', () => {
+        expect(estimateGptImage2CostUsd(12, 'low')).toBe(0.06);
+        expect(estimateGptImage2CostUsd(12, 'medium')).toBe(0.492);
+        expect(estimateGptImage2CostUsd(12, 'high')).toBe(1.98);
+    });
+
+    it('builds image generation preferences with animation style when requested', () => {
+        const prefs = buildImageGenerationPreferences({
+            userMessage: '기술 이슈 쇼츠 만들어줘. 이번에는 애니메이션 풍으로 그려줘라.',
+            sceneCount: 12,
+            imageQuality: 'medium',
+            textAndOtherEstimatedCostUsd: 0.18,
+        });
+
+        expect(prefs.model).toBe('gpt-image-2');
+        expect(prefs.imageStyleId).toBe('animation');
+        expect(prefs.imageStyleLabel).toBe('애니메이션');
+        expect(prefs.imageEstimatedCostUsd).toBe(0.492);
+        expect(prefs.estimatedTotalCostUsd).toBe(0.672);
+        expect(prefs.styleOptions.some(option => option.id === 'animation')).toBe(true);
+    });
+
+    it('does not leak invalid scene counts into media-image node config', () => {
+        const prefs = buildImageGenerationPreferences({
+            userMessage: '쇼츠 만들어줘',
+            sceneCount: 12,
+            imageQuality: 'medium',
+        });
+
+        expect(enrichImageNodeConfig({ count: 'not-a-number' }, prefs)).toEqual(
+            expect.objectContaining({
+                count: 12,
+                imageModel: 'gpt-image-2',
+            })
+        );
     });
 });

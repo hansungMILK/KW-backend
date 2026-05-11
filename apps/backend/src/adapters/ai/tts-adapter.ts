@@ -3,15 +3,15 @@ import { mkdtemp, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-import { ensurePaidOpenAIAllowed } from './paid-openai-guard';
 import { env } from '../../config/env';
 import { settingsService } from '../../services/settings-service';
 import { log } from '../../utils/logger';
 
 export interface TtsRequest {
     text: string;
-    voiceId?: string; // OpenAI voice name
+    voiceId?: string; // ElevenLabs voice id
     modelId?: string;
+    signal?: AbortSignal;
 }
 
 export interface TtsResult {
@@ -20,8 +20,9 @@ export interface TtsResult {
     estimatedDurationSec: number;
 }
 
-const TTS_TIMEOUT_MS = Number(process.env.OPENAI_TTS_TIMEOUT_MS || 120000);
-const TTS_MAX_ATTEMPTS = Math.max(1, Number(process.env.OPENAI_TTS_MAX_ATTEMPTS || 1));
+const ELEVENLABS_BASE_URL = 'https://api.elevenlabs.io/v1';
+const TTS_TIMEOUT_MS = env.elevenLabsTtsTimeoutMs;
+const TTS_MAX_ATTEMPTS = env.elevenLabsTtsMaxAttempts;
 const FFPROBE_PATH =
     process.env.FFPROBE_PATH ||
     (process.env.FFMPEG_PATH && process.env.FFMPEG_PATH.endsWith('ffmpeg')
@@ -30,16 +31,15 @@ const FFPROBE_PATH =
 
 export const ttsAdapter = {
     async synthesize(request: TtsRequest): Promise<TtsResult> {
-        ensurePaidOpenAIAllowed('text-to-speech');
-        const apiKey = await settingsService.getKeyForProviderAsync('openai');
-        if (!apiKey) throw new Error('OPENAI_API_KEY not configured');
+        const apiKey = await settingsService.getKeyForProviderAsync('elevenlabs');
+        if (!apiKey) throw new Error('ELEVENLABS_API_KEY not configured');
 
-        const model = request.modelId || env.openaiTtsModel;
-        const voice = request.voiceId || env.openaiTtsVoice;
+        const model = request.modelId || env.elevenLabsTtsModel;
+        const voice = request.voiceId || env.elevenLabsTtsVoiceId;
         const input = request.text.slice(0, 4096);
         const startedAt = Date.now();
 
-        log.info('OpenAI TTS generation', {
+        log.info('ElevenLabs TTS generation', {
             model,
             voice,
             textLength: input.length,
@@ -47,12 +47,12 @@ export const ttsAdapter = {
             maxAttempts: TTS_MAX_ATTEMPTS,
         });
 
-        const buffer = await requestOpenAITts(apiKey, model, voice, input);
+        const buffer = await requestElevenLabsTts(apiKey, model, voice, input, request.signal);
         const measuredDurationSec = await probeAudioDurationSec(buffer);
-        // Fallback estimate: OpenAI Korean narration is roughly 7.5 chars/sec with the current default voice.
+        // Fallback estimate: Korean narration is roughly 7.5 chars/sec with the current default voice.
         const estimatedDurationSec = measuredDurationSec ?? Math.ceil(input.length / 7.5);
 
-        log.info('OpenAI TTS generation complete', {
+        log.info('ElevenLabs TTS generation complete', {
             model,
             voice,
             latencyMs: Date.now() - startedAt,
@@ -65,32 +65,45 @@ export const ttsAdapter = {
     },
 };
 
-async function requestOpenAITts(apiKey: string, model: string, voice: string, input: string): Promise<Buffer> {
+async function requestElevenLabsTts(
+    apiKey: string,
+    model: string,
+    voice: string,
+    input: string,
+    signal?: AbortSignal
+): Promise<Buffer> {
     let lastError: unknown;
 
     for (let attempt = 1; attempt <= TTS_MAX_ATTEMPTS; attempt += 1) {
         let shouldRetry = false;
+        throwIfAborted(signal);
 
         try {
-            return await fetchOpenAITtsBuffer(apiKey, model, voice, input);
+            return await fetchElevenLabsTtsBuffer(apiKey, model, voice, input, signal);
         } catch (err) {
-            if (err instanceof Error && err.message.startsWith('OpenAI TTS error ')) {
-                const status = Number(err.message.match(/^OpenAI TTS error (\d+):/)?.[1] ?? 0);
+            if (isAbortError(err)) throw err;
+
+            if (err instanceof Error && err.message.startsWith('ElevenLabs TTS error ')) {
+                const status = Number(err.message.match(/^ElevenLabs TTS error (\d+):/)?.[1] ?? 0);
                 if (!isRetryableStatus(status) || attempt === TTS_MAX_ATTEMPTS) throw err;
 
                 shouldRetry = true;
                 lastError = err;
-                log.warn('OpenAI TTS transient error, retrying', { status, attempt, maxAttempts: TTS_MAX_ATTEMPTS });
+                log.warn('ElevenLabs TTS transient error, retrying', {
+                    status,
+                    attempt,
+                    maxAttempts: TTS_MAX_ATTEMPTS,
+                });
             } else {
                 lastError =
                     err instanceof Error && err.name === 'AbortError'
-                        ? new Error(`OpenAI TTS timed out after ${Math.round(TTS_TIMEOUT_MS / 1000)} seconds`)
+                        ? new Error(`ElevenLabs TTS timed out after ${Math.round(TTS_TIMEOUT_MS / 1000)} seconds`)
                         : err;
 
                 if (attempt === TTS_MAX_ATTEMPTS) break;
 
                 shouldRetry = true;
-                log.warn('OpenAI TTS request failed, retrying', {
+                log.warn('ElevenLabs TTS request failed, retrying', {
                     attempt,
                     maxAttempts: TTS_MAX_ATTEMPTS,
                     error: lastError instanceof Error ? lastError.message : String(lastError),
@@ -98,11 +111,11 @@ async function requestOpenAITts(apiKey: string, model: string, voice: string, in
             }
         }
 
-        if (shouldRetry) await sleep(retryDelayMs(attempt));
+        if (shouldRetry) await sleep(retryDelayMs(attempt), signal);
     }
 
     if (lastError instanceof Error) throw lastError;
-    throw new Error('OpenAI TTS request failed');
+    throw new Error('ElevenLabs TTS request failed');
 }
 
 async function probeAudioDurationSec(buffer: Buffer): Promise<number | undefined> {
@@ -131,43 +144,83 @@ function roundToMillis(value: number): number {
     return Math.round(value * 1000) / 1000;
 }
 
-async function fetchOpenAITtsBuffer(apiKey: string, model: string, voice: string, input: string): Promise<Buffer> {
+async function fetchElevenLabsTtsBuffer(
+    apiKey: string,
+    model: string,
+    voice: string,
+    input: string,
+    signal?: AbortSignal
+): Promise<Buffer> {
+    throwIfAborted(signal);
+
     const controller = new AbortController();
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    let abortListener: (() => void) | undefined;
 
     try {
+        abortListener = () => controller.abort(signal?.reason);
+        signal?.addEventListener('abort', abortListener, { once: true });
+
         const timeoutPromise = new Promise<never>((_, reject) => {
             timeout = setTimeout(() => {
-                controller.abort();
-                reject(new Error(`OpenAI TTS timed out after ${Math.round(TTS_TIMEOUT_MS / 1000)} seconds`));
+                const timeoutError = new Error(
+                    `ElevenLabs TTS timed out after ${Math.round(TTS_TIMEOUT_MS / 1000)} seconds`
+                );
+                timeoutError.name = 'TimeoutError';
+                controller.abort(timeoutError);
+                reject(timeoutError);
             }, TTS_TIMEOUT_MS);
         });
-        const response = await Promise.race([
-            fetch(`${env.openaiBaseUrl}/audio/speech`, {
+
+        const requestPromise = fetch(
+            `${ELEVENLABS_BASE_URL}/text-to-speech/${encodeURIComponent(voice)}?output_format=${encodeURIComponent(
+                env.elevenLabsTtsOutputFormat
+            )}`,
+            {
                 method: 'POST',
                 headers: {
-                    Authorization: `Bearer ${apiKey}`,
+                    'xi-api-key': apiKey,
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ model, voice, input, response_format: 'mp3' }),
+                body: JSON.stringify({
+                    text: input,
+                    model_id: model,
+                    language_code: 'ko',
+                    voice_settings: {
+                        stability: 0.55,
+                        similarity_boost: 0.75,
+                        style: 0.15,
+                        use_speaker_boost: true,
+                    },
+                }),
                 signal: controller.signal,
-            }),
-            timeoutPromise,
-        ]);
-        const buffer = Buffer.from(await Promise.race([response.arrayBuffer(), timeoutPromise]));
+            }
+        );
+        void requestPromise.catch(() => {
+            /* timeout/cancel path already reports the primary error */
+        });
+
+        const response = await Promise.race([requestPromise, timeoutPromise]);
+        const audioPromise = response.arrayBuffer();
+        void audioPromise.catch(() => {
+            /* timeout/cancel path already reports the primary error */
+        });
+        const buffer = Buffer.from(await Promise.race([audioPromise, timeoutPromise]));
 
         if (!response.ok) {
-            throw new Error(`OpenAI TTS error ${response.status}: ${buffer.toString('utf8').slice(0, 200)}`);
+            throw new Error(`ElevenLabs TTS error ${response.status}: ${buffer.toString('utf8').slice(0, 200)}`);
         }
 
         return buffer;
     } catch (err) {
-        if (err instanceof Error && err.name === 'AbortError') {
-            throw new Error(`OpenAI TTS timed out after ${Math.round(TTS_TIMEOUT_MS / 1000)} seconds`);
+        if (signal?.aborted) throw createAbortError(abortMessageFromSignal(signal));
+        if (err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError')) {
+            throw new Error(`ElevenLabs TTS timed out after ${Math.round(TTS_TIMEOUT_MS / 1000)} seconds`);
         }
         throw err;
     } finally {
         if (timeout) clearTimeout(timeout);
+        if (abortListener) signal?.removeEventListener('abort', abortListener);
     }
 }
 
@@ -179,6 +232,44 @@ function retryDelayMs(attempt: number): number {
     return attempt === 1 ? 1000 : 3000;
 }
 
-function sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+function isAbortError(err: unknown): boolean {
+    return err instanceof Error && err.name === 'AbortError';
+}
+
+function createAbortError(message: string): Error {
+    const error = new Error(message);
+    error.name = 'AbortError';
+    return error;
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+    if (signal?.aborted) throw createAbortError(abortMessageFromSignal(signal));
+}
+
+function abortMessageFromSignal(signal?: AbortSignal): string {
+    const reason = signal?.reason;
+    if (reason instanceof Error) return reason.message;
+    if (typeof reason === 'string' && reason) return reason;
+    return 'ElevenLabs TTS request aborted';
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+        if (signal?.aborted) {
+            reject(createAbortError(abortMessageFromSignal(signal)));
+            return;
+        }
+
+        const timeout = setTimeout(() => {
+            signal?.removeEventListener('abort', onAbort);
+            resolve();
+        }, ms);
+
+        const onAbort = () => {
+            clearTimeout(timeout);
+            reject(createAbortError(abortMessageFromSignal(signal)));
+        };
+
+        signal?.addEventListener('abort', onAbort, { once: true });
+    });
 }

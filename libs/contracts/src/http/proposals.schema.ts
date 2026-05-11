@@ -10,6 +10,17 @@ import { z } from 'zod';
 // ============================================================================
 
 export const ProposalStatusSchema = z.enum(['PENDING', 'APPROVED', 'REJECTED', 'EXPIRED']);
+export const ImageStyleIdSchema = z.enum([
+    'explainer-comic',
+    'animation',
+    'photo-real',
+    'research-visual',
+    'blueprint',
+    'newspaper',
+    'app-ui',
+    'icon-design',
+]);
+export const ImageQualitySchema = z.enum(['low', 'medium', 'high']);
 
 // ============================================================================
 // Proposal model (stored in ProposalsTable)
@@ -36,6 +47,7 @@ export const ProposalSchema = z.object({
                 .optional(),
         })
         .optional(),
+    metadata: z.record(z.unknown()).optional(),
     approvalRequired: z.boolean(),
     decisionReason: z.string().nullable().optional(),
     createdAt: z.string(),
@@ -83,6 +95,8 @@ export const ProposalApproveParamsSchema = z.object({
 export const ProposalApproveRequestSchema = z.object({
     decisionNote: z.string().optional(),
     layoutType: z.enum(['vertical', 'horizontal', 'grid']).default('vertical'),
+    imageStyleId: ImageStyleIdSchema.optional(),
+    imageQuality: ImageQualitySchema.optional(),
 });
 
 /**

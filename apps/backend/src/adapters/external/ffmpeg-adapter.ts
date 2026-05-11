@@ -36,6 +36,7 @@ const FFMPEG_PATH = process.env.FFMPEG_PATH || '/opt/bin/ffmpeg';
 const FFMPEG_TIMEOUT_MS = Number(process.env.FFMPEG_TIMEOUT_MS || 840000);
 const FFMPEG_OVERLAY_MODE = process.env.SHORTS_FFMPEG_OVERLAY || 'all';
 const LOCAL_ASSET_BASE_URL = process.env.LOCAL_ASSET_BASE_URL || 'http://localhost:8800/_local-assets';
+const REFERENCE_YELLOW = '#fff200';
 
 let cachedDrawtextSupport: boolean | undefined;
 let cachedSipsSupport: boolean | undefined;
@@ -172,25 +173,20 @@ function buildArgs(
         args.push('-stream_loop', '-1', '-t', String(durationSec), '-i', backgroundMusicPath);
     }
 
-    const width = String(request.outputWidth);
-    const height = String(request.outputHeight);
     const overlayStrategy = resolveOverlayStrategy();
     const fontFile = overlayStrategy === 'drawtext' ? resolveOverlayFontFile() : undefined;
     const filterParts: string[] = [];
     imageFiles.forEach((image, i) => {
+        const baseFilter = buildShortsVisualBaseFilter(i, request.outputWidth, request.outputHeight);
         const overlayInputIndex = overlayInputIndices.get(i);
         if (overlayInputIndex !== undefined) {
-            filterParts.push(
-                `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1[base${i}]`
-            );
+            filterParts.push(`${baseFilter}[base${i}]`);
             filterParts.push(`[base${i}][${overlayInputIndex}:v]overlay=0:0:format=auto[v${i}]`);
             return;
         }
 
         const overlay = overlayStrategy === 'drawtext' ? buildDrawtextOverlayFilter(image, fontFile) : '';
-        filterParts.push(
-            `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1${overlay}[v${i}]`
-        );
+        filterParts.push(`${baseFilter}${overlay}[v${i}]`);
     });
     const concatInputs = imageFiles.map((_, i) => `[v${i}]`).join('');
     filterParts.push(`${concatInputs}concat=n=${imageFiles.length}:v=1:a=0,format=yuv420p[v]`);
@@ -216,6 +212,12 @@ function buildArgs(
     args.push('-c:v', 'libx264', '-preset', 'veryfast', '-r', '30', '-movflags', '+faststart', outputPath);
 
     return args;
+}
+
+function buildShortsVisualBaseFilter(inputIndex: number, outputWidth: number, outputHeight: number): string {
+    const visualHeight = Math.round(outputHeight * 0.55);
+    const visualY = Math.round(outputHeight * 0.205);
+    return `[${inputIndex}:v]scale=${outputWidth}:${visualHeight}:force_original_aspect_ratio=increase,crop=${outputWidth}:${visualHeight},setsar=1,pad=${outputWidth}:${outputHeight}:0:${visualY}:black`;
 }
 
 function resolveOverlayFontFile(): string | undefined {
@@ -306,27 +308,26 @@ async function createOverlayPng(
 
 function buildOverlaySvg(image: { title?: string; caption?: string; sourceLabel?: string }): string {
     const titleLines =
-        FFMPEG_OVERLAY_MODE === 'all' ? splitOverlayLines(compactOverlayText(image.title, 24), 12, 2) : [];
+        FFMPEG_OVERLAY_MODE === 'all' ? splitOverlayLines(compactOverlayText(image.title, 28), 11, 2) : [];
     const captionLines =
-        FFMPEG_OVERLAY_MODE === 'all' ? splitOverlayLines(compactOverlayText(image.caption, 78), 18, 3) : [];
+        FFMPEG_OVERLAY_MODE === 'all' ? splitOverlayLines(compactOverlayText(image.caption, 62), 14, 3) : [];
     const sourceLabel = compactOverlayText(image.sourceLabel, 36);
     const titleText = titleLines
         .map((line, index) => {
-            const y = titleLines.length === 1 ? 198 : 148 + index * 112;
-            const color = index === 0 ? '#fff200' : '#ffffff';
-            return svgText(line, 540, y, 96, color, 8);
+            const y = titleLines.length === 1 ? 170 : 108 + index * 128;
+            const color = index === 0 ? REFERENCE_YELLOW : '#ffffff';
+            return svgText(line, 540, y, 118, color, 9);
         })
         .join('\n');
     const captionText = captionLines
-        .map((line, index) => svgText(line, 540, 1652 + index * 82, 62, '#ffffff', 7))
+        .map((line, index) => svgText(line, 540, 1500 + index * 92, 76, REFERENCE_YELLOW, 8))
         .join('\n');
     const sourceText = sourceLabel ? svgText(sourceLabel, 540, 1888, 30, 'rgba(255,255,255,0.78)', 2) : '';
 
     return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920">
-  ${FFMPEG_OVERLAY_MODE === 'all' ? '<rect x="0" y="0" width="1080" height="360" fill="black"/>' : ''}
   ${
       FFMPEG_OVERLAY_MODE === 'all'
-          ? '<rect x="0" y="1588" width="1080" height="332" fill="black"/>'
+          ? '<rect x="0" y="0" width="1080" height="1920" fill="none"/>'
           : sourceLabel
             ? '<rect x="0" y="1828" width="1080" height="92" fill="rgba(0,0,0,0.34)"/>'
             : ''
@@ -367,26 +368,24 @@ function buildDrawtextOverlayFilter(
 
     const filters: string[] = [];
     const sourceLabel = compactOverlayText(image.sourceLabel, 36);
-    const captionLines = splitOverlayLines(compactOverlayText(image.caption, 78), 18, 3);
-    const titleLines = splitOverlayLines(compactOverlayText(image.title, 24), 12, 2);
+    const captionLines = splitOverlayLines(compactOverlayText(image.caption, 62), 14, 3);
+    const titleLines = splitOverlayLines(compactOverlayText(image.title, 28), 11, 2);
     const font = escapeDrawtext(fontFile);
 
     if (FFMPEG_OVERLAY_MODE === 'all' && titleLines.length > 0) {
-        filters.push('drawbox=x=0:y=0:w=w:h=360:color=black:t=fill');
         titleLines.forEach((line, index) => {
-            const y = titleLines.length === 1 ? 144 : 92 + index * 112;
+            const y = titleLines.length === 1 ? 111 : 49 + index * 128;
             const color = index === 0 ? 'yellow' : 'white';
             filters.push(
-                `drawtext=fontfile='${font}':text='${escapeDrawtext(line)}':x=(w-text_w)/2:y=${y}:fontsize=96:fontcolor=${color}:borderw=5:bordercolor=black`
+                `drawtext=fontfile='${font}':text='${escapeDrawtext(line)}':x=(w-text_w)/2:y=${y}:fontsize=118:fontcolor=${color}:borderw=7:bordercolor=black`
             );
         });
     }
 
     if (FFMPEG_OVERLAY_MODE === 'all' && captionLines.length > 0) {
-        filters.push('drawbox=x=0:y=h-332:w=w:h=332:color=black:t=fill');
         captionLines.forEach((line, index) => {
             filters.push(
-                `drawtext=fontfile='${font}':text='${escapeDrawtext(line)}':x=(w-text_w)/2:y=h-${270 - index * 82}:fontsize=62:fontcolor=white:borderw=5:bordercolor=black`
+                `drawtext=fontfile='${font}':text='${escapeDrawtext(line)}':x=(w-text_w)/2:y=${1430 + index * 92}:fontsize=76:fontcolor=yellow:borderw=7:bordercolor=black`
             );
         });
     }

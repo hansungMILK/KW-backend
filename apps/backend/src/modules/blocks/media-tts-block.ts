@@ -5,7 +5,7 @@ import { getPublicUrl, putObject } from '../../adapters/aws/s3';
 import { env } from '../../config/env';
 import { traceService } from '../../services/trace-service';
 
-import type { BlockExecutor, BlockExecutorResult } from './types';
+import type { BlockExecutor, BlockExecutorContext, BlockExecutorResult } from './types';
 
 // ─── dummy output ─────────────────────────────────────────────────────────────
 
@@ -25,7 +25,11 @@ function dummyTtsOutput() {
 export const mediaTtsBlock: BlockExecutor = {
     blockType: 'media-tts',
 
-    async execute(input: unknown, _config?: Record<string, unknown>): Promise<BlockExecutorResult> {
+    async execute(
+        input: unknown,
+        _config?: Record<string, unknown>,
+        context?: BlockExecutorContext
+    ): Promise<BlockExecutorResult> {
         const start = Date.now();
 
         if (env.orchestratorMode === 'mock') {
@@ -78,12 +82,37 @@ export const mediaTtsBlock: BlockExecutor = {
         const fullText = segments.map(segment => segment.text).join(' ');
 
         try {
-            const result = await ttsAdapter.synthesize({ text: fullText });
+            await throwIfCancelled(context);
+            await recordTtsTrace(context, 'tts.text.prepared', 'STATUS', {
+                textLength: fullText.length,
+                segmentCount: segments.length,
+            });
+            await context?.onProgress?.(35, '나레이션 텍스트 준비 완료');
+
+            await recordTtsTrace(context, 'tts.elevenlabs.requested', 'STATUS', {
+                textLength: fullText.length,
+                model: env.elevenLabsTtsModel,
+                voice: env.elevenLabsTtsVoiceId,
+                timeoutMs: env.elevenLabsTtsTimeoutMs,
+            });
+            const ttsStartedAt = Date.now();
+            const result = await ttsAdapter.synthesize({ text: fullText, signal: context?.abortSignal });
+            await recordTtsTrace(context, 'tts.elevenlabs.completed', 'STATUS', {
+                durationMs: Date.now() - ttsStartedAt,
+                estimatedDurationSec: result.estimatedDurationSec,
+                bytes: result.audioBuffer.byteLength,
+            });
+            await context?.onProgress?.(60, '나레이션 음성 생성 완료');
+            await throwIfCancelled(context);
+
             const subtitleCues = buildSceneSubtitleCues(segments, result.estimatedDurationSec);
 
             const s3Key = `media/audio/${randomUUID()}/narration.mp3`;
+            await recordTtsTrace(context, 'tts.upload.started', 'STATUS', { s3Key });
             await putObject(s3Key, result.audioBuffer, result.contentType);
             const publicUrl = getPublicUrl(s3Key);
+            await recordTtsTrace(context, 'tts.upload.completed', 'STATUS', { s3Key });
+            await context?.onProgress?.(70, '나레이션 음성 저장 완료');
 
             const assets: BlockExecutorResult['assets'] = [
                 {
@@ -99,10 +128,16 @@ export const mediaTtsBlock: BlockExecutor = {
             ];
 
             try {
-                await traceService.record('pending', null, 'STATUS', 'media-tts: audio generated', {
-                    s3Key,
-                    estimatedDurationSec: result.estimatedDurationSec,
-                });
+                await traceService.record(
+                    context?.runId ?? 'pending',
+                    context?.nodeId ?? null,
+                    'STATUS',
+                    'media-tts: audio generated',
+                    {
+                        s3Key,
+                        estimatedDurationSec: result.estimatedDurationSec,
+                    }
+                );
             } catch {
                 /* non-fatal */
             }
@@ -127,7 +162,12 @@ export const mediaTtsBlock: BlockExecutor = {
             const msg = err instanceof Error ? err.message : String(err);
             console.error(`[media-tts-block] TTS generation failed: ${msg}`);
             try {
-                await traceService.record('pending', null, 'ERROR', `media-tts: failed: ${msg}`);
+                await traceService.record(
+                    context?.runId ?? 'pending',
+                    context?.nodeId ?? null,
+                    'ERROR',
+                    `media-tts: failed: ${msg}`
+                );
             } catch {
                 /* non-fatal */
             }
@@ -135,6 +175,33 @@ export const mediaTtsBlock: BlockExecutor = {
         }
     },
 };
+
+async function throwIfCancelled(context?: BlockExecutorContext): Promise<void> {
+    if (context?.abortSignal?.aborted) throw new Error('Run cancelled during media-tts execution');
+    if (await context?.isCancelled?.()) throw new Error('Run cancelled during media-tts execution');
+}
+
+async function recordTtsTrace(
+    context: BlockExecutorContext | undefined,
+    event: string,
+    traceType: 'STATUS' | 'ERROR',
+    data?: Record<string, unknown>
+): Promise<void> {
+    try {
+        await traceService.record(
+            context?.runId ?? 'pending',
+            context?.nodeId ?? null,
+            traceType,
+            `media-tts:${event}`,
+            {
+                event,
+                ...data,
+            }
+        );
+    } catch {
+        /* traceService is non-fatal */
+    }
+}
 
 type NarrationSegment = {
     sceneNumber: number;

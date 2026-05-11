@@ -1,5 +1,6 @@
 import { ensurePaidOpenAIAllowed } from './paid-openai-guard';
 import { env } from '../../config/env';
+import { GPT_IMAGE_MODEL, normalizeImageQuality } from '../../modules/image-generation/image-style';
 import { settingsService } from '../../services/settings-service';
 import { log } from '../../utils/logger';
 
@@ -8,6 +9,7 @@ export interface ImageGenerationRequest {
     width?: number;
     height?: number;
     style?: string;
+    quality?: string;
     signal?: AbortSignal;
 }
 
@@ -40,9 +42,10 @@ export const imageAdapter = {
         const width = request.width || 1080;
         const height = request.height || 1920;
         const size = openAIImageSizeFor(width, height);
-        const model = env.openaiImageModel;
+        const model = GPT_IMAGE_MODEL;
+        const quality = normalizeImageQuality(request.quality ?? env.openaiImageQuality);
 
-        return generateWithModel(apiKey, model, request.prompt, size, request.signal);
+        return generateWithModel(apiKey, model, request.prompt, size, quality, request.signal);
     },
 };
 
@@ -51,19 +54,20 @@ async function generateWithModel(
     model: string,
     prompt: string,
     size: { size: string; width: number; height: number },
+    quality: string,
     signal?: AbortSignal
 ): Promise<ImageGenerationResult> {
     log.info('OpenAI image generation', {
         model,
         promptLength: prompt.length,
         size: size.size,
-        quality: env.openaiImageQuality,
+        quality,
         timeoutMs: IMAGE_TIMEOUT_MS,
         maxAttempts: IMAGE_MAX_ATTEMPTS,
     });
 
     const startedAt = Date.now();
-    const data = await requestOpenAIImage(apiKey, model, prompt, size, signal);
+    const data = await requestOpenAIImage(apiKey, model, prompt, size, quality, signal);
     const first = data.data?.[0];
     if (!first?.b64_json && !first?.url) throw new Error('OpenAI returned no image data');
 
@@ -91,6 +95,7 @@ async function requestOpenAIImage(
     model: string,
     prompt: string,
     size: { size: string; width: number; height: number },
+    quality: string,
     signal?: AbortSignal
 ): Promise<{ data?: Array<{ b64_json?: string; url?: string }> }> {
     let lastError: unknown;
@@ -101,7 +106,7 @@ async function requestOpenAIImage(
 
         try {
             log.info('OpenAI image API attempt', { model, attempt, maxAttempts: IMAGE_MAX_ATTEMPTS });
-            return await fetchOpenAIImageData(apiKey, model, prompt, size, signal);
+            return await fetchOpenAIImageData(apiKey, model, prompt, size, quality, signal);
         } catch (err) {
             if (isAbortError(err)) throw err;
 
@@ -154,41 +159,56 @@ async function fetchOpenAIImageData(
     model: string,
     prompt: string,
     size: { size: string; width: number; height: number },
+    quality: string,
     signal?: AbortSignal
 ): Promise<OpenAIImageResponse> {
     throwIfAborted(signal);
 
     const controller = new AbortController();
     let timeout: ReturnType<typeof setTimeout> | undefined;
-    let timedOut = false;
     let abortListener: (() => void) | undefined;
 
     try {
         abortListener = () => controller.abort(signal?.reason);
         signal?.addEventListener('abort', abortListener, { once: true });
 
-        timeout = setTimeout(() => {
-            timedOut = true;
-            controller.abort();
-        }, IMAGE_TIMEOUT_MS);
-
-        const response = await fetch(`${env.openaiBaseUrl}/images/generations`, {
-            method: 'POST',
-            headers: {
-                Authorization: `Bearer ${apiKey}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                model,
-                prompt,
-                n: 1,
-                size: size.size,
-                quality: env.openaiImageQuality,
-                output_format: 'png',
-            }),
-            signal: controller.signal,
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            timeout = setTimeout(() => {
+                const timeoutError = new Error(
+                    `OpenAI image API timed out after ${Math.round(IMAGE_TIMEOUT_MS / 1000)} seconds`
+                );
+                timeoutError.name = 'TimeoutError';
+                controller.abort(timeoutError);
+                reject(timeoutError);
+            }, IMAGE_TIMEOUT_MS);
         });
-        const text = await response.text();
+
+        const requestPromise = (async () => {
+            const response = await fetch(`${env.openaiBaseUrl}/images/generations`, {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    model,
+                    prompt,
+                    n: 1,
+                    size: size.size,
+                    quality,
+                    output_format: 'png',
+                }),
+                signal: controller.signal,
+            });
+            const text = await response.text();
+
+            return { response, text };
+        })();
+        void requestPromise.catch(() => {
+            /* timeout/cancel path already reports the primary error */
+        });
+
+        const { response, text } = await Promise.race([requestPromise, timeoutPromise]);
 
         if (!response.ok) {
             if (response.status === 403 && /verified|verification|organization/i.test(text)) {
@@ -208,11 +228,8 @@ async function fetchOpenAIImageData(
             );
         }
     } catch (err) {
-        if (timedOut) {
-            throw new Error(`OpenAI image API timed out after ${Math.round(IMAGE_TIMEOUT_MS / 1000)} seconds`);
-        }
         if (signal?.aborted) throw createAbortError(abortMessageFromSignal(signal));
-        if (err instanceof Error && err.name === 'AbortError') {
+        if (err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError')) {
             throw new Error(`OpenAI image API timed out after ${Math.round(IMAGE_TIMEOUT_MS / 1000)} seconds`);
         }
         throw err;

@@ -8,11 +8,15 @@ import type { Orchestrator, ProposalResult } from './types';
  */
 
 const SHORTS_BLOCKS = [
-    { type: 'search', label: '트렌드 수집', config: { query: '입시 정보 쇼츠' } },
+    { type: 'search', label: '자료 수집', config: { query: '정보전달 쇼츠' } },
     { type: 'content', label: '스크립트 생성', config: { scenes: 12, durationSec: 60 } },
     { type: 'data', label: '데이터 정규화', config: {} },
     { type: 'analysis', label: '품질 검수', config: { mode: 'safety' } },
-    { type: 'media-image', label: '이미지 생성', config: { count: 12, style: 'korean-shorts-frame' } },
+    {
+        type: 'media-image',
+        label: '이미지 생성',
+        config: { count: 12, imageStyleId: 'explainer-comic', imageQuality: 'medium' },
+    },
     { type: 'media-tts', label: '음성 생성', config: { lang: 'ko' } },
     { type: 'media-video', label: '영상 합성', config: { format: '9:16', backgroundMusic: true } },
     { type: 'integration', label: '메타데이터 생성', config: {} },

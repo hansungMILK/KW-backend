@@ -331,7 +331,12 @@ async function readResponseText(response: Response, contentType: string): Promis
 }
 
 function extractReadableText(input: string): string {
-    const article = input.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)?.[1];
+    const articleBody = extractHtmlRegion(input, /<[^>]+(?:id=["']article_body["']|class=["'][^"']*article_body)/i, [
+        /<aside\b/i,
+        /<div\b[^>]+class=["'][^"']*article_footer/i,
+        /<\/article>/i,
+    ]);
+    const article = articleBody ?? input.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)?.[1];
     const body = article || input.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)?.[1] || input;
     return normalizeWhitespace(
         decodeHtmlEntities(
@@ -344,6 +349,19 @@ function extractReadableText(input: string): string {
                 .replace(/<[^>]+>/g, ' ')
         )
     );
+}
+
+function extractHtmlRegion(html: string, startPattern: RegExp, endPatterns: RegExp[]): string | null {
+    const startMatch = startPattern.exec(html);
+    if (!startMatch || startMatch.index < 0) return null;
+
+    const start = startMatch.index;
+    const contentStart = start + startMatch[0].length;
+    const tail = html.slice(contentStart);
+    const endOffsets = endPatterns.map(pattern => tail.search(pattern)).filter(offset => offset >= 0);
+    const end = endOffsets.length > 0 ? contentStart + Math.min(...endOffsets) : html.length;
+    const region = html.slice(start, end);
+    return region.trim() ? region : null;
 }
 
 function extractHtmlMeta(html: string, property: string): string | null {
@@ -373,7 +391,9 @@ function extractKeyClaims(text: string): string[] {
         .map(sentence => normalizeWhitespace(sentence))
         .filter(Boolean);
     const claimLike = sentences.filter(sentence =>
-        /(\d|%|원|달러|가격|요금|할인|공식|주의|조건|가능|불가|자동|예약|실행|제공)/.test(sentence)
+        /(\d|%|원|달러|가격|요금|할인|공식|주의|조건|가능|불가|자동|예약|실행|제공|논란|사과|실수|기만|해명|배제|CCTV|빈티지|소믈리에)/.test(
+            sentence
+        )
     );
     return [...new Set(claimLike)].slice(0, 8);
 }

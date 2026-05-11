@@ -4,6 +4,7 @@ import { mediaImageBlock } from './media-image-block';
 import { imageAdapter } from '../../adapters/ai/image-adapter';
 import { deleteObject } from '../../adapters/aws/s3';
 import { traceService } from '../../services/trace-service';
+import { buildGptImage2ScenePrompt } from '../image-generation/image-style';
 
 vi.mock('../../config/env', () => ({
     env: {
@@ -11,6 +12,9 @@ vi.mock('../../config/env', () => ({
         openaiImageSceneConcurrency: 2,
         openaiImageSceneMaxAttempts: 1,
         openaiImageSceneTimeoutMs: 50,
+        openaiImageBatchTimeoutBufferMs: 10,
+        openaiImageModel: 'gpt-image-2',
+        openaiImageQuality: 'medium',
     },
 }));
 
@@ -67,6 +71,53 @@ describe('mediaImageBlock', () => {
         traceRecord.mockClear();
         generateImage.mockClear();
         deleteUploadedObject.mockClear();
+    });
+
+    it('passes the selected image style and quality into GPT image generation requests', async () => {
+        await mediaImageBlock.execute(
+            {
+                normalizedScenes: [
+                    {
+                        sceneNumber: 1,
+                        caption: '애니 장면',
+                        narration: '기술 이슈를 애니메이션 장면으로 보여줍니다.',
+                        imagePrompt: 'a public debate visualized as animated characters',
+                        sourceRefs: [],
+                        durationSec: 5,
+                    },
+                ],
+            },
+            { imageStyleId: 'animation', imageQuality: 'low' },
+            {
+                runId: 'run-style',
+                nodeId: 'node-image',
+                onProgress: vi.fn(async () => undefined),
+                onAsset: vi.fn(async () => undefined),
+                isCancelled: vi.fn(async () => false),
+            }
+        );
+
+        expect(generateImage).toHaveBeenCalledWith(
+            expect.objectContaining({
+                style: 'animation',
+                quality: 'low',
+                prompt: expect.stringContaining('high-end Korean animation still'),
+            })
+        );
+    });
+
+    it('builds GPT-image-2 prompts that allow useful in-scene text without delegating final overlays', () => {
+        const prompt = buildGptImage2ScenePrompt({
+            styleId: 'animation',
+            title: '기술 이슈',
+            caption: '핵심은 여기',
+            narration: '이 논란은 숫자보다 신뢰 문제입니다.',
+            visualPrompt: 'animated people arguing around a statistics dashboard',
+        });
+
+        expect(prompt).toContain('high-end Korean animation still');
+        expect(prompt).toContain('Short Korean or English in-scene signage');
+        expect(prompt).toContain('이 논란은 숫자보다 신뢰 문제입니다.');
     });
 
     it('fails fast when one parallel scene fails instead of waiting for hung scenes', async () => {
@@ -306,6 +357,62 @@ describe('mediaImageBlock', () => {
                 sceneNumber: 1,
                 errorCode: 'IMAGE_TIMEOUT',
             })
+        );
+    });
+
+    it('fails a stuck image batch with a batch timeout before waiting for scene timeouts', async () => {
+        const startedAt = Date.now();
+
+        await expect(
+            mediaImageBlock.execute(
+                {
+                    normalizedScenes: [
+                        {
+                            sceneNumber: 1,
+                            caption: '멈춘 장면 1',
+                            imagePrompt: 'hang scene one',
+                            sourceRefs: [],
+                            durationSec: 5,
+                        },
+                        {
+                            sceneNumber: 2,
+                            caption: '멈춘 장면 2',
+                            imagePrompt: 'hang scene two',
+                            sourceRefs: [],
+                            durationSec: 5,
+                        },
+                    ],
+                },
+                { imageBatchTimeoutMs: 20 },
+                {
+                    runId: 'run-batch-timeout',
+                    nodeId: 'node-image',
+                    onProgress: vi.fn(async () => undefined),
+                    onAsset: vi.fn(async () => undefined),
+                    isCancelled: vi.fn(async () => false),
+                }
+            )
+        ).rejects.toThrow(/batch timed out/i);
+
+        expect(Date.now() - startedAt).toBeLessThan(200);
+
+        const events = traceRecord.mock.calls
+            .map(call => call[4] as { event?: string; pendingScenes?: number[]; errorCode?: string } | undefined)
+            .filter(Boolean);
+
+        expect(events).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    event: 'batch.timeout',
+                    errorCode: 'IMAGE_TIMEOUT',
+                    pendingScenes: [1, 2],
+                }),
+                expect.objectContaining({
+                    event: 'batch.failed',
+                    errorCode: 'IMAGE_TIMEOUT',
+                    pendingScenes: [1, 2],
+                }),
+            ])
         );
     });
 });

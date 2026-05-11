@@ -5,6 +5,7 @@ import { broadcastNodePortUpdated } from './ws-flow-events-service';
 import { PAID_OPENAI_DISABLED, isPaidOpenAIAllowed } from '../adapters/ai/paid-openai-guard';
 import { queue } from '../adapters/aws/queue';
 import { env } from '../config/env';
+import { estimateGptImage2CostUsd } from '../modules/image-generation/image-style';
 import { flowRepo } from '../repositories/flow-repository';
 import { runRepo } from '../repositories/run-repository';
 import { getFlowNodeBlockType, getFlowNodeId, isExecutableFlowNode } from '../utils/flow-node-classification';
@@ -200,7 +201,7 @@ const OPENAI_BLOCK_PROVIDER_MAP: Record<string, ApiKeyProvider> = {
     content: 'openai',
     analysis: 'openai',
     'media-image': 'openai',
-    'media-tts': 'openai',
+    'media-tts': 'elevenlabs',
     'media-video': 'openai',
     integration: 'openai',
 };
@@ -243,13 +244,6 @@ const readPositiveNumber = (value: unknown): number | null => {
     return Number.isFinite(number) && number > 0 ? number : null;
 };
 
-const getImageSceneCostUsd = (): number => {
-    const quality = env.openaiImageQuality.toLowerCase();
-    if (quality === 'high') return 0.25;
-    if (quality === 'low') return 0.02;
-    return 0.063;
-};
-
 const getMediaImageSceneCount = (node: Record<string, unknown>): number => {
     const config = getNodeConfig(node);
     const count =
@@ -280,7 +274,10 @@ const estimateRunCostUsd = (nodes: Array<Record<string, unknown>>): number => {
                 total += 0.03;
                 break;
             case 'media-image':
-                total += getMediaImageSceneCount(node) * getImageSceneCostUsd();
+                total += estimateGptImage2CostUsd(
+                    getMediaImageSceneCount(node),
+                    getNodeConfig(node)['imageQuality'] ?? env.openaiImageQuality
+                );
                 break;
             case 'media-tts':
                 total += 0.02;
