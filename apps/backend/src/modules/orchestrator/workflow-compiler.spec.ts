@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { compileWorkflowPlan } from './workflow-compiler';
+import { compileWorkflowPlan, seedRootBlockInputs } from './workflow-compiler';
 
 describe('compileWorkflowPlan', () => {
     it('rejects video blocks when the workflow plan is text-only', () => {
@@ -118,5 +118,64 @@ describe('compileWorkflowPlan', () => {
 
         expect(result.ok).toBe(false);
         if (!result.ok) expect(result.error).toContain('media-tts');
+    });
+
+    it('seeds root search blocks with the original user request when the AI omitted input config', () => {
+        const seeded = seedRootBlockInputs(
+            {
+                plan: {
+                    goal: '링크 내용을 쇼츠 영상으로 만든다',
+                    outputType: 'video',
+                    planType: 'pipeline',
+                    requiredCapabilities: ['source.collect', 'text.generate'],
+                    selectedBlocks: [
+                        { blockType: 'search', reason: '링크를 확인한다' },
+                        { blockType: 'content', reason: '대본을 만든다' },
+                    ],
+                    rejectedBlocks: [],
+                    assumptions: [],
+                },
+                blocks: [
+                    { type: 'search', label: '링크 내용 수집', config: {} },
+                    { type: 'content', label: '쇼츠 대본 생성', config: {} },
+                ],
+                edges: [{ from: 0, to: 1 }],
+                estimatedCostUsd: 0.1,
+                summary: '링크 기반 쇼츠를 만듭니다.',
+            },
+            '쇼츠 만들어줘 https://tikongs.tistory.com/1463'
+        );
+
+        expect(seeded.blocks[0].config.query).toBe('쇼츠 만들어줘 https://tikongs.tistory.com/1463');
+        expect(seeded.blocks[1].config.topic).toBeUndefined();
+    });
+
+    it('does not overwrite explicit root block input config', () => {
+        const seeded = seedRootBlockInputs(
+            {
+                plan: {
+                    goal: 'KTX 설명문',
+                    outputType: 'text',
+                    planType: 'pipeline',
+                    requiredCapabilities: ['source.collect', 'text.generate'],
+                    selectedBlocks: [
+                        { blockType: 'search', reason: '자료 수집' },
+                        { blockType: 'content', reason: '설명 작성' },
+                    ],
+                    rejectedBlocks: [],
+                    assumptions: [],
+                },
+                blocks: [
+                    { type: 'search', label: '자료 수집', config: { query: 'KTX 예매 어려운 이유' } },
+                    { type: 'content', label: '설명 작성', config: {} },
+                ],
+                edges: [{ from: 0, to: 1 }],
+                estimatedCostUsd: 0.1,
+                summary: 'KTX 설명문을 만듭니다.',
+            },
+            '다른 사용자 요청'
+        );
+
+        expect(seeded.blocks[0].config.query).toBe('KTX 예매 어려운 이유');
     });
 });

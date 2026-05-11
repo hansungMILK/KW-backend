@@ -7,6 +7,7 @@ import { queue } from '../adapters/aws/queue';
 import { env } from '../config/env';
 import { flowRepo } from '../repositories/flow-repository';
 import { runRepo } from '../repositories/run-repository';
+import { getFlowNodeBlockType, getFlowNodeId, isExecutableFlowNode } from '../utils/flow-node-classification';
 import { generateNumericId } from '../utils/id-generator';
 
 import type { ApiKeyProvider, Run, RunNode } from '@flows/contracts';
@@ -224,13 +225,12 @@ const getProviderForBlock = (blockType: string): ApiKeyProvider | undefined => {
 };
 
 const getBlockType = (node: Record<string, unknown>): string => {
-    const data = node['data'] as Record<string, unknown> | undefined;
-    return String(node['blockType'] ?? data?.['blockType'] ?? node['type'] ?? '');
+    return getFlowNodeBlockType(node);
 };
 
-const getNodeId = (node: Record<string, unknown>): string => String(node['id'] ?? node['nodeId'] ?? '');
+const getNodeId = (node: Record<string, unknown>): string => getFlowNodeId(node);
 
-const isExecutableNode = (node: Record<string, unknown>): boolean => node['stereo'] !== 'port' && !!getNodeId(node);
+const isExecutableNode = (node: Record<string, unknown>): boolean => isExecutableFlowNode(node);
 
 const getNodeConfig = (node: Record<string, unknown>): Record<string, unknown> => {
     const data = node['data'] as Record<string, unknown> | undefined;
@@ -414,7 +414,7 @@ export const runService = {
             triggerSource,
             executionMode: (options?.executionMode as 'full' | 'step') ?? 'full',
             notifyWebhook: options?.notifyWebhook ?? null,
-            flowSnapshot: { nodes: snapshotNodes, edges: snapshotEdges },
+            flowSnapshot: { nodes: executableNodes, edges: snapshotEdges },
             createdAt: now,
         };
         await runRepo.putRun(run);
@@ -501,7 +501,7 @@ export const runService = {
             targetNodeId: nodeId,
             status: 'QUEUED',
             triggerSource,
-            flowSnapshot: { nodes: snapshotNodes, edges: snapshotEdges },
+            flowSnapshot: { nodes: executableNodes, edges: snapshotEdges },
             createdAt: now,
         };
         await runRepo.putRun(run);

@@ -11,7 +11,7 @@ import { settingsService } from '../../../services/settings-service';
 import { wsService } from '../../../services/websocket-service';
 import { generateNumericId } from '../../../utils/id-generator';
 import { getBody, getPathParam, withMiddleware } from '../../../utils/middleware';
-import { badGateway, badRequest, created, notFound, unprocessableJson } from '../../../utils/response';
+import { badRequest, created, notFound, unprocessableJson } from '../../../utils/response';
 
 import type { ApiKeyProvider, Message, Proposal } from '@flows/contracts';
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
@@ -117,7 +117,24 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
     const result = await orchestrator.generateProposal(fid, bodyParsed.data.content, currentContext);
 
     if (!result.approvalRequired || result.proposedNodes.length === 0) {
-        return badGateway(result.assistantMessage, 'AI_PROVIDER_ERROR');
+        const assistantMessage: Message = {
+            messageId: generateNumericId(),
+            flowId: fid,
+            role: 'ASSISTANT',
+            messageType: 'STATUS',
+            content: result.assistantMessage,
+            metadata: {
+                intent,
+                proposalError: true,
+            },
+            createdAt: now,
+        };
+        await messageRepo.put(assistantMessage);
+
+        return created({
+            message: userMessage,
+            assistantMessage,
+        });
     }
 
     // 3. Save proposal

@@ -106,7 +106,7 @@ function dummySearch(): BlockExecutorResult {
         ],
         trendScore: 85,
         retrievedAt: new Date().toISOString(),
-        presetId: 'education-admission',
+        presetId: 'general-shorts',
     };
     return { output, durationMs: Date.now() - start };
 }
@@ -122,6 +122,32 @@ export const searchBlock: BlockExecutor = {
 
         const start = Date.now();
         const topic = extractTopic(input);
+        const primaryUrls = extractUrls(topic);
+
+        if (primaryUrls.length > 0) {
+            try {
+                log.info('[search-block] Starting primary URL fetch', { urls: primaryUrls });
+                const directOutput = await collectPrimaryUrls(primaryUrls, topic);
+                const validated = SearchOutputSchema.safeParse(directOutput);
+                if (!validated.success) {
+                    throw new Error(`[search-block] URL output schema validation failed: ${validated.error.message}`);
+                }
+                log.info('[search-block] Primary URL fetch complete', {
+                    urls: primaryUrls,
+                    articles: validated.data.articles.length,
+                    textLength: validated.data.articles.reduce(
+                        (sum, article) => sum + String(article.fullText ?? '').length,
+                        0
+                    ),
+                });
+                return { output: validated.data as Record<string, unknown>, durationMs: Date.now() - start };
+            } catch (err) {
+                log.warn('[search-block] Primary URL fetch failed, falling back to web search', {
+                    urls: primaryUrls,
+                    error: err instanceof Error ? err.message : String(err),
+                });
+            }
+        }
 
         log.info('[search-block] Starting AI search', { topicLength: topic.length });
 
@@ -156,12 +182,74 @@ export const searchBlock: BlockExecutor = {
     },
 };
 
+async function collectPrimaryUrls(urls: string[], topic: string): Promise<Record<string, unknown>> {
+    const articles = [];
+    for (const [index, url] of urls.slice(0, 5).entries()) {
+        articles.push(await collectPrimaryUrl(url, topic, index));
+    }
+
+    const joinedText = articles
+        .flatMap(article => [article.title, ...(Array.isArray(article.keyClaims) ? article.keyClaims : [])])
+        .join(' ');
+
+    return {
+        collectionMode: 'url',
+        primaryUrl: urls[0],
+        keywords: deriveKeywords(`${topic} ${joinedText}`),
+        articles,
+        trendScore: undefined,
+        retrievedAt: new Date().toISOString(),
+    };
+}
+
+async function collectPrimaryUrl(url: string, topic: string, index: number): Promise<Record<string, unknown>> {
+    const response = await fetch(url, {
+        headers: {
+            accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7',
+            'user-agent': 'Mozilla/5.0 (compatible; EurekaFlowBot/1.0; +https://github.com/hansungMILK/KW-backend)',
+        },
+    });
+
+    if (!response.ok) throw new Error(`URL fetch failed: ${response.status}`);
+
+    const contentType = response.headers.get('content-type') ?? '';
+    const raw = await readResponseText(response, contentType);
+    const text = contentType.includes('html') ? extractReadableText(raw) : normalizeWhitespace(raw);
+    if (!text) throw new Error('URL fetch returned no readable text');
+
+    const title = extractHtmlMeta(raw, 'og:title') || extractTagText(raw, 'title') || sourceFromUrl(url);
+    const publishedAt = extractHtmlMeta(raw, 'article:published_time') || extractHtmlMeta(raw, 'og:regDate') || null;
+    const source = extractHtmlMeta(raw, 'og:site_name') || sourceFromUrl(url);
+    const keyClaims = extractKeyClaims(text);
+
+    return {
+        id: `source-${index + 1}`,
+        title,
+        url,
+        source,
+        publishedAt,
+        sourceType: normalizeSourceType(undefined, url),
+        confidence: 0.98,
+        summary: summarizeText(text),
+        fullText: text.slice(0, 8000),
+        keyClaims,
+        primarySource: true,
+        sourcePriority: index + 1,
+    };
+}
+
 function normalizeSearchOutput(input: unknown): unknown {
     if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
     const obj = input as Record<string, unknown>;
     const articles = Array.isArray(obj['articles']) ? obj['articles'] : [];
     return {
         ...obj,
+        collectionMode:
+            obj['collectionMode'] === 'url' ||
+            obj['collectionMode'] === 'web_search' ||
+            obj['collectionMode'] === 'url_fallback_web_search'
+                ? obj['collectionMode']
+                : 'web_search',
         articles: articles.map((article, index) => normalizeArticle(article, index)),
         retrievedAt: typeof obj['retrievedAt'] === 'string' ? obj['retrievedAt'] : new Date().toISOString(),
     };
@@ -182,6 +270,10 @@ function normalizeArticle(article: unknown, index: number): Record<string, unkno
         publishedAt: typeof obj['publishedAt'] === 'string' || obj['publishedAt'] === null ? obj['publishedAt'] : null,
         sourceType,
         confidence: confidence ?? (sourceType === 'official' ? 0.9 : 0.65),
+        fullText: typeof obj['fullText'] === 'string' ? obj['fullText'] : undefined,
+        keyClaims: Array.isArray(obj['keyClaims']) ? obj['keyClaims'].map(String) : undefined,
+        primarySource: typeof obj['primarySource'] === 'boolean' ? obj['primarySource'] : undefined,
+        sourcePriority: typeof obj['sourcePriority'] === 'number' ? obj['sourcePriority'] : undefined,
     };
 }
 
@@ -210,4 +302,110 @@ function extractJson(content: string): string {
     if (start >= 0 && end > start) return trimmed.slice(start, end + 1);
 
     return trimmed;
+}
+
+function extractUrls(text: string): string[] {
+    const matches = text.match(/https?:\/\/[^\s<>"'`]+/gi) ?? [];
+    const urls: string[] = [];
+    for (const match of matches) {
+        const url = match.replace(/[),.;!?]+$/, '');
+        if (!urls.includes(url)) urls.push(url);
+    }
+    return urls;
+}
+
+async function readResponseText(response: Response, contentType: string): Promise<string> {
+    const bytes = await response.arrayBuffer();
+    const charset = contentType.match(/charset=([^;\s]+)/i)?.[1]?.toLowerCase();
+    const encodings = [charset, 'utf-8', 'euc-kr'].filter((encoding): encoding is string => Boolean(encoding));
+
+    for (const encoding of encodings) {
+        try {
+            return new TextDecoder(encoding).decode(bytes);
+        } catch {
+            // Try the next supported encoding.
+        }
+    }
+
+    return new TextDecoder().decode(bytes);
+}
+
+function extractReadableText(input: string): string {
+    const article = input.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)?.[1];
+    const body = article || input.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)?.[1] || input;
+    return normalizeWhitespace(
+        decodeHtmlEntities(
+            body
+                .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
+                .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
+                .replace(/<noscript\b[\s\S]*?<\/noscript>/gi, ' ')
+                .replace(/<br\s*\/?>/gi, '\n')
+                .replace(/<\/(p|li|h1|h2|h3|div|section|article)>/gi, '\n')
+                .replace(/<[^>]+>/g, ' ')
+        )
+    );
+}
+
+function extractHtmlMeta(html: string, property: string): string | null {
+    const escaped = property.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const patterns = [
+        new RegExp(`<meta[^>]+property=["']${escaped}["'][^>]+content=["']([^"']+)["'][^>]*>`, 'i'),
+        new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+property=["']${escaped}["'][^>]*>`, 'i'),
+        new RegExp(`<meta[^>]+name=["']${escaped}["'][^>]+content=["']([^"']+)["'][^>]*>`, 'i'),
+        new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+name=["']${escaped}["'][^>]*>`, 'i'),
+    ];
+    for (const pattern of patterns) {
+        const match = html.match(pattern)?.[1];
+        if (match) return decodeHtmlEntities(match).trim();
+    }
+    return null;
+}
+
+function extractTagText(html: string, tag: string): string | null {
+    const match = html.match(new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i'))?.[1];
+    if (!match) return null;
+    return normalizeWhitespace(decodeHtmlEntities(match.replace(/<[^>]+>/g, ' ')));
+}
+
+function extractKeyClaims(text: string): string[] {
+    const sentences = text
+        .split(/(?<=[.!?。！？]|다\.|요\.|죠\.)\s+|\n+/)
+        .map(sentence => normalizeWhitespace(sentence))
+        .filter(Boolean);
+    const claimLike = sentences.filter(sentence =>
+        /(\d|%|원|달러|가격|요금|할인|공식|주의|조건|가능|불가|자동|예약|실행|제공)/.test(sentence)
+    );
+    return [...new Set(claimLike)].slice(0, 8);
+}
+
+function summarizeText(text: string): string {
+    return text.slice(0, 360);
+}
+
+function deriveKeywords(text: string): string[] {
+    const matches = text.match(/[A-Za-z가-힣0-9%]{2,}/g) ?? [];
+    const stopwords = new Set(['https', 'http', 'www', 'com', '으로', '에서', '입니다', '합니다', '그리고']);
+    const keywords: string[] = [];
+    for (const match of matches) {
+        const cleaned = match.trim();
+        if (stopwords.has(cleaned.toLowerCase())) continue;
+        if (!keywords.includes(cleaned)) keywords.push(cleaned);
+        if (keywords.length >= 5) break;
+    }
+    return keywords.length > 0 ? keywords : ['URL', '원문', '요약'];
+}
+
+function normalizeWhitespace(text: string): string {
+    return text.replace(/\s+/g, ' ').trim();
+}
+
+function decodeHtmlEntities(text: string): string {
+    return text
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)));
 }

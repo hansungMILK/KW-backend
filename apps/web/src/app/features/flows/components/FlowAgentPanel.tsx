@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { Send, X } from 'lucide-react';
 
-import { approveProposal, sendFlowMessage } from '@flows/flows';
+import { approveProposal, getFlowMessages, sendFlowMessage } from '@flows/flows';
 import { MarkdownViewer } from '@flows/ui-kit';
 import { extractErrorMessage } from '@flows/web-core';
 
@@ -81,10 +81,54 @@ export const FlowAgentPanel = ({
     const bottomRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const isComposingRef = useRef(false);
+    const loadedFlowIdRef = useRef<string | null>(null);
 
     useEffect(() => {
         if (open) inputRef.current?.focus();
     }, [open]);
+
+    useEffect(() => {
+        if (!open || !flowId) return;
+        if (loadedFlowIdRef.current === flowId) return;
+
+        loadedFlowIdRef.current = flowId;
+        let cancelled = false;
+
+        const loadHistory = async () => {
+            try {
+                const history = await getFlowMessages(flowId);
+                if (cancelled) return;
+                setMessages(prev =>
+                    prev.length > 0
+                        ? prev
+                        : history.map(message => ({
+                              id: message.id,
+                              role: message.role,
+                              text: message.content,
+                          }))
+                );
+            } catch (error) {
+                if (cancelled) return;
+                setMessages(prev =>
+                    prev.length > 0
+                        ? prev
+                        : [
+                              {
+                                  id: crypto.randomUUID(),
+                                  role: 'agent',
+                                  text: toUserVisibleAgentError(error),
+                              },
+                          ]
+                );
+            }
+        };
+
+        void loadHistory();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [open, flowId]);
 
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -124,7 +168,16 @@ export const FlowAgentPanel = ({
 
             setMessages(prev => {
                 const withoutThinking = prev.filter(m => !m.thinking);
-                if (!response) return withoutThinking;
+                if (!response) {
+                    return [
+                        ...withoutThinking,
+                        {
+                            id: crypto.randomUUID(),
+                            role: 'agent',
+                            text: '서버 응답에 표시할 답변이 없습니다. 잠시 후 다시 시도해주세요.',
+                        },
+                    ];
+                }
 
                 if (response.proposal) {
                     return withoutThinking.some(message => message.proposal?.id === response.proposal?.id)
@@ -149,8 +202,15 @@ export const FlowAgentPanel = ({
             const result = await approveProposal(proposal.id);
             onApproveProposal?.(result.nodes, result.edges);
             setMessages(prev => prev.filter(m => m.proposal?.id !== proposal.id));
-        } catch {
-            // keep proposal card visible on error
+        } catch (error) {
+            setMessages(prev => [
+                ...prev,
+                {
+                    id: crypto.randomUUID(),
+                    role: 'agent',
+                    text: toUserVisibleAgentError(error),
+                },
+            ]);
         }
     };
 

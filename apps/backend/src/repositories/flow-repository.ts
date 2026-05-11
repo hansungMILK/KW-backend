@@ -3,6 +3,12 @@ import { DeleteCommand, GetCommand, PutCommand, ScanCommand } from '@aws-sdk/lib
 import { messageRepo } from './message-repository';
 import { proposalRepo } from './proposal-repository';
 import { TableNames, USE_REAL_DYNAMO, getDocClient, memDb } from '../adapters/aws/dynamodb';
+import {
+    getFlowNodeBlockType,
+    getFlowNodeId,
+    isStoredPortNode,
+    sanitizeCanvasNodesForStorage,
+} from '../utils/flow-node-classification';
 import { generateNumericId } from '../utils/id-generator';
 
 export interface FlowRecord {
@@ -49,26 +55,76 @@ const normalizeRecord = (record: FlowRecord): FlowRecord => ({
     state: normalizeFlowStatus(record.state),
 });
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-    value != null && typeof value === 'object' && !Array.isArray(value);
-
-const isPortNode = (node: unknown): node is Record<string, unknown> => isRecord(node) && node['stereo'] === 'port';
-
-const getNodeId = (node: unknown): string => {
-    if (!isRecord(node)) return '';
-    return String(node['id'] ?? node['nodeId'] ?? '');
-};
-
 const preserveExistingPortNodes = (incomingNodes: unknown[], existingNodes: unknown[]): unknown[] => {
-    const visualNodes = incomingNodes.filter(node => !isPortNode(node));
-    const visualNodeIds = new Set(visualNodes.map(getNodeId).filter(Boolean));
+    const visualNodes = sanitizeCanvasNodesForStorage(incomingNodes);
+    const visualNodeIds = new Set(visualNodes.map(getFlowNodeId).filter(Boolean));
     const existingPorts = existingNodes.filter(node => {
-        if (!isPortNode(node)) return false;
+        if (!isStoredPortNode(node)) return false;
         const parentId = String(node['parentId'] ?? '');
         return parentId && visualNodeIds.has(parentId);
     });
 
     return [...visualNodes, ...existingPorts];
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+    value != null && typeof value === 'object' && !Array.isArray(value);
+
+const hasMeaningfulConfig = (value: unknown): boolean =>
+    isRecord(value) ? Object.keys(value).length > 0 : value !== undefined && value !== null;
+
+const mergeNodeData = (incomingData: unknown, existingData: unknown): Record<string, unknown> | undefined => {
+    if (!isRecord(incomingData) && !isRecord(existingData)) return undefined;
+    const merged = {
+        ...(isRecord(existingData) ? existingData : {}),
+        ...(isRecord(incomingData) ? incomingData : {}),
+    };
+    const incomingConfig = isRecord(incomingData) ? incomingData['config'] : undefined;
+    const existingConfig = isRecord(existingData) ? existingData['config'] : undefined;
+    if (!hasMeaningfulConfig(incomingConfig) && hasMeaningfulConfig(existingConfig)) {
+        merged['config'] = existingConfig;
+    }
+    return merged;
+};
+
+export const mergeIncomingCanvasNodesWithExistingMetadata = (
+    incomingNodes: unknown[],
+    existingNodes: unknown[]
+): unknown[] => {
+    const existingById = new Map(
+        existingNodes
+            .filter(isRecord)
+            .map(node => [getFlowNodeId(node), node] as const)
+            .filter(([id]) => id.length > 0)
+    );
+
+    return sanitizeCanvasNodesForStorage(incomingNodes).map(node => {
+        if (!isRecord(node)) return node;
+        const existing = existingById.get(getFlowNodeId(node));
+        if (!existing || getFlowNodeBlockType(existing) !== getFlowNodeBlockType(node)) {
+            return node;
+        }
+
+        const merged: Record<string, unknown> = {
+            ...existing,
+            ...node,
+        };
+
+        for (const key of ['blockId', 'blockType', 'name', 'label']) {
+            if (merged[key] === undefined || merged[key] === null || merged[key] === '') {
+                merged[key] = existing[key];
+            }
+        }
+
+        if (!hasMeaningfulConfig(node['config']) && hasMeaningfulConfig(existing['config'])) {
+            merged['config'] = existing['config'];
+        }
+
+        const data = mergeNodeData(node['data'], existing['data']);
+        if (data) merged['data'] = data;
+
+        return merged;
+    });
 };
 
 // ============================================================================
@@ -118,7 +174,7 @@ export const flowRepo = {
                 id: flowId,
                 name: 'Untitled Flow',
                 state: 'DRAFT',
-                nodes,
+                nodes: sanitizeCanvasNodesForStorage(nodes),
                 edges,
                 channelId: flowId,
                 createdAt: now,
@@ -136,7 +192,7 @@ export const flowRepo = {
             state: existing?.state ?? 'DRAFT',
             stereo: existing?.stereo,
             description: existing?.description,
-            nodes,
+            nodes: sanitizeCanvasNodesForStorage(nodes),
             edges,
             channelId: existing?.channelId ?? id,
             createdAt: existing?.createdAt ?? now,
@@ -207,17 +263,18 @@ export const flowRepo = {
         if (!existing) return null;
 
         const now = new Date().toISOString();
+        const incomingVisualNodes = mergeIncomingCanvasNodesWithExistingMetadata(data.nodes, existing.nodes ?? []);
         // Auto status transition: nodes >= 1 → READY (if currently DRAFT)
         // existing.state is already normalized by get()
         let newState = existing.state;
-        if (data.nodes.length >= 1 && normalizeFlowStatus(existing.state) === 'DRAFT') {
+        if (incomingVisualNodes.length >= 1 && normalizeFlowStatus(existing.state) === 'DRAFT') {
             newState = 'READY';
         }
 
         const nextNodes =
             options.preservePortNodes === false
-                ? data.nodes
-                : preserveExistingPortNodes(data.nodes, existing.nodes ?? []);
+                ? incomingVisualNodes
+                : preserveExistingPortNodes(incomingVisualNodes, existing.nodes ?? []);
 
         const updated: FlowRecord = {
             ...existing,

@@ -34,6 +34,10 @@ const SourceRefSchema = z.object({
     sourceType: z.enum(['official', 'news', 'blog', 'other']).optional(),
     confidence: z.number().min(0).max(1).optional(),
     summary: z.string().optional(),
+    fullText: z.string().optional(),
+    keyClaims: z.array(z.string()).optional(),
+    primarySource: z.boolean().optional(),
+    sourcePriority: z.number().optional(),
 });
 
 const VisualSchema = z.object({
@@ -85,6 +89,8 @@ export interface BlockExecutor {
 
 /** search block */
 export const SearchOutputSchema = z.object({
+    collectionMode: z.enum(['url', 'web_search', 'url_fallback_web_search']).optional(),
+    primaryUrl: z.string().optional(),
     keywords: z.array(z.string()),
     articles: z.array(
         z.object({
@@ -96,6 +102,10 @@ export const SearchOutputSchema = z.object({
             sourceType: z.enum(['official', 'news', 'blog', 'other']).optional(),
             confidence: z.number().min(0).max(1).optional(),
             summary: z.string().optional(),
+            fullText: z.string().optional(),
+            keyClaims: z.array(z.string()).optional(),
+            primarySource: z.boolean().optional(),
+            sourcePriority: z.number().optional(),
         })
     ),
     trendScore: z.number().optional(),

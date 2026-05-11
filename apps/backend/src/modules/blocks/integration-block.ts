@@ -90,7 +90,7 @@ function buildPublicUrl(videoUrl: string): string {
 
 function generateTitle(upstream: UpstreamData): string {
     if (upstream.metadata?.title) return upstream.metadata.title;
-    const keywords = upstream.search?.keywords?.slice(0, 3).join(' ') || '입시 트렌드';
+    const keywords = upstream.search?.keywords?.slice(0, 3).join(' ') || '핵심 정리';
     const hook = upstream.content?.hook;
     if (hook && !hook.startsWith('[dummy]')) return hook;
     return `${keywords} — 60초 핵심 정리 #shorts`;
@@ -98,8 +98,8 @@ function generateTitle(upstream: UpstreamData): string {
 
 function generateDescription(upstream: UpstreamData): string {
     const hook = upstream.content?.hook || upstream.metadata?.hook || '';
-    const cta = upstream.content?.cta || upstream.metadata?.cta || '구독하고 매일 입시 정보를 받아보세요!';
-    const keywords = upstream.search?.keywords?.join(', ') || '입시';
+    const cta = upstream.content?.cta || upstream.metadata?.cta || '필요하면 저장하고 다시 확인해보세요.';
+    const keywords = upstream.search?.keywords?.join(', ') || '핵심 정리';
     const sourceLines = (upstream.metadata?.sources || [])
         .slice(0, 3)
         .map(
@@ -111,17 +111,23 @@ function generateDescription(upstream: UpstreamData): string {
 }
 
 function generateHashtags(upstream: UpstreamData): string[] {
-    const base = ['#shorts', '#입시', '#교육'];
+    const base = upstream.metadata?.presetId === 'education-admission' ? ['#shorts', '#입시', '#교육'] : ['#shorts'];
     const fromKeywords = (upstream.search?.keywords || []).slice(0, 4).map(k => `#${k.replace(/\s+/g, '')}`);
-    return [...new Set([...base, ...fromKeywords])];
+    return sanitizeHashtags([...new Set([...base, ...fromKeywords])], upstream.metadata?.presetId);
+}
+
+function sanitizeHashtags(hashtags: string[], presetId?: string): string[] {
+    if (presetId === 'education-admission') return hashtags;
+    const educationTags = new Set(['#입시', '#교육', '#대입', '#수능', '#정시', '#수시', '#수험생', '#공부']);
+    return hashtags.filter(tag => !educationTags.has(tag));
 }
 
 function dummyIntegrationOutput(): Record<string, unknown> {
     return {
-        title: '[dummy] 2026 수능 완벽 분석 — 합격을 위한 최후 전략 #shorts',
-        description: '[dummy] 2026학년도 수능 트렌드와 정시 전략을 60초 안에 정리했습니다.',
-        hashtags: ['#수능2026', '#입시', '#정시', '#수험생', '#공부법', '#shorts', '#교육'],
-        publicUrl: 'fake://cdn.example.com/published/shorts-2026-suneung-abc123',
+        title: '[dummy] 핵심 이슈 60초 정리 #shorts',
+        description: '[dummy] 사용자 요청 주제의 배경, 근거, 주의점을 짧게 정리했습니다.',
+        hashtags: ['#shorts', '#핵심정리', '#정보전달'],
+        publicUrl: 'fake://cdn.example.com/published/shorts-summary-abc123',
         video: { url: 'fake://cdn.example.com/video.mp4', durationSec: 60, width: 1080, height: 1920, format: 'mp4' },
         audio: { url: 'fake://cdn.example.com/audio.mp3', durationSec: 60, format: 'mp3' },
         thumbnailUrl: 'fake://cdn.example.com/thumbnails/thumb.jpg',
@@ -135,7 +141,7 @@ function dummyIntegrationOutput(): Record<string, unknown> {
         ],
         warnings: [],
         createdAt: new Date().toISOString(),
-        seoMetadata: { category: 'Education', language: 'ko' },
+        seoMetadata: { category: 'Shorts', language: 'ko' },
     };
 }
 
@@ -189,8 +195,8 @@ export const integrationBlock: BlockExecutor = {
             const resp = await openaiAdapter.chatJson({
                 model: env.openaiModel,
                 systemPrompt:
-                    'Generate a catchy Korean YouTube Shorts title and description for an education video. Return JSON: { "title": "...", "description": "...", "hashtags": ["..."] }',
-                userMessage: `키워드: ${upstream.search?.keywords?.join(', ') || '입시'}\n훅: ${upstream.content?.hook || ''}\nCTA: ${upstream.content?.cta || ''}`,
+                    'Generate a catchy Korean YouTube Shorts title and description for the provided topic. Do not inject unrelated domains such as education/admission unless the upstream metadata explicitly says so. Return JSON: { "title": "...", "description": "...", "hashtags": ["..."] }',
+                userMessage: `키워드: ${upstream.search?.keywords?.join(', ') || '핵심 정리'}\n훅: ${upstream.content?.hook || upstream.metadata?.hook || ''}\nCTA: ${upstream.content?.cta || upstream.metadata?.cta || ''}\nPreset: ${upstream.metadata?.presetId || 'general-shorts'}`,
                 maxTokens: 512,
                 maxAttempts: 1,
                 signal: context?.abortSignal,
@@ -205,6 +211,7 @@ export const integrationBlock: BlockExecutor = {
                 if (enhanced.title) title = enhanced.title;
                 if (enhanced.description) description = enhanced.description;
                 if (enhanced.hashtags?.length) hashtags = [...new Set([...hashtags, ...enhanced.hashtags])];
+                hashtags = sanitizeHashtags(hashtags, upstream.metadata?.presetId);
             } catch {
                 log.warn('AI metadata enhancement parse failed, using deterministic');
             }

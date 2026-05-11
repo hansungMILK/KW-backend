@@ -204,7 +204,14 @@ export const useFlows = () => {
                 // 4. Extract height (with backward compatibility for legacy config.textareaHeight)
                 const { blockRegistry } = useFlowsStore.getState();
 
-                const slimNodes = nodes.map(node => {
+                const runnableCanvasNodes = nodes.filter(node => {
+                    const nodeRecord = node as NodeData & { stereo?: string };
+                    if (nodeRecord.stereo === 'port') return false;
+                    if (node.id?.startsWith('port_')) return false;
+                    return !!node.type;
+                });
+
+                const slimNodes = runnableCanvasNodes.map(node => {
                     const blockDef = blockRegistry[node.type];
                     const height = getNodeHeight(node);
 

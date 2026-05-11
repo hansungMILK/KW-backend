@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join, resolve } from 'path';
@@ -221,18 +221,34 @@ function buildArgs(
 function resolveOverlayFontFile(): string | undefined {
     const candidates = [
         process.env.FFMPEG_FONT_FILE,
-        resolve('assets/fonts/Jalnan2.otf'),
+        resolve('assets/fonts/Pretendard-Black.otf'),
+        resolve('assets/fonts/Pretendard-Bold.otf'),
         '/opt/fonts/Pretendard-Black.otf',
+        '/opt/fonts/Pretendard-Bold.otf',
         '/opt/fonts/BlackHanSans-Regular.ttf',
         '/opt/fonts/NotoSansKR-Black.otf',
         '/opt/fonts/NotoSansCJKkr-Black.otf',
+        resolve('assets/fonts/Jalnan2.otf'),
         '/System/Library/Fonts/AppleSDGothicNeo.ttc',
         '/System/Library/Fonts/Supplemental/AppleGothic.ttf',
         '/opt/fonts/NotoSansCJKkr-Regular.otf',
         '/opt/fonts/NotoSansKR-Regular.otf',
     ].filter((candidate): candidate is string => Boolean(candidate));
 
-    return candidates.find(candidate => existsSync(candidate));
+    return candidates.find(isSupportedFontFile);
+}
+
+export function isSupportedFontFile(candidate: string | undefined): candidate is string {
+    if (!candidate || !existsSync(candidate)) return false;
+
+    try {
+        const header = readFileSync(candidate, { encoding: null, flag: 'r' }).subarray(0, 4);
+        const signature = header.toString('latin1');
+        const sfntVersion = header.readUInt32BE(0);
+        return signature === 'OTTO' || signature === 'ttcf' || sfntVersion === 0x00010000 || signature === 'true';
+    } catch {
+        return false;
+    }
 }
 
 function ffmpegSupportsDrawtext(): boolean {

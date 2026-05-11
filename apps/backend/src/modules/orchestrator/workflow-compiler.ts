@@ -63,6 +63,51 @@ export function compileWorkflowPlan(data: ClaudeProposalOutput): CompileWorkflow
     return { ok: true, data };
 }
 
+export function seedRootBlockInputs(data: ClaudeProposalOutput, userMessage: string): ClaudeProposalOutput {
+    const trimmedMessage = userMessage.trim();
+    if (!trimmedMessage) return data;
+
+    const nodesWithParents = new Set(data.edges.map(edge => edge.to));
+    const blocks = data.blocks.map((block, index) => {
+        if (nodesWithParents.has(index)) return block;
+
+        if (block.type === 'search' && !hasSeedInput(block.config)) {
+            return {
+                ...block,
+                config: {
+                    ...block.config,
+                    query: trimmedMessage,
+                },
+            };
+        }
+
+        if (block.type === 'content' && !hasSeedInput(block.config)) {
+            return {
+                ...block,
+                config: {
+                    ...block.config,
+                    topic: trimmedMessage,
+                },
+            };
+        }
+
+        return block;
+    });
+
+    return { ...data, blocks };
+}
+
 function fail(error: string): CompileWorkflowPlanResult {
     return { ok: false, error };
+}
+
+function hasSeedInput(config: Record<string, unknown> | undefined): boolean {
+    if (!config) return false;
+
+    for (const key of ['query', 'topic', 'content', 'text']) {
+        const value = config[key];
+        if (typeof value === 'string' && value.trim().length > 0) return true;
+    }
+
+    return Array.isArray(config['keywords']) && config['keywords'].length > 0;
 }

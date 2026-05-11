@@ -1,6 +1,6 @@
 import { ORCHESTRATOR_SYSTEM_PROMPT, PROMPT_VERSION, buildUserPrompt } from './prompt-templates';
 import { parseClaudeResponse } from './response-parser';
-import { compileWorkflowPlan } from './workflow-compiler';
+import { compileWorkflowPlan, seedRootBlockInputs } from './workflow-compiler';
 import { openaiAdapter } from '../../adapters/ai/openai-adapter';
 import { env } from '../../config/env';
 import { traceService } from '../../services/trace-service';
@@ -77,7 +77,7 @@ export const openaiOrchestrator: Orchestrator = {
                 );
             }
 
-            const { data } = compileResult;
+            const data = seedRootBlockInputs(compileResult.data, userMessage);
             const nodes = data.blocks.map((block, i) => ({
                 id: generateNumericId(),
                 blockId: `blk-${block.type}`,

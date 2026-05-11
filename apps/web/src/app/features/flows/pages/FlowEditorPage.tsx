@@ -3,7 +3,16 @@ import { useTranslation } from 'react-i18next';
 
 import { Loader2, Play } from 'lucide-react';
 
-import { EXECUTE_FUNCTIONS, createFlowRun, getPortData, useBlocks, useCanvasStore, useFlows } from '@flows/flows';
+import {
+    EXECUTE_FUNCTIONS,
+    createFlowRun,
+    getPortData,
+    getRun,
+    getRunNodes,
+    useBlocks,
+    useCanvasStore,
+    useFlows,
+} from '@flows/flows';
 import { ApiKeyDialog } from '@flows/shared';
 import { useInitFlowSocket } from '@flows/socket';
 import { useWebCoreStore } from '@flows/web-core';
@@ -17,7 +26,15 @@ import { WorkflowCanvas } from '../components/WorkflowCanvas';
 import type { HelpTab } from '../components/help';
 import type { SidebarRef } from '../components/Sidebar';
 import type { WorkflowCanvasRef } from '../components/WorkflowCanvas';
-import type { NodeUpdateInfo, PortUpdateInfo } from '@flows/socket';
+import type { EdgeData, NodeData } from '@flows/flows';
+import type {
+    NodeUpdateInfo,
+    PortUpdateInfo,
+    ProposalCreatedMessage,
+    RunCompletedMessage,
+    RunFailedMessage,
+    RunStartedMessage,
+} from '@flows/socket';
 
 const serializeWorkflowState = (data: { nodes?: unknown[]; connections?: unknown[]; edges?: unknown[] }): string =>
     JSON.stringify({ nodes: data.nodes ?? [], connections: data.connections ?? data.edges ?? [] });
@@ -25,6 +42,36 @@ const serializeWorkflowState = (data: { nodes?: unknown[]; connections?: unknown
 const isInputElement = (target: EventTarget | null): boolean => {
     if (!target || !(target instanceof HTMLElement)) return false;
     return ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable;
+};
+
+type RunNodeSnapshot = Awaited<ReturnType<typeof getRunNodes>>[number];
+
+const RUN_NODE_POLL_MS = 1500;
+
+const mapRunNodeStatusToCanvasState = (
+    status: RunNodeSnapshot['status']
+): 'IDLE' | 'READY' | 'RUNNING' | 'COMPLETED' | 'ERROR' => {
+    if (status === 'RUNNING') return 'RUNNING';
+    if (status === 'COMPLETED') return 'COMPLETED';
+    if (status === 'FAILED' || status === 'CANCELLED') return 'ERROR';
+    return 'IDLE';
+};
+
+const getRunNodeProgress = (node: RunNodeSnapshot): number =>
+    Number.isFinite(node.progress) ? Math.min(100, Math.max(0, node.progress)) : 0;
+
+const toOutputPacket = (node: RunNodeSnapshot) => {
+    if (node.outputPayload === undefined || node.outputPayload === null) return undefined;
+    const valueType = typeof node.outputPayload;
+    const packetType =
+        valueType === 'string' ? 'text' : valueType === 'number' || valueType === 'boolean' ? 'any' : 'json';
+    return {
+        out: {
+            value: node.outputPayload,
+            type: packetType,
+            timestamp: node.completedAt ? Date.parse(node.completedAt) : Date.now(),
+        },
+    };
 };
 
 export const FlowEditorPage = () => {
@@ -51,6 +98,105 @@ export const FlowEditorPage = () => {
         toggleAutoSave,
         updateFlowName,
     } = useFlows();
+
+    const [isAgentOpen, setIsAgentOpen] = useState(false);
+    const [runStatus, setRunStatus] = useState<'running' | 'completed' | 'failed' | null>(null);
+    const [runActivity, setRunActivity] = useState<{
+        nodeLabel?: string;
+        progress?: number;
+        state?: 'queued' | 'running' | 'completed' | 'failed';
+        error?: string | null;
+    } | null>(null);
+    const [activeRunId, setActiveRunId] = useState<string | null>(null);
+    const [latestProposal, setLatestProposal] = useState<ProposalCreatedMessage | null>(null);
+
+    const getCanvasNodeLabel = useCallback(
+        (nodeId: string): string => {
+            const node = canvasRef.current?.getWorkflow()?.nodes?.find(item => item.id === nodeId);
+            const definition = node?.type ? blockRegistry[node.type] : undefined;
+            return node?.customLabel ?? node?.name ?? definition?.label ?? nodeId;
+        },
+        [blockRegistry]
+    );
+
+    const applyRunNodeSnapshots = useCallback(
+        (runNodes: RunNodeSnapshot[]): 'running' | 'completed' | 'failed' | null => {
+            const visibleRunNodes = runNodes.filter(node => !node.nodeId.startsWith('port_'));
+            if (visibleRunNodes.length === 0) return null;
+
+            for (const runNode of visibleRunNodes) {
+                const state = mapRunNodeStatusToCanvasState(runNode.status);
+                const startedAtMs = runNode.startedAt ? Date.parse(runNode.startedAt) : undefined;
+                const completedAtMs = runNode.completedAt ? Date.parse(runNode.completedAt) : undefined;
+                const duration =
+                    startedAtMs && completedAtMs && completedAtMs >= startedAtMs
+                        ? completedAtMs - startedAtMs
+                        : undefined;
+                const outputData = runNode.status === 'COMPLETED' ? toOutputPacket(runNode) : undefined;
+
+                canvasRef.current?.updateNodeFromServer(runNode.nodeId, {
+                    state,
+                    status: state,
+                    errorMessage: runNode.errorMessage ?? runNode.errorCode ?? undefined,
+                    executionStats: {
+                        progress: getRunNodeProgress(runNode),
+                        ...(startedAtMs ? { startTime: startedAtMs } : {}),
+                        ...(duration !== undefined ? { duration } : {}),
+                    },
+                    ...(outputData ? { outputData } : {}),
+                });
+            }
+
+            const failedNode = visibleRunNodes.find(node => node.status === 'FAILED' || node.status === 'CANCELLED');
+            if (failedNode) {
+                setRunStatus('failed');
+                setRunActivity({
+                    nodeLabel: getCanvasNodeLabel(failedNode.nodeId),
+                    progress: getRunNodeProgress(failedNode) || 100,
+                    state: 'failed',
+                    error:
+                        failedNode.errorMessage ??
+                        failedNode.errorCode ??
+                        (failedNode.status === 'CANCELLED' ? '사용자가 실행을 취소했습니다.' : '노드 실행 실패'),
+                });
+                return 'failed';
+            }
+
+            const runningNode = visibleRunNodes.find(node => node.status === 'RUNNING');
+            const pendingNode = visibleRunNodes.find(node => node.status === 'PENDING');
+            const completedCount = visibleRunNodes.filter(node => node.status === 'COMPLETED').length;
+            const progressFromCount = Math.round((completedCount / visibleRunNodes.length) * 100);
+
+            if (runningNode) {
+                setRunStatus('running');
+                setRunActivity({
+                    nodeLabel: getCanvasNodeLabel(runningNode.nodeId),
+                    progress: Math.max(progressFromCount, getRunNodeProgress(runningNode)),
+                    state: 'running',
+                });
+                return 'running';
+            }
+
+            if (pendingNode) {
+                setRunStatus('running');
+                setRunActivity({
+                    nodeLabel: `${completedCount}/${visibleRunNodes.length} 완료, 대기: ${getCanvasNodeLabel(pendingNode.nodeId)}`,
+                    progress: progressFromCount,
+                    state: 'queued',
+                });
+                return 'running';
+            }
+
+            setRunStatus('completed');
+            setRunActivity({
+                nodeLabel: '전체 워크플로우',
+                progress: 100,
+                state: 'completed',
+            });
+            return 'completed';
+        },
+        [getCanvasNodeLabel]
+    );
 
     // Handle flow update notification from WebSocket (new format)
     // Fetches entire flow from server and updates canvas
@@ -106,6 +252,13 @@ export const FlowEditorPage = () => {
 
             // ERROR state: socket node.failed includes the failure details after P3.
             if (state === 'ERROR') {
+                setRunStatus('failed');
+                setRunActivity({
+                    nodeLabel: getCanvasNodeLabel(nodeId),
+                    progress: progress ?? 100,
+                    state: 'failed',
+                    error: errorMessage ?? errorCode ?? '노드 실행 실패',
+                });
                 canvasRef.current.updateNodeFromServer(nodeId, {
                     state,
                     status: state,
@@ -127,6 +280,21 @@ export const FlowEditorPage = () => {
                 status: state,
                 executionStats,
             });
+
+            if (state === 'RUNNING') {
+                setRunStatus('running');
+                setRunActivity({
+                    nodeLabel: getCanvasNodeLabel(nodeId),
+                    progress: progress ?? 0,
+                    state: 'running',
+                });
+            } else if (state === 'COMPLETED') {
+                setRunActivity({
+                    nodeLabel: getCanvasNodeLabel(nodeId),
+                    progress: 100,
+                    state: 'completed',
+                });
+            }
 
             // Auto-execute isFrontend nodes when READY (if all inputs have data)
             if (state !== 'READY') return;
@@ -150,7 +318,7 @@ export const FlowEditorPage = () => {
                 canvasRef.current?.executeNode(nodeId);
             }, 0);
         },
-        [blockRegistry, currentFlowId]
+        [blockRegistry, currentFlowId, getCanvasNodeLabel]
     );
 
     // Track port sequence numbers to detect stale updates (higher no = newer)
@@ -267,6 +435,47 @@ export const FlowEditorPage = () => {
         };
     }, []);
 
+    const handleProposalCreated = useCallback((message: ProposalCreatedMessage) => {
+        setLatestProposal(message);
+        setIsAgentOpen(true);
+    }, []);
+
+    const handleRunStarted = useCallback((message: RunStartedMessage) => {
+        if (message.runId) setActiveRunId(message.runId);
+        setRunStatus('running');
+        setRunActivity({
+            nodeLabel: message.runId ? `실행 ${message.runId}` : '워크플로우 실행',
+            progress: 0,
+            state: 'running',
+        });
+        setIsAgentOpen(true);
+    }, []);
+
+    const handleRunCompleted = useCallback((_message: RunCompletedMessage) => {
+        setActiveRunId(null);
+        setRunStatus('completed');
+        setRunActivity({
+            nodeLabel: '전체 워크플로우',
+            progress: 100,
+            state: 'completed',
+        });
+    }, []);
+
+    const handleRunFailed = useCallback(
+        (message: RunFailedMessage) => {
+            setActiveRunId(null);
+            setRunStatus('failed');
+            setRunActivity({
+                nodeLabel: message.failedNodeId ? getCanvasNodeLabel(message.failedNodeId) : '전체 워크플로우',
+                progress: 100,
+                state: 'failed',
+                error: message.errorMessage ?? message.error ?? message.errorCode ?? '워크플로우 실행 실패',
+            });
+            setIsAgentOpen(true);
+        },
+        [getCanvasNodeLabel]
+    );
+
     // Track last local update to prevent self-echo from socket (use ref to avoid re-renders)
     const lastLocalUpdateTimestampRef = useRef<number | null>(null);
     const getLastLocalUpdateTimestamp = useCallback(() => lastLocalUpdateTimestampRef.current, []);
@@ -285,7 +494,79 @@ export const FlowEditorPage = () => {
         onFlowUpdate: handleFlowUpdate,
         onNodeReload: handleNodeUpdate,
         onPortUpdate: handlePortUpdate,
+        onProposalCreated: handleProposalCreated,
+        onRunStarted: handleRunStarted,
+        onRunCompleted: handleRunCompleted,
+        onRunFailed: handleRunFailed,
     });
+
+    useEffect(() => {
+        if (!activeRunId) return;
+
+        let cancelled = false;
+        let timeoutId: number | null = null;
+
+        const pollRunNodes = async () => {
+            try {
+                const [run, runNodes] = await Promise.all([getRun(activeRunId), getRunNodes(activeRunId)]);
+                if (cancelled) return;
+
+                const derivedStatus = applyRunNodeSnapshots(runNodes);
+
+                if (run.status === 'FAILED') {
+                    const summary = run.finalOutputSummary as
+                        | { failedNodeId?: string; errorMessage?: string; errorCode?: string }
+                        | null
+                        | undefined;
+                    setRunStatus('failed');
+                    setRunActivity({
+                        nodeLabel: summary?.failedNodeId ? getCanvasNodeLabel(summary.failedNodeId) : '전체 워크플로우',
+                        progress: 100,
+                        state: 'failed',
+                        error: summary?.errorMessage ?? summary?.errorCode ?? '워크플로우 실행 실패',
+                    });
+                    setActiveRunId(null);
+                    return;
+                }
+
+                if (run.status === 'CANCELLED') {
+                    setRunStatus('failed');
+                    setRunActivity({
+                        nodeLabel: '전체 워크플로우',
+                        progress: 100,
+                        state: 'failed',
+                        error: '사용자가 실행을 취소했습니다.',
+                    });
+                    setActiveRunId(null);
+                    return;
+                }
+
+                if (run.status === 'COMPLETED' || derivedStatus === 'completed') {
+                    setRunStatus('completed');
+                    setRunActivity({
+                        nodeLabel: '전체 워크플로우',
+                        progress: 100,
+                        state: 'completed',
+                    });
+                    setActiveRunId(null);
+                    return;
+                }
+            } catch (error) {
+                console.debug('[FlowEditor] Failed to poll run nodes:', error);
+            }
+
+            if (!cancelled) {
+                timeoutId = window.setTimeout(pollRunNodes, RUN_NODE_POLL_MS);
+            }
+        };
+
+        void pollRunNodes();
+
+        return () => {
+            cancelled = true;
+            if (timeoutId !== null) window.clearTimeout(timeoutId);
+        };
+    }, [activeRunId, applyRunNodeSnapshots, getCanvasNodeLabel]);
 
     const [isAppReady, setIsAppReady] = useState(false);
     const [isBootError, setIsBootError] = useState(false);
@@ -293,7 +574,6 @@ export const FlowEditorPage = () => {
     const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
     const [isApiKeyDialogOpen, setIsApiKeyDialogOpen] = useState(false);
     const [isHelpDialogOpen, setIsHelpDialogOpen] = useState(false);
-    const [isAgentOpen, setIsAgentOpen] = useState(false);
     const [isWorkflowRunning, setIsWorkflowRunning] = useState(false);
     const [helpDialogTab, setHelpDialogTab] = useState<HelpTab>('gettingStarted');
     const [agentBtnPos, setAgentBtnPos] = useState<{ x: number; y: number } | null>(null);
@@ -506,6 +786,12 @@ export const FlowEditorPage = () => {
         setIsWorkflowRunning(true);
         try {
             const data = canvasRef.current.getWorkflow();
+            if (!data.nodes || data.nodes.length === 0) {
+                setIsAgentOpen(true);
+                showNotification('실행할 블록이 없습니다. 먼저 제안을 승인해 캔버스에 배치해주세요.', 'error');
+                return;
+            }
+
             lastLocalUpdateTimestampRef.current = Date.now();
             const result = await saveCurrentFlow(data);
             if (!result.success || !result.id) {
@@ -517,7 +803,15 @@ export const FlowEditorPage = () => {
                 updateUrl(result.id, window.location.hash.replace('#', ''));
             }
 
-            await createFlowRun(result.id);
+            const run = await createFlowRun(result.id);
+            setActiveRunId(run.id);
+            setRunStatus('running');
+            setRunActivity({
+                nodeLabel: `실행 ${run.id}`,
+                progress: 0,
+                state: 'queued',
+            });
+            setIsAgentOpen(true);
             showNotification('워크플로우 실행을 시작했습니다.', 'success');
         } catch (error) {
             console.error('[FlowEditor] Failed to start flow run:', error);
@@ -527,16 +821,35 @@ export const FlowEditorPage = () => {
         }
     };
 
-    const handleApproveProposal = useCallback(async (nodes: unknown[], edges: unknown[]) => {
-        if (!canvasRef.current || (!nodes.length && !edges.length)) return;
-        try {
-            await canvasRef.current.loadWorkflow({ nodes, edges } as Parameters<WorkflowCanvasRef['loadWorkflow']>[0]);
-            lastSavedStateRef.current = null;
-            showNotification('캔버스에 블록이 배치되었습니다.', 'success');
-        } catch {
-            showNotification('캔버스 업데이트 실패', 'error');
-        }
-    }, []);
+    const handleApproveProposal = useCallback(
+        async (nodes: unknown[], edges: unknown[]) => {
+            if (!canvasRef.current || (!nodes.length && !edges.length)) return;
+            try {
+                await canvasRef.current.loadWorkflow({
+                    nodes,
+                    edges,
+                } as Parameters<WorkflowCanvasRef['loadWorkflow']>[0]);
+
+                const workflow = { nodes: nodes as NodeData[], edges: edges as EdgeData[] };
+                lastLocalUpdateTimestampRef.current = Date.now();
+                const result = await saveCurrentFlow(workflow);
+
+                if (result.success) {
+                    lastSavedStateRef.current = serializeWorkflowState(workflow);
+                    if (result.id !== currentFlowId) {
+                        updateUrl(result.id, window.location.hash.replace('#', ''));
+                    }
+                    showNotification('캔버스에 블록이 배치되고 저장되었습니다.', 'success');
+                } else {
+                    lastSavedStateRef.current = null;
+                    showNotification('캔버스 배치는 완료됐지만 저장에 실패했습니다.', 'error');
+                }
+            } catch {
+                showNotification('캔버스 업데이트 실패', 'error');
+            }
+        },
+        [currentFlowId, saveCurrentFlow, updateUrl]
+    );
 
     const handleSelectionChange = (nodeId: string | null) => {
         updateUrl(currentFlowId, nodeId);
@@ -786,6 +1099,9 @@ export const FlowEditorPage = () => {
                 onClose={() => setIsAgentOpen(false)}
                 flowId={currentFlowId}
                 onApproveProposal={handleApproveProposal}
+                externalProposal={latestProposal}
+                runStatus={runStatus}
+                runActivity={runActivity}
             />
 
             {/* Full Workflow Run Button */}

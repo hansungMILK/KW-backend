@@ -16,6 +16,8 @@ const CONTENT_SYSTEM_PROMPT = `You are a Korean YouTube Shorts scriptwriter.
 Given keywords and/or article summaries, generate a complete 10–15 scene, one-minute vertical comic Shorts plan in Korean.
 
 Requirements:
+- If the user message contains "PRIMARY SOURCE", treat that source as the main brief. Supporting sources may verify or add caveats, but must not replace the primary source's angle.
+- Preserve concrete numbers, conditions, warnings, and key claims from the PRIMARY SOURCE in factual scenes.
 - title: a short high-impact Korean title that can stay at the top of every frame
 - hook: a punchy opening question or statement (one short sentence, max 32 Korean characters)
 - script: structured script metadata with hook, angle, and cta
@@ -100,121 +102,69 @@ Respond with JSON only — no markdown fences, no extra text:
 function dummyContent(): BlockExecutorResult {
     const start = Date.now();
     const output = {
-        title: '[dummy] 2026 입시 핵심 변화',
-        hook: '[dummy] 2026 수능, 올해 수험생들이 가장 두려워하는 과목은?',
+        title: '[dummy] 핵심 요약 쇼츠',
+        hook: '[dummy] 지금 이 이슈, 핵심만 보면?',
         scenes: [
             {
                 sceneNumber: 1,
-                caption: '[dummy] 입시가 바뀐다',
-                narration: '[dummy] 매년 11월, 수험생들의 운명을 가르는 수능이 다가옵니다.',
-                imagePrompt:
-                    '[dummy] A student nervously studying late at night, books and notes spread on desk, warm lamp light, cinematic',
-                visualText: '[dummy] 입시가 바뀐다',
+                caption: '[dummy] 먼저 배경',
+                narration: '[dummy] 이 주제가 왜 나왔는지 배경부터 짚어봅니다.',
+                imagePrompt: '[dummy] Clear Korean explainer scene, person reading article on laptop, comic style',
+                visualText: '[dummy] 먼저 배경',
                 sourceRefs: ['source-1'],
                 durationSec: 6,
             },
             {
                 sceneNumber: 2,
-                caption: '[dummy] 국어가 변수다',
-                narration: '[dummy] 2026학년도 수능, 국어 비문학이 달라집니다.',
-                imagePrompt:
-                    '[dummy] Close-up of Korean language exam paper with highlighted passages, clean white background',
-                visualText: '[dummy] 국어가 변수다',
+                caption: '[dummy] 핵심 주장',
+                narration: '[dummy] 원문에서 반복되는 핵심 주장만 분리합니다.',
+                imagePrompt: '[dummy] Key points being organized on a board, Korean information channel style',
+                visualText: '[dummy] 핵심 주장',
                 sourceRefs: ['source-1'],
                 durationSec: 6,
             },
             {
                 sceneNumber: 3,
-                caption: '[dummy] 수학은 여전히 벽',
-                narration: '[dummy] 수학 영역은 여전히 수험생들의 최대 난관.',
-                imagePrompt:
-                    '[dummy] Complex math equations floating in a blue abstract digital space, dramatic lighting',
-                visualText: '[dummy] 수학은 여전히 벽',
+                caption: '[dummy] 왜 중요하냐',
+                narration: '[dummy] 이 변화가 실제 사용자에게 주는 영향을 봅니다.',
+                imagePrompt: '[dummy] People comparing before and after outcomes, simple comic explainer',
+                visualText: '[dummy] 왜 중요하냐',
                 sourceRefs: ['source-2'],
                 durationSec: 6,
             },
             {
                 sceneNumber: 4,
-                caption: '[dummy] 난도 상승 예고',
-                narration: '[dummy] 전문가들은 올해 수능 난이도가 작년보다 소폭 높아질 것으로 예측합니다.',
-                imagePrompt:
-                    '[dummy] Expert teacher pointing at a graph showing difficulty trends, professional setting',
-                visualText: '[dummy] 난도 상승 예고',
+                caption: '[dummy] 주의할 점',
+                narration: '[dummy] 확인되지 않은 내용은 단정하지 않고 따로 표시합니다.',
+                imagePrompt: '[dummy] Caution sign beside a fact-check checklist, clean comic style',
+                visualText: '[dummy] 주의할 점',
                 sourceRefs: ['source-2'],
                 durationSec: 6,
             },
             {
                 sceneNumber: 5,
-                caption: '[dummy] 정시 일정 체크',
-                narration: '[dummy] 정시 원서 접수는 12월 초, 지금부터 전략이 필요합니다.',
-                imagePrompt: '[dummy] Calendar showing December dates circled in red, urgency visual',
-                visualText: '[dummy] 정시 일정 체크',
-                sourceRefs: ['source-2'],
-                durationSec: 6,
-            },
-            {
-                sceneNumber: 6,
-                caption: '[dummy] 기출이 답이다',
-                narration: '[dummy] 합격의 비결은 단 하나 — 꾸준한 기출 분석과 약점 보완.',
-                imagePrompt:
-                    '[dummy] Stack of past exam papers with sticky notes, organized study setup, motivational atmosphere',
-                visualText: '[dummy] 기출이 답이다',
-                sourceRefs: ['source-3'],
-                durationSec: 6,
-            },
-            {
-                sceneNumber: 7,
-                caption: '[dummy] 지금 전략 세워라',
-                narration: '[dummy] 지금 바로 전략을 세우세요. 당신의 합격을 응원합니다!',
-                imagePrompt:
-                    '[dummy] Triumphant student raising fists in celebration, graduation cap flying, sunny campus background',
-                visualText: '[dummy] 지금 전략 세워라',
-                sourceRefs: ['source-3'],
-                durationSec: 6,
-            },
-            {
-                sceneNumber: 8,
-                caption: '[dummy] 점수보다 전략',
-                narration: '[dummy] 같은 점수라도 대학별 반영 방식에 따라 결과가 달라질 수 있습니다.',
-                imagePrompt: '[dummy] Korean admission score report and strategy graph, bold vertical shorts layout',
-                visualText: '[dummy] 점수보다 전략',
-                sourceRefs: ['source-2'],
-                durationSec: 6,
-            },
-            {
-                sceneNumber: 9,
-                caption: '[dummy] 상담은 빠르게',
-                narration: '[dummy] 담임 상담과 입시 자료를 함께 보며 지원 가능성을 좁혀야 합니다.',
-                imagePrompt:
-                    '[dummy] Student and counselor planning university admission options, clean educational style',
-                visualText: '[dummy] 상담은 빠르게',
+                caption: '[dummy] 한 줄 결론',
+                narration: '[dummy] 마지막에는 사용자가 바로 이해할 결론을 남깁니다.',
+                imagePrompt: '[dummy] Final takeaway card visual without readable text, bold Korean shorts style',
+                visualText: '[dummy] 한 줄 결론',
                 sourceRefs: ['source-1'],
                 durationSec: 6,
             },
-            {
-                sceneNumber: 10,
-                caption: '[dummy] 마지막 체크',
-                narration: '[dummy] 마감일, 제출 서류, 모집 단위까지 마지막에 한 번 더 확인하세요.',
-                imagePrompt: '[dummy] Smartphone admission checklist with Korean bold text, vertical shorts frame',
-                visualText: '[dummy] 마지막 체크',
-                sourceRefs: ['source-2'],
-                durationSec: 6,
-            },
         ],
-        cta: '[dummy] 구독하고 매일 입시 트렌드를 받아보세요!',
-        totalDurationSec: 60,
+        cta: '[dummy] 더 깊은 내용은 원문을 확인하세요.',
+        totalDurationSec: 30,
         sources: [
             {
                 id: 'source-1',
-                title: '[dummy] 2026 수능 출제 경향 분석',
+                title: '[dummy] 사용자 제공 원문',
                 url: 'fake://news.example.com/article/001',
-                source: '[dummy] EduNews',
+                source: '[dummy] Example Source',
                 publishedAt: null,
                 sourceType: 'other',
                 confidence: 0.5,
             },
         ],
-        presetId: 'education-admission',
+        presetId: 'generic-shorts',
     };
     return { output, durationMs: Date.now() - start };
 }
@@ -225,7 +175,7 @@ function dummyContent(): BlockExecutorResult {
  * Build a descriptive user message from the search block's output (or any input).
  */
 function buildUserMessage(input: unknown): string {
-    if (input == null) return '주제: 입시 트렌드';
+    if (input == null) return '주제: 사용자가 요청한 콘텐츠';
 
     if (typeof input === 'object' && !Array.isArray(input)) {
         const obj = input as Record<string, unknown>;
@@ -236,12 +186,38 @@ function buildUserMessage(input: unknown): string {
         }
 
         if (Array.isArray(obj['articles']) && (obj['articles'] as unknown[]).length > 0) {
-            const summaries = (obj['articles'] as Record<string, unknown>[])
+            const articles = obj['articles'] as Record<string, unknown>[];
+            const primarySources = articles
+                .filter(article => article['primarySource'] === true)
+                .sort((a, b) => Number(a['sourcePriority'] ?? 999) - Number(b['sourcePriority'] ?? 999))
+                .slice(0, 3);
+            if (primarySources.length > 0) {
+                parts.push(
+                    [
+                        'PRIMARY SOURCES',
+                        ...primarySources.map(primary =>
+                            [
+                                `PRIMARY SOURCE primarySource=true sourcePriority=${String(primary['sourcePriority'] ?? 1)}`,
+                                `Title: ${String(primary['title'] ?? '')}`,
+                                `URL: ${String(primary['url'] ?? '')}`,
+                                `PublishedAt: ${String(primary['publishedAt'] ?? 'date unknown')}`,
+                                `KeyClaims: ${Array.isArray(primary['keyClaims']) ? primary['keyClaims'].map(String).join(' / ') : ''}`,
+                                `FullText: ${String(primary['fullText'] ?? primary['summary'] ?? '').slice(0, 3000)}`,
+                            ].join('\n')
+                        ),
+                    ].join('\n\n')
+                );
+            }
+
+            const summaries = articles
                 .slice(0, 3)
-                .map(
-                    a =>
-                        `- ${String(a['id'] ?? '')} ${String(a['title'] ?? '')} (${String(a['source'] ?? '')}, ${String(a['publishedAt'] ?? 'date unknown')}, ${String(a['sourceType'] ?? 'other')}, confidence=${String(a['confidence'] ?? 'unknown')})\n  URL: ${String(a['url'] ?? '')}\n  Summary: ${String(a['summary'] ?? '')}`
-                )
+                .map(a => {
+                    const sourceFlags = [
+                        a['primarySource'] === true ? 'primarySource=true' : 'primarySource=false',
+                        `sourcePriority=${String(a['sourcePriority'] ?? 'unknown')}`,
+                    ].join(', ');
+                    return `- ${String(a['id'] ?? '')} ${String(a['title'] ?? '')} (${String(a['source'] ?? '')}, ${String(a['publishedAt'] ?? 'date unknown')}, ${String(a['sourceType'] ?? 'other')}, confidence=${String(a['confidence'] ?? 'unknown')}, ${sourceFlags})\n  URL: ${String(a['url'] ?? '')}\n  Summary: ${String(a['summary'] ?? '')}`;
+                })
                 .join('\n');
             parts.push(`관련 출처:\n${summaries}`);
         }
@@ -553,5 +529,9 @@ function extractSources(input: unknown): Array<Record<string, unknown>> {
         sourceType: article['sourceType'] ?? 'other',
         confidence: article['confidence'] ?? 0.6,
         summary: article['summary'],
+        fullText: article['fullText'],
+        keyClaims: article['keyClaims'],
+        primarySource: article['primarySource'],
+        sourcePriority: article['sourcePriority'],
     }));
 }
