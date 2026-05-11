@@ -4,6 +4,8 @@ const baseUrl = (process.env.API_BASE_URL || 'http://localhost:8800').replace(/\
 const apiKey = process.env.SMOKE_API_KEY || process.env.APP_API_KEY || '';
 const waitMs = Number(process.env.SMOKE_WAIT_MS || 120000);
 const pollMs = Number(process.env.SMOKE_POLL_MS || 3000);
+const prompt = process.env.SMOKE_PROMPT || '입시정보 쇼츠 제작해줘';
+const flowTitle = process.env.SMOKE_FLOW_TITLE || `Local smoke ${new Date().toISOString()}`;
 const isTruthy = value => ['1', 'true', 'yes', 'on'].includes(String(value || '').toLowerCase());
 const allowPaidOpenAI = isTruthy(process.env.ALLOW_PAID_OPENAI);
 const expectPaidSmoke = isTruthy(process.env.EXPECT_PAID_SMOKE);
@@ -81,7 +83,7 @@ async function main() {
 
     const flow = await request('/flows', {
         method: 'POST',
-        body: { title: `Local smoke ${new Date().toISOString()}` },
+        body: { title: flowTitle },
     });
     const flowId = flow.flowId || flow.id;
     assert(flowId, `POST /flows returned no flowId: ${JSON.stringify(flow, null, 2)}`);
@@ -90,7 +92,7 @@ async function main() {
     if (!allowPaidOpenAI) {
         const blockedMessage = await request(`/flows/${flowId}/messages`, {
             method: 'POST',
-            body: { content: '입시정보 쇼츠 제작해줘' },
+            body: { content: prompt },
             allowError: true,
         });
         assert(blockedMessage.status === 422, `Expected paid message block, got ${blockedMessage.status}`);
@@ -133,7 +135,7 @@ async function main() {
 
     const proposalResponse = await request(`/flows/${flowId}/messages`, {
         method: 'POST',
-        body: { content: '입시정보 쇼츠 제작해줘' },
+        body: { content: prompt },
     });
     const proposalId = getProposalId(proposalResponse);
     const proposedNodes = proposalResponse?.proposal?.proposedNodes || [];
@@ -165,10 +167,9 @@ async function main() {
     const assetItems = assets.items || assets.assets || assets;
     assert(Array.isArray(nodeItems), `Run nodes response is not a list: ${JSON.stringify(nodes, null, 2)}`);
     assert(Array.isArray(assetItems), `Run assets response is not a list: ${JSON.stringify(assets, null, 2)}`);
-    assert(
-        assetItems.some(asset => String(asset.assetType || '').toUpperCase() === 'VIDEO'),
-        'No final VIDEO asset found'
-    );
+    const videoAsset = assetItems.find(asset => String(asset.assetType || '').toUpperCase() === 'VIDEO');
+    assert(videoAsset, 'No final VIDEO asset found');
+    console.log(`[smoke] final video asset: ${videoAsset.assetId || '(no assetId)'} ${videoAsset.publicUrl || ''}`);
 
     console.log('[smoke] PASS: chat -> proposal -> approve -> run -> video asset');
 }
