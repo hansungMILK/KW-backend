@@ -856,95 +856,63 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     const nodesWithExistingPortData = applyPortDataToNodes(loadedNodes, portsWithData);
                     const nodesWithPropagatedData = propagateData(nodesWithExistingPortData, loadedConnections);
 
-                    // Detect overlapping nodes (saved with bad positions) and auto-spread them
-                    const fixOverlappingNodes = (
-                        nodeList: typeof nodesWithPropagatedData
-                    ): typeof nodesWithPropagatedData => {
-                        if (nodeList.length <= 1) return nodeList;
-                        // Detect visual overlap: two nodes whose top-left corners are closer than
-                        // NODE_WIDTH in x OR closer than MIN_GAP in y (i.e. they'd paint over each other).
-                        const hasOverlap = nodeList.some((a, i) =>
-                            nodeList
-                                .slice(i + 1)
-                                .some(
-                                    b =>
-                                        Math.abs(a.position.x - b.position.x) < PORT_LAYOUT.NODE_WIDTH &&
-                                        Math.abs(a.position.y - b.position.y) < LAYOUT_CONFIG.MIN_GAP
-                                )
-                        );
-                        // Also detect "same column" layout: all nodes within 100px x-range
-                        // (indicates positions were never properly set — needs horizontal spread)
-                        const xValues = nodeList.map(n => n.position.x);
-                        const xRange = Math.max(...xValues) - Math.min(...xValues);
-                        const allSameColumn = xRange < 100;
-                        if (!hasOverlap && !allSameColumn) return nodeList;
+                    // Fix overlapping node positions before rendering
+                    // Groups nodes by x-column and re-spaces only columns that overlap vertically
+                    const nodesReadyToRender = (() => {
+                        const ns = nodesWithPropagatedData;
+                        if (ns.length < 2) return ns;
 
-                        // Topological sort to assign horizontal levels
-                        const adj: Record<string, string[]> = {};
-                        const inDeg: Record<string, number> = {};
-                        nodeList.forEach(n => {
-                            adj[n.id] = [];
-                            inDeg[n.id] = 0;
+                        // Group nodes by approximate x column (within NODE_WIDTH tolerance)
+                        const groups: NodeData[][] = [];
+                        ns.forEach(n => {
+                            const col = groups.find(
+                                g => g.length > 0 && Math.abs(g[0].position.x - n.position.x) < PORT_LAYOUT.NODE_WIDTH
+                            );
+                            if (col) col.push(n);
+                            else groups.push([n]);
                         });
-                        loadedConnections.forEach(c => {
-                            if (adj[c.sourceNodeId] !== undefined && adj[c.targetNodeId] !== undefined) {
-                                adj[c.sourceNodeId].push(c.targetNodeId);
-                                inDeg[c.targetNodeId]++;
+
+                        // Identify which groups have vertical overlaps
+                        const overlappingGroups = new Set<NodeData[]>();
+                        for (const group of groups) {
+                            const sorted = [...group].sort((a, b) => a.position.y - b.position.y);
+                            for (let i = 0; i + 1 < sorted.length; i++) {
+                                const h = estimateNodeHeight(sorted[i], blockRegistry[sorted[i].type]);
+                                if (sorted[i].position.y + h > sorted[i + 1].position.y) {
+                                    overlappingGroups.add(group);
+                                    break;
+                                }
                             }
-                        });
-                        const lvls: Record<string, number> = {};
-                        const q = nodeList.filter(n => inDeg[n.id] === 0).map(n => n.id);
-                        q.forEach(id => {
-                            lvls[id] = 0;
-                        });
-                        const tmp = { ...inDeg };
-                        const bfsQ = [...q];
-                        while (bfsQ.length > 0) {
-                            const cur = bfsQ.shift();
-                            if (cur === undefined) break;
-                            (adj[cur] || []).forEach(next => {
-                                lvls[next] = Math.max(lvls[next] || 0, (lvls[cur] || 0) + 1);
-                                tmp[next]--;
-                                if (tmp[next] === 0) bfsQ.push(next);
-                            });
                         }
-                        const maxLvl = nodeList.reduce((m, n) => Math.max(m, lvls[n.id] || 0), 0);
-                        nodeList.forEach(n => {
-                            if (lvls[n.id] === undefined) lvls[n.id] = maxLvl + 1;
-                        });
 
-                        // Group and position
-                        const groups: Record<number, typeof nodeList> = {};
-                        nodeList.forEach(n => {
-                            const l = lvls[n.id] || 0;
-                            if (!groups[l]) groups[l] = [];
-                            groups[l].push(n);
-                        });
-                        const result = [...nodeList];
-                        Object.keys(groups)
-                            .map(Number)
-                            .sort((a, b) => a - b)
-                            .forEach(level => {
-                                let cy = LAYOUT_CONFIG.START_Y;
-                                groups[level].forEach(node => {
-                                    const x = LAYOUT_CONFIG.START_X + level * LAYOUT_CONFIG.LEVEL_WIDTH;
-                                    const idx = result.findIndex(n => n.id === node.id);
-                                    if (idx !== -1) result[idx] = { ...result[idx], position: { x, y: cy } };
-                                    cy +=
-                                        (estimateNodeHeight(node, blockRegistry[node.type]) ||
-                                            LAYOUT_CONFIG.DEFAULT_HEIGHT) + LAYOUT_CONFIG.MIN_GAP;
-                                });
+                        if (overlappingGroups.size === 0) return ns;
+
+                        // Re-space only the groups with actual overlaps, leave others unchanged
+                        const fixed = new Map<string, NodeData>(ns.map(n => [n.id, n]));
+                        overlappingGroups.forEach(group => {
+                            const sorted = [...group].sort((a, b) => a.position.y - b.position.y);
+                            // Start from the topmost node's actual y — avoid unnecessary repositioning
+                            // Keep each node's original x — prevents backward (right-to-left) connections
+                            let currentY = sorted[0].position.y;
+                            sorted.forEach(n => {
+                                fixed.set(n.id, { ...n, position: { x: n.position.x, y: currentY } });
+                                currentY += estimateNodeHeight(n, blockRegistry[n.type]) + LAYOUT_CONFIG.MIN_GAP;
                             });
-                        return result;
-                    };
+                        });
+                        return ns.map(n => fixed.get(n.id) ?? n);
+                    })();
 
-                    // Display nodes immediately.
-                    // Suppress onChange for this batch: loading server data should not
-                    // echo back as a local save (load→save→WS→load loop prevention).
-                    const finalNodes = fixOverlappingNodes(nodesWithPropagatedData);
+                    // Display nodes immediately — disable CSS transitions during positional fix
+                    // to prevent the 200ms desynced animation where connection lines appear
+                    // disconnected from still-moving node visuals (same pattern as autoLayout).
+                    // Also suppress onChange: loading server data must not echo back as a local
+                    // save (prevents load→save→WS→load loop).
+                    const positionsChanged = nodesReadyToRender !== nodesWithPropagatedData;
+                    if (positionsChanged) setIsLayouting(true);
                     suppressNextOnChangeRef.current = true;
-                    setNodes(finalNodes);
+                    setNodes(nodesReadyToRender);
                     setConnections(loadedConnections);
+                    if (positionsChanged) requestAnimationFrame(() => setIsLayouting(false));
                     pastRef.current = [];
                     futureRef.current = [];
                     handleSelectionChange(null);
@@ -2299,11 +2267,19 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
         const getPortPosition = (nodeId: string, portId: string, type: 'input' | 'output') => {
             const node = nodes.find(n => n.id === nodeId);
             if (!node) return { x: 0, y: 0 };
+            const nodeWidth = resizingNode?.nodeId === nodeId ? resizingNode.width : getNodeWidth(node);
             const def = blockRegistry[node.type];
-            if (!def) return { x: node.position.x, y: node.position.y };
+            if (!def) {
+                // Fallback: use the port edge positions so lines at least connect to the node border
+                const xOffset = type === 'input' ? PORT_LAYOUT.INPUT_X : nodeWidth - 1.5;
+                return { x: node.position.x + xOffset, y: node.position.y + PORT_LAYOUT.FIRST_PORT_Y };
+            }
 
             const allPorts = type === 'input' ? def.inputs : def.outputs;
-            if (allPorts.length === 0) return { x: node.position.x, y: node.position.y };
+            if (allPorts.length === 0) {
+                const xOffset = type === 'input' ? PORT_LAYOUT.INPUT_X : nodeWidth - 1.5;
+                return { x: node.position.x + xOffset, y: node.position.y + PORT_LAYOUT.FIRST_PORT_Y };
+            }
 
             // Calculate connected port IDs for this node
             const connectedPortIds = connections
@@ -2318,10 +2294,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
             const safeIndex = visibleIndex !== -1 ? visibleIndex : 0;
 
             const yOffset = PORT_LAYOUT.FIRST_PORT_Y + safeIndex * PORT_LAYOUT.PORT_SPACING;
-            // Use dynamic node width for output port position
-            // If node is being resized, use the resizing width for real-time edge updates
-            const nodeWidth = resizingNode?.nodeId === nodeId ? resizingNode.width : getNodeWidth(node);
-            const xOffset = type === 'input' ? PORT_LAYOUT.INPUT_X : nodeWidth;
+            const xOffset = type === 'input' ? PORT_LAYOUT.INPUT_X : nodeWidth - 1.5;
             return { x: node.position.x + xOffset, y: node.position.y + yOffset };
         };
 

@@ -68,8 +68,8 @@ export const useEdgeSync = ({ flowId }: UseEdgeSyncOptions): UseEdgeSyncReturn =
     // Use spec PUT through the compatibility upsert helper so partial edge
     // updates do not replace the entire canvas.
     const createMutation = useMutation({
-        mutationFn: ({ flowId, edge, nodes }: { flowId: string; edge: EdgeData; nodes?: NodeData[] }) =>
-            upsertFlow(flowId, { nodes: nodes ?? [], edges: [edge] }),
+        mutationFn: ({ flowId, edge, nodes }: { flowId: string; edge: Omit<EdgeData, 'id'>; nodes?: NodeData[] }) =>
+            upsertFlow(flowId, { nodes: nodes ?? [], edges: [edge as EdgeData] }),
     });
 
     // Track pending temp edge IDs waiting for server response
@@ -106,9 +106,8 @@ export const useEdgeSync = ({ flowId }: UseEdgeSyncOptions): UseEdgeSyncReturn =
             // Track pending temp ID
             pendingEdgeIdsRef.current.add(tempId);
 
-            // Prepare edge data for server (no id field, server will assign)
-            const edgeData: EdgeData & { id?: string } = {
-                id: tempId,
+            // Prepare edge data for server (no id — server will assign)
+            const edgeData: Omit<EdgeData, 'id'> = {
                 sourceNodeId: edge.sourceNodeId,
                 sourcePortId: edge.sourcePortId,
                 targetNodeId: edge.targetNodeId,
@@ -116,22 +115,23 @@ export const useEdgeSync = ({ flowId }: UseEdgeSyncOptions): UseEdgeSyncReturn =
             };
 
             createMutation.mutate(
-                { flowId, edge: edgeData, nodes },
+                { flowId, edge: edgeData as Omit<EdgeData, 'id'>, nodes },
                 {
                     onSuccess: result => {
                         const resultAny = result as Record<string, unknown>;
                         const allEdges = result.edges ?? (resultAny['edges$$'] as typeof result.edges) ?? [];
 
-                        const createdEdge =
-                            // NOTE - resultAny should be FlowView
-                            // (resultAny.id ? (result as unknown as EdgeData) : null) ??
-                            allEdges.find(
-                                e =>
-                                    e.sourceNodeId === edgeData.sourceNodeId &&
-                                    e.sourcePortId === edgeData.sourcePortId &&
-                                    e.targetNodeId === edgeData.targetNodeId &&
-                                    e.targetPortId === edgeData.targetPortId
-                            );
+                        // Backend returns createdEdgeId when a new edge was assigned an ID
+                        const createdEdge = result.createdEdgeId
+                            ? allEdges.find(e => e != null && e.id === result.createdEdgeId)
+                            : allEdges.find(
+                                  e =>
+                                      e != null &&
+                                      e.sourceNodeId === edgeData.sourceNodeId &&
+                                      e.sourcePortId === edgeData.sourcePortId &&
+                                      e.targetNodeId === edgeData.targetNodeId &&
+                                      e.targetPortId === edgeData.targetPortId
+                              );
 
                         console.debug('[useEdgeSync] API response:', { tempId, result, createdEdge, edgeData });
 

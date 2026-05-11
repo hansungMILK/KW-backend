@@ -516,6 +516,18 @@ export interface SaveFlowView extends FlowView {
     /** List of ports (preferred) */
     ports?: NodeView[];
 
+    /**
+     * Server-assigned ID for a newly created node (upsert with no id).
+     * Only present when the upsert request created a new node.
+     */
+    createdNodeId?: string;
+
+    /**
+     * Server-assigned ID for a newly created edge (upsert with no id).
+     * Only present when the upsert request created a new edge.
+     */
+    createdEdgeId?: string;
+
     /** @deprecated use `nodes` instead */
     nodes$$?: NodeView[];
     /** @deprecated use `edges` instead */
