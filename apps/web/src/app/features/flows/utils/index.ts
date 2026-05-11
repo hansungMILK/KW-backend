@@ -85,10 +85,14 @@ export const getConnectionKey = (conn: Connection): string =>
     `${conn.sourceNodeId}:${conn.sourcePortId}→${conn.targetNodeId}:${conn.targetPortId}`;
 
 export const deduplicateEdges = (edges: Connection[]): Connection[] => {
+    if (!Array.isArray(edges)) return [];
     const edgeMap = new Map<string, Connection>();
     const seenIds = new Set<string>();
 
     edges.forEach(edge => {
+        // Skip null/undefined edges (can occur with malformed server data)
+        if (!edge) return;
+
         // Skip if we've already seen this ID (prevents duplicate key errors in React)
         if (edge.id && seenIds.has(edge.id)) {
             return;

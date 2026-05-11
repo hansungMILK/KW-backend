@@ -523,7 +523,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     };
 
     const renderConfigInput = (node: NodeData, field: ConfigField, definition: BlockDefinition) => {
-        const value = node.config?.[field.key] ?? definition.defaultConfig[field.key];
+        const value = node.config?.[field.key] ?? definition.defaultConfig?.[field.key];
 
         const handleChange = (val: unknown) => onConfigChange(node.id, field.key, val);
 
@@ -657,7 +657,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
 
         const configSchema =
             def.configSchema ||
-            Object.entries(def.defaultConfig).map(([key, value]): ConfigField => {
+            Object.entries(def.defaultConfig ?? {}).map(([key, value]): ConfigField => {
                 let type: ConfigControlType = 'text';
                 if (typeof value === 'number') type = 'number';
                 if (typeof value === 'boolean') type = 'boolean';
@@ -927,7 +927,10 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                             ) : (
                                 def.outputs.map(output => {
                                     const outgoingConns = connections.filter(
-                                        c => c.sourceNodeId === selectedNode.id && c.sourcePortId === output.id
+                                        c =>
+                                            c != null &&
+                                            c.sourceNodeId === selectedNode.id &&
+                                            c.sourcePortId === output.id
                                     );
                                     const portId = `${selectedNode.id}:${output.id}`;
 

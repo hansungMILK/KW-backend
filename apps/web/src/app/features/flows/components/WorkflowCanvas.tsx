@@ -95,12 +95,12 @@ const TOUCH_PORT_HIT_THRESHOLD = 50;
 const TOUCH_PORT_LAYOUT = {
     /** Input port X offset from node left edge */
     INPUT_X_OFFSET: -6,
-    /** First port Y offset from node top */
+    /** First port Y offset from node top (top-[45px] container) */
     FIRST_PORT_Y: 45,
-    /** Vertical spacing between ports */
-    PORT_SPACING: 16,
-    /** Port center offset */
-    PORT_CENTER_OFFSET: 6,
+    /** Vertical spacing between ports: h-6(24px) + gap-1(4px) = 28 */
+    PORT_SPACING: 28,
+    /** Port center offset within h-6 wrapper: 24px/2 = 12 */
+    PORT_CENTER_OFFSET: 12,
 } as const;
 
 /**
@@ -232,6 +232,8 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
         const [connections, setConnections] = useState<Connection[]>([]);
         const [clipboard, setClipboard] = useState<NodeData[]>([]);
         const [resizingNode, setResizingNode] = useState<{ nodeId: string; width: number } | null>(null);
+        // Disables CSS transitions during auto-layout so nodes jump instantly (no desynced animation)
+        const [isLayouting, setIsLayouting] = useState(false);
 
         const pastRef = useRef<WorkflowState[]>([]);
         const futureRef = useRef<WorkflowState[]>([]);
@@ -361,7 +363,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     config: n.config ?? {},
                 }));
                 setNodes(loadedNodes);
-                setConnections(deduplicateEdges(initialData.connections ?? []));
+                setConnections(deduplicateEdges(initialData.edges ?? []));
                 pastRef.current = [];
                 futureRef.current = [];
             }
@@ -479,14 +481,28 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     let startY = 0;
 
                     if (sourceNode) {
-                        startX = sourceNode.position.x + 300;
+                        startX = sourceNode.position.x + LAYOUT_CONFIG.LEVEL_WIDTH;
                         startY = sourceNode.position.y;
+                    } else if (nodes.length > 0) {
+                        // No type-compatible connection — place to the right of the rightmost node
+                        const rightmost = nodes.reduce((a, b) => (a.position.x > b.position.x ? a : b));
+                        startX = rightmost.position.x + LAYOUT_CONFIG.LEVEL_WIDTH;
+                        startY = rightmost.position.y;
                     } else {
                         const rect = canvasRef.current?.getBoundingClientRect();
                         const centerX = rect ? (rect.width / 2 - viewport.x) / viewport.zoom : 100;
                         const centerY = rect ? (rect.height / 2 - viewport.y) / viewport.zoom : 100;
-                        startX = centerX - 100 + (Math.random() * 40 - 20);
-                        startY = centerY - 50 + (Math.random() * 40 - 20);
+                        startX = centerX - 130;
+                        startY = centerY - 90;
+                    }
+
+                    // Avoid placing on top of an existing node in the same column
+                    const COLUMN_TOLERANCE = PORT_LAYOUT.NODE_WIDTH;
+                    const nodesInColumn = nodes.filter(n => Math.abs(n.position.x - startX) < COLUMN_TOLERANCE);
+                    if (nodesInColumn.length > 0) {
+                        const bottommost = nodesInColumn.reduce((a, b) => (a.position.y > b.position.y ? a : b));
+                        const bottommostHeight = estimateNodeHeight(bottommost, blockRegistry[bottommost.type]);
+                        startY = bottommost.position.y + bottommostHeight + LAYOUT_CONFIG.MIN_GAP;
                     }
 
                     const snappedX = Math.round(startX / GRID_SIZE) * GRID_SIZE;
@@ -499,7 +515,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                         id: tempNodeId,
                         type,
                         position: { x: snappedX, y: snappedY },
-                        config: { ...blockRegistry[type].defaultConfig },
+                        config: { ...(blockRegistry[type]?.defaultConfig ?? {}) },
                         state: 'IDLE' as NodeState,
                         status: 'IDLE', // Deprecated: kept for backward compatibility
                         inputData: {},
@@ -620,7 +636,9 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                                     (oldEdgeTempId, newEdgeServerId) => {
                                         // Replace temp edge ID with server ID
                                         setConnections(prev =>
-                                            prev.map(c => (c.id === oldEdgeTempId ? { ...c, id: newEdgeServerId } : c))
+                                            prev.map(c =>
+                                                c != null && c.id === oldEdgeTempId ? { ...c, id: newEdgeServerId } : c
+                                            )
                                         );
                                     },
                                     [nodeForServer]
@@ -634,14 +652,29 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                 },
                 getWorkflow: () => ({
                     nodes,
-                    edges: connections.filter(c => !pendingEdgeIds.has(c.id)),
+                    edges: connections.filter(c => c != null && !pendingEdgeIds.has(c.id)),
                 }),
                 loadWorkflow: async (state: WorkflowStateWithPorts) => {
-                    // Normalize nodes to ensure config is never undefined
-                    const loadedNodes = (state.nodes ?? []).map(n => ({
-                        ...n,
-                        config: n.config ?? {},
-                    }));
+                    // Normalize nodes: ensure config is defined, map blockId→type, generate id if missing
+                    const loadedNodes = (state.nodes ?? [])
+                        .filter(n => n != null)
+                        .map((n, idx) => {
+                            const anyN = n as Record<string, unknown>;
+                            // Assign staggered fallback position if server didn't send one
+                            const fallbackPosition = {
+                                x: LAYOUT_CONFIG.START_X + (idx % 4) * LAYOUT_CONFIG.LEVEL_WIDTH,
+                                y: LAYOUT_CONFIG.START_Y + Math.floor(idx / 4) * 300,
+                            };
+                            const pos = n.position;
+                            const hasValidPosition = pos && (pos.x !== 0 || pos.y !== 0);
+                            return {
+                                ...n,
+                                id: (n.id ?? anyN['blockId'] ?? generateTempId('node')) as string,
+                                type: (n.type ?? anyN['blockId'] ?? '') as string,
+                                config: n.config ?? {},
+                                position: hasValidPosition ? pos : fallbackPosition,
+                            };
+                        });
 
                     const rawConnections = state.edges ?? state.connections ?? [];
                     const loadedConnections = deduplicateEdges(rawConnections);
@@ -682,7 +715,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                         conns: typeof loadedConnections
                     ): typeof loadedNodes => {
                         return baseNodes.map(node => {
-                            const incomingConnections = conns.filter(c => c.targetNodeId === node.id);
+                            const incomingConnections = conns.filter(c => c != null && c.targetNodeId === node.id);
                             if (incomingConnections.length === 0) return node;
 
                             const propagatedInputData = { ...node.inputData };
@@ -709,8 +742,54 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     const nodesWithExistingPortData = applyPortDataToNodes(loadedNodes, portsWithData);
                     const nodesWithPropagatedData = propagateData(nodesWithExistingPortData, loadedConnections);
 
+                    // Fix overlapping node positions before rendering
+                    // Groups nodes by x-column and re-spaces any that overlap vertically
+                    const nodesReadyToRender = (() => {
+                        const ns = nodesWithPropagatedData;
+                        if (ns.length < 2) return ns;
+
+                        // Group nodes by approximate x column (within NODE_WIDTH tolerance)
+                        const groups: NodeData[][] = [];
+                        ns.forEach(n => {
+                            const col = groups.find(
+                                g => g.length > 0 && Math.abs(g[0].position.x - n.position.x) < PORT_LAYOUT.NODE_WIDTH
+                            );
+                            if (col) col.push(n);
+                            else groups.push([n]);
+                        });
+
+                        // Check for any vertical overlap within a column
+                        let hasOverlap = false;
+                        for (const group of groups) {
+                            const sorted = [...group].sort((a, b) => a.position.y - b.position.y);
+                            for (let i = 0; i + 1 < sorted.length; i++) {
+                                const h = estimateNodeHeight(sorted[i], blockRegistry[sorted[i].type]);
+                                if (sorted[i].position.y + h > sorted[i + 1].position.y) {
+                                    hasOverlap = true;
+                                    break;
+                                }
+                            }
+                            if (hasOverlap) break;
+                        }
+
+                        if (!hasOverlap) return ns;
+
+                        // Re-space overlapping nodes within each column
+                        const fixed = new Map<string, NodeData>(ns.map(n => [n.id, n]));
+                        groups.forEach(group => {
+                            const sorted = [...group].sort((a, b) => a.position.y - b.position.y);
+                            const colX = sorted[0].position.x;
+                            let currentY = LAYOUT_CONFIG.START_Y;
+                            sorted.forEach(n => {
+                                fixed.set(n.id, { ...n, position: { x: colX, y: currentY } });
+                                currentY += estimateNodeHeight(n, blockRegistry[n.type]) + LAYOUT_CONFIG.MIN_GAP;
+                            });
+                        });
+                        return ns.map(n => fixed.get(n.id) ?? n);
+                    })();
+
                     // Display nodes immediately
-                    setNodes(nodesWithPropagatedData);
+                    setNodes(nodesReadyToRender);
                     setConnections(loadedConnections);
                     pastRef.current = [];
                     futureRef.current = [];
@@ -796,6 +875,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     });
 
                     connections.forEach(c => {
+                        if (!c) return;
                         if (adj[c.sourceNodeId] && adj[c.targetNodeId] !== undefined) {
                             adj[c.sourceNodeId].push(c.targetNodeId);
                             incomingEdges[c.targetNodeId].push(c.sourceNodeId);
@@ -885,8 +965,13 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                         });
                     });
 
+                    // Disable CSS transitions so nodes jump instantly to new positions
+                    // (avoids the 200ms desynced animation where connection lines
+                    //  appear disconnected from still-moving node visuals)
+                    setIsLayouting(true);
                     setNodes(positionedNodes);
                     setViewport({ x: 20, y: 20, zoom: 1 });
+                    requestAnimationFrame(() => setIsLayouting(false));
                 },
                 executeNode: async (nodeId: string) => {
                     if (executeNodeRef.current) {
@@ -1007,6 +1092,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                 createNodeAsync,
                 createEdgeAsync,
                 pendingEdgeIds,
+                setIsLayouting,
             ]
         );
 
@@ -1057,7 +1143,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
 
                 // Check for missing required inputs before execution
                 // Missing if: no data AND (has incoming connection OR explicitly required)
-                const incomingConnections = connectionsRef.current.filter(c => c.targetNodeId === nodeId);
+                const incomingConnections = connectionsRef.current.filter(c => c != null && c.targetNodeId === nodeId);
                 const missingInputs = nodeDef.inputs.filter(inputPort => {
                     if (inputs[inputPort.id]) return false; // Has data - not missing
                     const hasConnection = incomingConnections.some(c => c.targetPortId === inputPort.id);
@@ -1135,7 +1221,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                             return nodesWithOutput.map(n => {
                                 // Find connections where this node receives data from the executed node
                                 const incomingFromExecuted = connections.filter(
-                                    c => c.targetNodeId === n.id && c.sourceNodeId === nodeId
+                                    c => c != null && c.targetNodeId === n.id && c.sourceNodeId === nodeId
                                 );
                                 if (incomingFromExecuted.length === 0) return n;
 
@@ -1343,11 +1429,11 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
 
                 // Get connected edges before removing from state
                 const connectedEdges = connectionsRef.current.filter(
-                    c => c.sourceNodeId === id || c.targetNodeId === id
+                    c => c != null && (c.sourceNodeId === id || c.targetNodeId === id)
                 );
 
                 setNodes(prev => prev.filter(n => n.id !== id));
-                setConnections(prev => prev.filter(c => c.sourceNodeId !== id && c.targetNodeId !== id));
+                setConnections(prev => prev.filter(c => c != null && c.sourceNodeId !== id && c.targetNodeId !== id));
                 handleSelectionChange(null);
 
                 if (flowId && !isTempId(id)) {
@@ -1368,7 +1454,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                 if (readOnly) return;
                 saveCheckpoint();
 
-                setConnections(prev => prev.filter(c => c.id !== id));
+                setConnections(prev => prev.filter(c => c != null && c.id !== id));
                 setSelectedConnectionId(null);
 
                 if (flowId && !isTempId(id)) {
@@ -1893,7 +1979,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     // Optimistic UI update
                     setConnections(prev => {
                         const filtered = prev.filter(
-                            c => !(c.targetNodeId === targetNodeId && c.targetPortId === targetPortId)
+                            c => c != null && !(c.targetNodeId === targetNodeId && c.targetPortId === targetPortId)
                         );
                         return [...filtered, newConn];
                     });
@@ -1922,7 +2008,9 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
 
                     // Create edge callback to replace temp ID with server ID
                     const onEdgeIdAssigned = (oldTempId: string, newServerId: string) => {
-                        setConnections(prev => prev.map(c => (c.id === oldTempId ? { ...c, id: newServerId } : c)));
+                        setConnections(prev =>
+                            prev.map(c => (c != null && c.id === oldTempId ? { ...c, id: newServerId } : c))
+                        );
                     };
 
                     if (!sourceIsTempId && !targetIsTempId) {
@@ -1983,7 +2071,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
 
             // Calculate connected port IDs for this node
             const connectedPortIds = connections
-                .filter(c => (type === 'input' ? c.targetNodeId : c.sourceNodeId) === nodeId)
+                .filter(c => c != null && (type === 'input' ? c.targetNodeId : c.sourceNodeId) === nodeId)
                 .map(c => (type === 'input' ? c.targetPortId : c.sourcePortId));
 
             // Use shared utility for consistent visibility calculation
@@ -1997,7 +2085,8 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
             // Use dynamic node width for output port position
             // If node is being resized, use the resizing width for real-time edge updates
             const nodeWidth = resizingNode?.nodeId === nodeId ? resizingNode.width : getNodeWidth(node);
-            const xOffset = type === 'input' ? PORT_LAYOUT.INPUT_X : nodeWidth + 3;
+            // Output port center: border(1.5) inside from nodeWidth right edge
+            const xOffset = type === 'input' ? PORT_LAYOUT.INPUT_X : nodeWidth - 1.5;
             return { x: node.position.x + xOffset, y: node.position.y + yOffset };
         };
 
@@ -2080,13 +2169,18 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
 
                         // Get connected edges before removing from state
                         const connectedEdges = connectionsRef.current.filter(
-                            c => selectedNodeIds.has(c.sourceNodeId) || selectedNodeIds.has(c.targetNodeId)
+                            c =>
+                                c != null &&
+                                (selectedNodeIds.has(c.sourceNodeId) || selectedNodeIds.has(c.targetNodeId))
                         );
 
                         setNodes(prev => prev.filter(n => !selectedNodeIds.has(n.id)));
                         setConnections(prev =>
                             prev.filter(
-                                c => !selectedNodeIds.has(c.sourceNodeId) && !selectedNodeIds.has(c.targetNodeId)
+                                c =>
+                                    c != null &&
+                                    !selectedNodeIds.has(c.sourceNodeId) &&
+                                    !selectedNodeIds.has(c.targetNodeId)
                             )
                         );
                         handleSelectionChange(null);
@@ -2111,7 +2205,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     } else if (selectedConnectionId || hoveredConnectionId) {
                         const targetId = selectedConnectionId || hoveredConnectionId;
                         saveCheckpoint();
-                        setConnections(prev => prev.filter(c => c.id !== targetId));
+                        setConnections(prev => prev.filter(c => c != null && c.id !== targetId));
                         setSelectedConnectionId(null);
                         setHoveredConnectionId(null);
                         setTooltip(null);
@@ -2149,10 +2243,12 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
         ]);
 
         const activeConnectionId = selectedConnectionId || hoveredConnectionId;
-        const activeConnection = activeConnectionId ? connections.find(c => c.id === activeConnectionId) : null;
+        const activeConnection = activeConnectionId
+            ? connections.find(c => c != null && c.id === activeConnectionId)
+            : null;
         const detailNode = selectedNodeId ? nodes.find(n => n.id === selectedNodeId) || null : null;
         const detailConnection = selectedConnectionId
-            ? connections.find(c => c.id === selectedConnectionId) || null
+            ? connections.find(c => c != null && c.id === selectedConnectionId) || null
             : null;
 
         return (
@@ -2242,10 +2338,15 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     >
                         <svg className="absolute overflow-visible top-0 left-0 w-full h-full">
                             {connections.map(conn => {
-                                const start = getPortPosition(conn.sourceNodeId, conn.sourcePortId, 'output');
-                                const end = getPortPosition(conn.targetNodeId, conn.targetPortId, 'input');
+                                if (!conn) return null;
+                                // Skip self-loops (corrupted data: source === target)
+                                if (conn.sourceNodeId === conn.targetNodeId) return null;
                                 const sourceNode = nodes.find(n => n.id === conn.sourceNodeId);
                                 const targetNode = nodes.find(n => n.id === conn.targetNodeId);
+                                // Skip orphaned connections (referenced node no longer in canvas)
+                                if (!sourceNode || !targetNode) return null;
+                                const start = getPortPosition(conn.sourceNodeId, conn.sourcePortId, 'output');
+                                const end = getPortPosition(conn.targetNodeId, conn.targetPortId, 'input');
                                 const packet = sourceNode?.outputData?.[conn.sourcePortId];
                                 const isActive = !!packet;
                                 // Use getEffectiveState for backward compatibility (state preferred, status fallback)
@@ -2332,7 +2433,9 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
 
                                 // Calculate connected ports for this node
                                 const connectedPorts = connections
-                                    .filter(c => c.sourceNodeId === node.id || c.targetNodeId === node.id)
+                                    .filter(
+                                        c => c != null && (c.sourceNodeId === node.id || c.targetNodeId === node.id)
+                                    )
                                     .map(c => (c.sourceNodeId === node.id ? c.sourcePortId : c.targetPortId));
 
                                 return (
@@ -2375,7 +2478,9 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                                             }}
                                             onMouseDown={e => handleNodeMouseDown(e, node.id)}
                                             onTouchStart={e => handleNodeTouchStart(e, node.id)}
-                                            isDragging={dragState?.initialPositions.has(node.id) ?? false}
+                                            isDragging={
+                                                (dragState?.initialPositions.has(node.id) ?? false) || isLayouting
+                                            }
                                         />
                                     </div>
                                 );
@@ -2395,23 +2500,6 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                             onReset={handleResetView}
                             className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 hidden sm:flex"
                         />
-                    )}
-
-                    {/* Connection type legend */}
-                    {!readOnly && (
-                        <div className="absolute bottom-4 left-4 z-20 hidden sm:flex flex-col gap-1 bg-background/80 backdrop-blur-sm border border-border/50 rounded-lg px-3 py-2 pointer-events-none">
-                            {[
-                                { label: '텍스트', color: 'bg-port-text' },
-                                { label: '이미지', color: 'bg-port-image' },
-                                { label: '음성', color: 'bg-port-json' },
-                                { label: '영상', color: 'bg-destructive' },
-                            ].map(({ label, color }) => (
-                                <div key={label} className="flex items-center gap-1.5">
-                                    <span className={`w-2 h-2 rounded-full ${color}`} />
-                                    <span className="text-[10px] text-muted-foreground">{label}</span>
-                                </div>
-                            ))}
-                        </div>
                     )}
 
                     {/* Mobile Zoom Controls - visible only on mobile */}

@@ -85,7 +85,10 @@ export const Sidebar = forwardRef<SidebarRef, SidebarProps>(({ onAddNode, isLoad
             process: [],
             outputs: [],
         };
+        const seen = new Set<string>();
         Object.values(blockRegistry).forEach(block => {
+            if (seen.has(block.type)) return;
+            seen.add(block.type);
             const category = block.stereo ? (STEREO_TO_CATEGORY[block.stereo] ?? 'process') : 'process';
             result[category].push(block);
         });
@@ -141,9 +144,7 @@ export const Sidebar = forwardRef<SidebarRef, SidebarProps>(({ onAddNode, isLoad
                         {/* Block list */}
                         <div className="overflow-y-auto px-4 pb-2 flex-1">
                             {!hasBlocks && (
-                                <p className="text-xs text-muted-foreground text-center py-6">
-                                    블록을 불러오는 중...
-                                </p>
+                                <p className="text-xs text-muted-foreground text-center py-6">블록을 불러오는 중...</p>
                             )}
                             {CATEGORIES.map((category, idx) => {
                                 const blocks = grouped[category];

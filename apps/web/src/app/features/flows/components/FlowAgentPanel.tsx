@@ -63,11 +63,16 @@ export const FlowAgentPanel = ({ open, onClose, flowId, onApprove, onCreateBlock
                 throw new Error('flowId is required to send a message');
             }
 
-            const result = await sendMessageApi(flowId, { message: text });
+            const result = await sendMessageApi(flowId, { content: text });
 
             setMessages(prev => {
                 const withoutThinking = prev.filter(m => !m.thinking);
                 const msgs: Message[] = [...withoutThinking];
+
+                if (!result) {
+                    msgs.push({ id: crypto.randomUUID(), role: 'agent', text: '응답을 받지 못했습니다.' });
+                    return msgs;
+                }
 
                 if (result.message) {
                     msgs.push({ id: crypto.randomUUID(), role: 'agent', text: result.message });

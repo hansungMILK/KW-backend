@@ -78,7 +78,7 @@ export const claudeOrchestrator: Orchestrator = {
                 blockId: `blk-${block.type}`,
                 name: block.label,
                 blockType: block.type,
-                position: { x: 300, y: 100 + i * 120 },
+                position: { x: 300, y: 100 + i * 220 },
                 state: 'IDLE',
                 config: block.config,
             }));

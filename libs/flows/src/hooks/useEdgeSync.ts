@@ -126,6 +126,7 @@ export const useEdgeSync = ({ flowId }: UseEdgeSyncOptions): UseEdgeSyncReturn =
                             // (resultAny.id ? (result as unknown as EdgeData) : null) ??
                             allEdges.find(
                                 e =>
+                                    e != null &&
                                     e.sourceNodeId === edgeData.sourceNodeId &&
                                     e.sourcePortId === edgeData.sourcePortId &&
                                     e.targetNodeId === edgeData.targetNodeId &&

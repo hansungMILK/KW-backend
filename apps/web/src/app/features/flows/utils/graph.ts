@@ -37,6 +37,7 @@ export const wouldCreateCycle = (
     // Build adjacency list (source → [targets])
     const adjacencyList = new Map<string, string[]>();
     for (const conn of connections) {
+        if (!conn) continue;
         const neighbors = adjacencyList.get(conn.sourceNodeId);
         if (neighbors) {
             neighbors.push(conn.targetNodeId);

@@ -41,11 +41,11 @@ export const ConnectionLine: React.FC<ConnectionLineProps> = ({
         if (isDraft) return 'stroke-primary/70';
         if (isFlowing) return 'stroke-primary';
         if (isHovered || isSelected) return 'stroke-primary';
-        if (isActive) return 'stroke-muted-foreground/70';
-        return 'stroke-muted-foreground/50';
+        if (isActive) return 'stroke-muted-foreground/80';
+        return 'stroke-muted-foreground/60';
     };
 
-    const strokeWidth = isFlowing ? 2 : isHovered || isSelected ? 2.5 : isDraft ? 2 : 1.5;
+    const strokeWidth = isFlowing ? 2 : isHovered || isSelected ? 2.5 : isDraft ? 2 : 2;
 
     // Flow animation styles
     const flowAnimationStyle: React.CSSProperties = isFlowing

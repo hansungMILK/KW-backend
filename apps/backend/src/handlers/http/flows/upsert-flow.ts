@@ -24,9 +24,31 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
     const parsed = FlowSaveRequestSchema.safeParse(body);
     if (!parsed.success) return badRequest(`Invalid body: ${parsed.error.message}`);
 
-    // Merge: upsert replaces nodes/edges that match by id, adds new ones
-    // For simplicity in P0, treat as full replacement (same as save)
-    const flow = await flowRepo.save(id, parsed.data.nodes, parsed.data.edges);
+    // True merge: update matched nodes/edges by id, add new ones, keep unmentioned ones
+    const existingNodes = (existing.nodes as Array<Record<string, unknown>>) ?? [];
+    const existingEdges = (existing.edges as Array<Record<string, unknown>>) ?? [];
+
+    const mergedNodes = [...existingNodes];
+    for (const incoming of parsed.data.nodes as Array<Record<string, unknown>>) {
+        const idx = mergedNodes.findIndex(n => n.id === incoming.id);
+        if (idx !== -1) {
+            mergedNodes[idx] = { ...mergedNodes[idx], ...incoming };
+        } else {
+            mergedNodes.push(incoming);
+        }
+    }
+
+    const mergedEdges = [...existingEdges];
+    for (const incoming of parsed.data.edges as Array<Record<string, unknown>>) {
+        const idx = mergedEdges.findIndex(e => e.id === incoming.id);
+        if (idx !== -1) {
+            mergedEdges[idx] = { ...mergedEdges[idx], ...incoming };
+        } else {
+            mergedEdges.push(incoming);
+        }
+    }
+
+    const flow = await flowRepo.save(id, mergedNodes, mergedEdges);
 
     return ok({
         id: flow.id,

@@ -13,7 +13,10 @@ import type {
     NodeUpdateMessage,
     PortUpdateMessage,
     ProposalCreatedMessage,
+    RunCompletedMessage,
     RunEventMessage,
+    RunFailedMessage,
+    RunStartedMessage,
     WebSocketMessage,
 } from '../types';
 
@@ -35,8 +38,13 @@ const parseWebSocketMessage = (data: unknown): WebSocketMessage | null => {
             ? (msg['data'] as Record<string, unknown>)
             : msg;
 
-    // Check for id field (node ID) or nodeId field
-    const messageId = (payload['id'] as string) || (payload['nodeId'] as string);
+    // Check for various ID fields across event types
+    const messageId =
+        (payload['id'] as string) ||
+        (payload['nodeId'] as string) ||
+        (payload['runId'] as string) ||
+        (payload['assetId'] as string) ||
+        (payload['proposalId'] as string);
 
     if (messageId) {
         return {
@@ -76,14 +84,34 @@ export const isPortUpdateMessage = (data: unknown): data is PortUpdateMessage =>
 export const isProposalCreatedMessage = (data: unknown): data is ProposalCreatedMessage => {
     if (typeof data !== 'object' || data === null) return false;
     const msg = data as Record<string, unknown>;
-    return msg['type'] === 'proposal.created' && typeof msg['id'] === 'string';
+    return msg['type'] === 'proposal.created' && typeof msg['proposalId'] === 'string';
 };
 
 export const isRunEventMessage = (data: unknown): data is RunEventMessage => {
     if (typeof data !== 'object' || data === null) return false;
     const msg = data as Record<string, unknown>;
     const type = msg['type'];
-    return (type === 'run.started' || type === 'run.completed' || type === 'run.failed') && typeof msg['id'] === 'string';
+    return (
+        (type === 'run.started' || type === 'run.completed' || type === 'run.failed') &&
+        typeof msg['runId'] === 'string'
+    );
+};
+
+// Spec-named aliases (명세서 기준 타입가드 이름)
+export const isRunStartedMessage = (data: unknown): data is RunStartedMessage => {
+    if (typeof data !== 'object' || data === null) return false;
+    const msg = data as Record<string, unknown>;
+    return msg['type'] === 'run.started' && typeof msg['runId'] === 'string';
+};
+export const isRunCompletedMessage = (data: unknown): data is RunCompletedMessage => {
+    if (typeof data !== 'object' || data === null) return false;
+    const msg = data as Record<string, unknown>;
+    return msg['type'] === 'run.completed' && typeof msg['runId'] === 'string';
+};
+export const isRunFailedMessage = (data: unknown): data is RunFailedMessage => {
+    if (typeof data !== 'object' || data === null) return false;
+    const msg = data as Record<string, unknown>;
+    return msg['type'] === 'run.failed' && typeof msg['runId'] === 'string';
 };
 
 export const isNodeEventMessage = (data: unknown): data is NodeEventMessage => {
@@ -92,14 +120,16 @@ export const isNodeEventMessage = (data: unknown): data is NodeEventMessage => {
     const type = msg['type'];
     return (
         (type === 'node.started' || type === 'node.progress' || type === 'node.completed' || type === 'node.failed') &&
-        typeof msg['id'] === 'string'
+        typeof msg['nodeId'] === 'string'
     );
 };
+// Spec-named alias (명세서 기준: isNodeExecutionMessage)
+export const isNodeExecutionMessage = isNodeEventMessage;
 
 export const isAssetCreatedMessage = (data: unknown): data is AssetCreatedMessage => {
     if (typeof data !== 'object' || data === null) return false;
     const msg = data as Record<string, unknown>;
-    return msg['type'] === 'asset.created' && typeof msg['id'] === 'string';
+    return msg['type'] === 'asset.created' && typeof msg['assetId'] === 'string';
 };
 
 /**
@@ -379,29 +409,30 @@ export const useInitFlowSocket = (options: UseInitFlowSocketOptions = {}) => {
 
             // Handle orchestrator events (proposal.created, run.*, node.*, asset.created)
             if (isProposalCreatedMessage(data)) {
-                if (!data.flowId || data.flowId === currentFlowId) {
-                    onProposalCreated?.(data.id, data.flowId);
+                if (data.flowId === currentFlowId) {
+                    onProposalCreated?.(data.proposalId, data.flowId);
                 }
                 return;
             }
 
             if (isRunEventMessage(data)) {
                 if (!data.flowId || data.flowId === currentFlowId) {
-                    onRunUpdate?.(data.type, data.id, data.flowId, data.error);
+                    const error = data.type === 'run.failed' ? data.errorMessage : undefined;
+                    onRunUpdate?.(data.type, data.runId, data.flowId, error);
                 }
                 return;
             }
 
             if (isNodeEventMessage(data)) {
                 if (!data.flowId || data.flowId === currentFlowId) {
-                    onNodeEvent?.(data.type, data.id, data.progress, data.flowId);
+                    onNodeEvent?.(data.type, data.nodeId, data.progress, data.flowId);
                 }
                 return;
             }
 
             if (isAssetCreatedMessage(data)) {
                 if (!data.flowId || data.flowId === currentFlowId) {
-                    onAssetCreated?.(data.id, data.assetType, data.url, data.flowId);
+                    onAssetCreated?.(data.assetId, data.assetType, data.url ?? data.publicUrl, data.flowId);
                 }
                 return;
             }

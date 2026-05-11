@@ -4,7 +4,6 @@ import { HelmetProvider } from 'react-helmet-async';
 import { I18nextProvider } from 'react-i18next';
 
 import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { Toaster } from 'sonner';
 
 import { flowStorage } from '@flows/flows';
@@ -141,7 +140,6 @@ export const Providers = ({ children }: ProvidersProps) => {
                                 </ApiKeyGate>
                                 <Toaster />
                             </ThemeProvider>
-                            {import.meta.env.DEV && <ReactQueryDevtools />}
                         </QueryClientProvider>
                     </HelmetProvider>
                 </I18nextProvider>

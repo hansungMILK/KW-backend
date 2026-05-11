@@ -122,23 +122,62 @@ export interface PortUpdateMessage {
  */
 export interface ProposalCreatedMessage {
     type: 'proposal.created';
-    id: string;
-    flowId?: string;
-    timestamp?: number;
+    id?: string;
+    /** Actual proposal ID — use this to call POST /proposals/:id/approve */
+    proposalId: string;
+    flowId: string;
+    status: 'PENDING';
     blocks?: Array<{ type: string; label: string }>;
-    estimatedCost?: string;
+    estimatedCost?: number;
+    estimatedCostUsd?: number;
+    maxRunEstimatedCostUsd?: number;
+    description?: string;
+    approvalRequired: boolean;
+    timestamp: number;
 }
 
 /**
- * Run lifecycle event notification from WebSocket
+ * Run started event from WebSocket
  */
-export interface RunEventMessage {
-    type: 'run.started' | 'run.completed' | 'run.failed';
-    id: string;
-    flowId?: string;
-    timestamp?: number;
-    error?: string;
+export interface RunStartedMessage {
+    type: 'run.started';
+    id?: string;
+    runId: string;
+    flowId: string;
+    status: 'RUNNING';
+    timestamp: number;
 }
+
+/**
+ * Run completed event from WebSocket
+ */
+export interface RunCompletedMessage {
+    type: 'run.completed';
+    id?: string;
+    runId: string;
+    flowId: string;
+    status: 'COMPLETED';
+    timestamp: number;
+}
+
+/**
+ * Run failed event from WebSocket
+ */
+export interface RunFailedMessage {
+    type: 'run.failed';
+    id?: string;
+    runId: string;
+    flowId: string;
+    status: 'FAILED';
+    failedNodeId?: string;
+    errorCode?: string;
+    errorMessage?: string;
+    error?: string;
+    timestamp: number;
+}
+
+/** Union of all run lifecycle events */
+export type RunEventMessage = RunStartedMessage | RunCompletedMessage | RunFailedMessage;
 
 /**
  * Node lifecycle event from orchestrator run (distinct from NodeUpdateMessage)
@@ -146,11 +185,19 @@ export interface RunEventMessage {
  */
 export interface NodeEventMessage {
     type: 'node.started' | 'node.progress' | 'node.completed' | 'node.failed';
-    id: string;
+    id?: string;
+    /** Run ID that triggered this node */
+    runId: string;
     flowId?: string;
-    timestamp?: number;
+    /** Node ID being executed */
+    nodeId: string;
+    status?: 'RUNNING' | 'COMPLETED' | 'FAILED' | string;
+    /** Progress percentage 0-100 (for node.progress) */
     progress?: number;
-    error?: string;
+    message?: string;
+    errorCode?: string;
+    errorMessage?: string;
+    timestamp: number;
 }
 
 /**
@@ -159,11 +206,17 @@ export interface NodeEventMessage {
  */
 export interface AssetCreatedMessage {
     type: 'asset.created';
-    id: string;
+    id?: string;
+    runId: string;
     flowId?: string;
-    timestamp?: number;
-    assetType?: 'image' | 'audio' | 'video' | string;
+    nodeId: string;
+    /** Asset ID — use to call GET /assets/:id */
+    assetId: string;
+    assetType: 'IMAGE' | 'AUDIO' | 'VIDEO' | 'JSON' | 'TEXT' | string;
+    /** S3/CloudFront URL (may be same as publicUrl) */
     url?: string;
+    publicUrl?: string;
+    timestamp: number;
 }
 
 /**

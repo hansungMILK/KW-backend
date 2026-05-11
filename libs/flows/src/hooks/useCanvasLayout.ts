@@ -9,12 +9,12 @@ import type { BlockDefinition, NodeData } from '@lemoncloud/eureka-flows-api';
 
 /** Layout configuration for auto-layout algorithm */
 export const LAYOUT_CONFIG = {
-    /** Horizontal spacing between levels (columns) */
-    LEVEL_WIDTH: 300,
+    /** Horizontal spacing between levels (columns) — must exceed NODE_WIDTH (260) + connection gap */
+    LEVEL_WIDTH: 400,
     /** Minimum vertical gap between nodes */
-    MIN_GAP: 30,
+    MIN_GAP: 40,
     /** Default node height when definition is unavailable */
-    DEFAULT_HEIGHT: 180,
+    DEFAULT_HEIGHT: 200,
     /** Initial X position */
     START_X: 50,
     /** Initial Y position */
@@ -25,14 +25,14 @@ export const LAYOUT_CONFIG = {
 export const PORT_LAYOUT = {
     /** Node header height */
     HEADER_HEIGHT: 45,
-    /** First port Y offset from node top (header + centering) */
-    FIRST_PORT_Y: 58,
-    /** Vertical spacing between ports (port height 24px + gap 4px) */
+    /** First port Y offset from node top: border(1.5) + top-[45px] container + h-6(24px)/2 = 1.5+45+12 = 58.5 */
+    FIRST_PORT_Y: 58.5,
+    /** Vertical spacing between ports: h-6(24px) + gap-1(4px) = 28 */
     PORT_SPACING: 28,
-    /** Input port X offset from node left edge */
-    INPUT_X: -3,
-    /** Output port X offset from node left edge (node width 260px + offset) */
-    OUTPUT_X: 263,
+    /** Input port X center: border(1.5) + left-[-6px] container + w-3(12px)/2 = 1.5-6+6 = 1.5 */
+    INPUT_X: 1.5,
+    /** Output port X center: right-[-6px] container, center = nodeWidth (use in getPortPosition) */
+    OUTPUT_X: 260,
     /** Node width */
     NODE_WIDTH: 260,
     /** Port circle size */
@@ -45,8 +45,8 @@ export const PORT_LAYOUT = {
 const NODE_HEIGHT = {
     /** Base: header(40) + description(20) + border(10) + padding(40) */
     BASE: 110,
-    /** Height per port row */
-    PORT_ROW: 26,
+    /** Height per port row: matches PORT_LAYOUT.PORT_SPACING (h-6 + gap-1 = 28) */
+    PORT_ROW: 28,
     /** Extra height for input nodes (Run button + visualization) */
     INPUT_NODE: 100,
     /** Extra height for output-console nodes (visualization area) */

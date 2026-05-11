@@ -60,7 +60,7 @@ export const proposalService = {
             const cols = 3;
             layoutNodes = layoutNodes.map((n, i) => ({
                 ...n,
-                position: { x: 100 + (i % cols) * 300, y: 100 + Math.floor(i / cols) * 200 },
+                position: { x: 100 + (i % cols) * 400, y: 100 + Math.floor(i / cols) * 220 },
             }));
         }
         // 'vertical' or default: use existing positions (y-spaced by orchestrator)
