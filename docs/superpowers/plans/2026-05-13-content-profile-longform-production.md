@@ -120,8 +120,10 @@
     - ffprobe QA
     - package output
 - HyperFrames route may start as a local composition adapter if external CLI/API is not available, but it must produce a real MP4 and QA result. Do not mark Gate B complete with a placeholder.
+- Longform Gate B must refuse execution before any compose/render provider call when one attempt's combined estimated HTML compose + HyperFrames render generation cost is above `$5.00`.
 - Tests:
     - Gate B requires approved Gate A artifacts.
+    - Gate B rejects estimated render/compose cost above `$5.00`.
     - QA failure blocks completion.
     - Successful smoke returns preview/download asset.
 

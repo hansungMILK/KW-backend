@@ -222,4 +222,86 @@ describe('contentBlock', () => {
         expect(request?.userMessage).toContain('sourcePriority=2');
         expect(request?.userMessage).toContain('개발자 커뮤니티 반응');
     });
+
+    it('injects selected script tone rules into the Shorts writer prompt', async () => {
+        vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
+            content: JSON.stringify({
+                title: '뉴스 톤 테스트',
+                hook: '핵심만 보겠습니다',
+                script: {
+                    hook: '핵심만 보겠습니다',
+                    angle: '뉴스앵커형 톤 테스트',
+                    cta: '원문도 확인하세요',
+                },
+                scenes: Array.from({ length: 10 }, (_, index) => ({
+                    sceneNumber: index + 1,
+                    imageSlot: `[Image #${index + 1}]`,
+                    storyBeat: index === 0 ? 'hook' : 'setup',
+                    topTitle: '뉴스 톤 테스트',
+                    caption: '핵심 정리',
+                    narration: '사실 관계를 차분하게 확인합니다.',
+                    imagePrompt: 'neutral newsroom evidence scene',
+                    visualText: '핵심 정리',
+                    visual: { topTitle: '뉴스 톤 테스트', mainCaption: '핵심 정리' },
+                    claimType: 'fact',
+                    sourceRefs: ['source-1'],
+                    durationSec: 5,
+                })),
+                cta: '원문도 확인하세요',
+                totalDurationSec: 50,
+            }),
+            model: 'gpt-test',
+            inputTokens: 1,
+            outputTokens: 1,
+            latencyMs: 1,
+        });
+
+        await contentBlock.execute(
+            {
+                articles: [
+                    {
+                        id: 'source-1',
+                        title: 'AI 뉴스',
+                        url: 'https://example.com/news',
+                        source: 'Example',
+                    },
+                ],
+            },
+            {
+                scriptToneId: 'news-anchor',
+                scriptToneIntensity: 'high',
+                contentProfileId: 'shorts.info.v1',
+                reviewMode: 'script-first',
+            }
+        );
+
+        const request = vi.mocked(openaiAdapter.chatJson).mock.calls[0]?.[0];
+        expect(request?.systemPrompt).toContain('Script Tone Rulepack: news-anchor');
+        expect(request?.systemPrompt).toContain('뉴스 앵커처럼');
+        expect(request?.systemPrompt).toContain('Tone intensity: high');
+        expect(request?.systemPrompt).toContain('Review mode: script-first');
+        expect(request?.systemPrompt).toContain('Content profile: shorts.info.v1');
+    });
+
+    it('keeps generic text mode free of paid media and script-review instructions', async () => {
+        await contentBlock.execute(
+            {
+                keywords: ['KTX', '예매'],
+                articles: [{ id: 'source-1', title: 'KTX 기사', url: 'https://example.com', source: 'Example' }],
+            },
+            {
+                mode: 'explain',
+                scriptToneId: 'calm-explainer',
+                scriptToneIntensity: 'low',
+                contentProfileId: 'text.explainer.v1',
+                reviewMode: 'script-first',
+            }
+        );
+
+        const request = vi.mocked(openaiAdapter.chatJson).mock.calls[0]?.[0];
+        expect(request?.systemPrompt).toContain('Content Preference: text.explainer.v1');
+        expect(request?.systemPrompt).toContain('Tone preference: calm-explainer');
+        expect(request?.systemPrompt).not.toContain('paid media generation');
+        expect(request?.systemPrompt).not.toContain('Script Tone Rulepack');
+    });
 });

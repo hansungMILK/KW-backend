@@ -4,6 +4,7 @@ import { openaiAdapter } from '../../adapters/ai/openai-adapter';
 import { env } from '../../config/env';
 import { log } from '../../utils/logger';
 import { buildCombinedPrompt } from '../shorts/rulepacks/base-shorts-rulepack';
+import { buildContentPreferencePrompt, buildScriptTonePrompt } from '../shorts/rulepacks/script-tone-rulepack';
 import { SCRIPT_OUTPUT_RULES, SCRIPT_WRITER_RULES } from '../shorts/rulepacks/script-writer-rulepack';
 import { DIRECTOR_OUTPUT_RULES, SHORTS_DIRECTOR_RULES } from '../shorts/rulepacks/shorts-director-rulepack';
 import { selectShortsRulepack } from '../shorts/topic-router';
@@ -267,13 +268,15 @@ export const contentBlock: BlockExecutor = {
         });
 
         const directorPrompt = `${SCRIPT_WRITER_RULES}\n\n${SCRIPT_OUTPUT_RULES}\n\n${SHORTS_DIRECTOR_RULES}\n\n${DIRECTOR_OUTPUT_RULES}`;
+        const contentPreferencePrompt = buildContentPreferencePrompt(config);
+        const scriptTonePrompt = buildScriptTonePrompt(config);
         const response = await openaiAdapter.chatJson({
             model: env.openaiModel,
             systemPrompt: singleImageMode
-                ? `${SINGLE_IMAGE_SYSTEM_PROMPT}\n\n${directorPrompt}\n\n${rulepack.imagePrompt}`
+                ? `${SINGLE_IMAGE_SYSTEM_PROMPT}\n\n${contentPreferencePrompt}\n\n${directorPrompt}\n\n${rulepack.imagePrompt}`
                 : genericTextMode
-                  ? GENERIC_TEXT_SYSTEM_PROMPT
-                  : `${CONTENT_SYSTEM_PROMPT}\n\n${buildCombinedPrompt(rulepack, 'contentPrompt')}\n\n${directorPrompt}\n\n${rulepack.sourcePolicy}`,
+                  ? `${GENERIC_TEXT_SYSTEM_PROMPT}\n\n${contentPreferencePrompt}`
+                  : `${CONTENT_SYSTEM_PROMPT}\n\n${buildCombinedPrompt(rulepack, 'contentPrompt')}\n\n${scriptTonePrompt}\n\n${directorPrompt}\n\n${rulepack.sourcePolicy}`,
             userMessage,
             maxTokens: 4096,
         });

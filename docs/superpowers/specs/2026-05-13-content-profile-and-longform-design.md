@@ -370,6 +370,7 @@ type ReviewableArtifact = {
 - `request_changes`는 기존 artifact를 `superseded`로 만들고 새 attempt를 만든다.
 - `approved` artifact만 Gate B 입력이 될 수 있다.
 - paid execution은 `paidExecutionApprovedAt` 이후에만 시작할 수 있다.
+- Longform Gate B 1회 attempt 기준 HTML compose + HyperFrames render generation 합산 사전 예상 비용이 `$5.00`를 넘으면 어떤 compose/render provider 호출도 시작하지 않는다.
 - provider 실패는 지우지 않고 trace/providerCalls에 남긴다.
 
 ## 13. 비용 정책
@@ -383,6 +384,7 @@ type ReviewableArtifact = {
 - TTS cost estimate
 - render/compose estimate
 - max run limit
+- longform Gate B HTML compose + HyperFrames render combined hard cap per attempt: `$5.00`
 - paid execution enabled 여부
 
 쇼츠 기본값:
