@@ -1,3 +1,4 @@
+import { buildLongformGateAWorkflow, enforceLongformGateAProfile, isLongformContentProfile } from './longform-gate-a';
 import { generateNumericId } from '../../utils/id-generator';
 import { buildContentProfilePreferences, enrichContentProfileNodeConfig } from '../content-profile/content-profile';
 import { recommendImageStyleId } from '../image-generation/image-style';
@@ -102,15 +103,22 @@ export const mockOrchestrator: Orchestrator = {
         }
 
         const imageStyleId = recommendImageStyleId(userMessage);
-        const contentProfile = buildContentProfilePreferences({
+        const inferredContentProfile = buildContentProfilePreferences({
             userMessage,
             outputType: 'video',
             hasMediaVideo: true,
             hasMediaImage: true,
         });
+        const contentProfile = enforceLongformGateAProfile(inferredContentProfile);
+        const longformGateA = isLongformContentProfile(contentProfile.contentProfileId)
+            ? buildLongformGateAWorkflow(userMessage, contentProfile)
+            : undefined;
+        const proposalBlocks = longformGateA?.blocks ?? SHORTS_BLOCKS;
+        const proposalEdges = longformGateA?.edges;
+        const summary = longformGateA?.summary;
 
         // Generate 8 nodes in a vertical layout
-        const nodes = SHORTS_BLOCKS.map((block, i) => ({
+        const nodes = proposalBlocks.map((block, i) => ({
             id: generateNumericId(),
             blockId: `blk-${block.type}`,
             name: block.label,
@@ -129,61 +137,71 @@ export const mockOrchestrator: Orchestrator = {
             ),
         }));
 
-        // Linear edges: each node connects to the next
-        // Exception: media-image (index 4) and media-tts (index 5) are parallel from analysis (index 3)
         const edges: Record<string, unknown>[] = [];
-        // search → content → data → analysis
-        for (let i = 0; i < 3; i++) {
+        if (proposalEdges) {
+            for (const edge of proposalEdges) {
+                edges.push({
+                    id: generateNumericId(),
+                    sourceNodeId: nodes[edge.from].id,
+                    sourcePortId: 'out',
+                    targetNodeId: nodes[edge.to].id,
+                    targetPortId: 'in',
+                });
+            }
+        } else {
+            // search → content → data → analysis
+            for (let i = 0; i < 3; i++) {
+                edges.push({
+                    id: generateNumericId(),
+                    sourceNodeId: nodes[i].id,
+                    sourcePortId: 'out',
+                    targetNodeId: nodes[i + 1].id,
+                    targetPortId: 'in',
+                });
+            }
+            // analysis → media-image (parallel 1)
             edges.push({
                 id: generateNumericId(),
-                sourceNodeId: nodes[i].id,
+                sourceNodeId: nodes[3].id,
                 sourcePortId: 'out',
-                targetNodeId: nodes[i + 1].id,
+                targetNodeId: nodes[4].id,
+                targetPortId: 'in',
+            });
+            // analysis → media-tts (parallel 2)
+            edges.push({
+                id: generateNumericId(),
+                sourceNodeId: nodes[3].id,
+                sourcePortId: 'out',
+                targetNodeId: nodes[5].id,
+                targetPortId: 'in',
+            });
+            // media-image → media-video
+            edges.push({
+                id: generateNumericId(),
+                sourceNodeId: nodes[4].id,
+                sourcePortId: 'out',
+                targetNodeId: nodes[6].id,
+                targetPortId: 'in',
+            });
+            // media-tts → media-video
+            edges.push({
+                id: generateNumericId(),
+                sourceNodeId: nodes[5].id,
+                sourcePortId: 'out',
+                targetNodeId: nodes[6].id,
+                targetPortId: 'in',
+            });
+            // media-video → integration
+            edges.push({
+                id: generateNumericId(),
+                sourceNodeId: nodes[6].id,
+                sourcePortId: 'out',
+                targetNodeId: nodes[7].id,
                 targetPortId: 'in',
             });
         }
-        // analysis → media-image (parallel 1)
-        edges.push({
-            id: generateNumericId(),
-            sourceNodeId: nodes[3].id,
-            sourcePortId: 'out',
-            targetNodeId: nodes[4].id,
-            targetPortId: 'in',
-        });
-        // analysis → media-tts (parallel 2)
-        edges.push({
-            id: generateNumericId(),
-            sourceNodeId: nodes[3].id,
-            sourcePortId: 'out',
-            targetNodeId: nodes[5].id,
-            targetPortId: 'in',
-        });
-        // media-image → media-video
-        edges.push({
-            id: generateNumericId(),
-            sourceNodeId: nodes[4].id,
-            sourcePortId: 'out',
-            targetNodeId: nodes[6].id,
-            targetPortId: 'in',
-        });
-        // media-tts → media-video
-        edges.push({
-            id: generateNumericId(),
-            sourceNodeId: nodes[5].id,
-            sourcePortId: 'out',
-            targetNodeId: nodes[6].id,
-            targetPortId: 'in',
-        });
-        // media-video → integration
-        edges.push({
-            id: generateNumericId(),
-            sourceNodeId: nodes[6].id,
-            sourcePortId: 'out',
-            targetNodeId: nodes[7].id,
-            targetPortId: 'in',
-        });
 
-        const breakdown = SHORTS_BLOCKS.map(b => ({
+        const breakdown = proposalBlocks.map(b => ({
             blockType: b.type,
             amount: COST_PER_BLOCK[b.type] ?? 0,
         }));
@@ -199,7 +217,9 @@ export const mockOrchestrator: Orchestrator = {
             },
             metadata: { contentProfile },
             approvalRequired: true,
-            assistantMessage: `10~15장 이미지 기반 1분 쇼츠 파이프라인 8개 블록이 필요합니다. 예상 비용: $${total.toFixed(2)}. 승인하시겠습니까?`,
+            assistantMessage:
+                summary ??
+                `10~15장 이미지 기반 1분 쇼츠 파이프라인 8개 블록이 필요합니다. 예상 비용: $${total.toFixed(2)}. 승인하시겠습니까?`,
         };
     },
 };

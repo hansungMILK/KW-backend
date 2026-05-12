@@ -1,3 +1,4 @@
+import { buildLongformGateAWorkflow, enforceLongformGateAProfile, isLongformContentProfile } from './longform-gate-a';
 import { ORCHESTRATOR_SYSTEM_PROMPT, PROMPT_VERSION, buildUserPrompt } from './prompt-templates';
 import { parseClaudeResponse } from './response-parser';
 import { compileWorkflowPlan, seedRootBlockInputs } from './workflow-compiler';
@@ -72,29 +73,32 @@ export const openaiOrchestrator: Orchestrator = {
                 return buildFallbackProposal(`AI 응답을 처리할 수 없습니다. 다시 시도해주세요. (${parseResult.error})`);
             }
 
-            const compileResult = compileWorkflowPlan(parseResult.data);
-            if (!compileResult.ok) {
-                await traceService.record(flowId, null, 'ERROR', 'OpenAI workflow plan rejected', {
-                    error: compileResult.error,
-                    promptVersion: PROMPT_VERSION,
-                    outputType: parseResult.data.plan.outputType,
-                    selectedBlocks: parseResult.data.plan.selectedBlocks.map(block => block.blockType),
-                });
-                return buildFallbackProposal(
-                    `워크플로우 계획이 요청과 맞지 않습니다. 다시 시도해주세요. (${compileResult.error})`
-                );
+            const inferredContentProfile = buildContentProfilePreferences({
+                userMessage,
+                outputType: parseResult.data.plan.outputType,
+                hasMediaVideo: parseResult.data.blocks.some(block => block.type === 'media-video'),
+                hasMediaImage: parseResult.data.blocks.some(block => block.type === 'media-image'),
+            });
+            const contentProfile = enforceLongformGateAProfile(inferredContentProfile);
+            let data = buildLongformGateAWorkflow(userMessage, contentProfile);
+            if (!isLongformContentProfile(contentProfile.contentProfileId)) {
+                const compileResult = compileWorkflowPlan(parseResult.data);
+                if (!compileResult.ok) {
+                    await traceService.record(flowId, null, 'ERROR', 'OpenAI workflow plan rejected', {
+                        error: compileResult.error,
+                        promptVersion: PROMPT_VERSION,
+                        outputType: parseResult.data.plan.outputType,
+                        selectedBlocks: parseResult.data.plan.selectedBlocks.map(block => block.blockType),
+                    });
+                    return buildFallbackProposal(
+                        `워크플로우 계획이 요청과 맞지 않습니다. 다시 시도해주세요. (${compileResult.error})`
+                    );
+                }
+                data = seedRootBlockInputs(compileResult.data, userMessage);
             }
-
-            const data = seedRootBlockInputs(compileResult.data, userMessage);
             const mediaImageBlock = data.blocks.find(block => block.type === 'media-image');
             const sceneCount = resolveProposalSceneCount(userMessage, data);
             const textAndOtherEstimatedCostUsd = estimateNonImageCostUsd(data.blocks);
-            const contentProfile = buildContentProfilePreferences({
-                userMessage,
-                outputType: data.plan.outputType,
-                hasMediaVideo: data.blocks.some(block => block.type === 'media-video'),
-                hasMediaImage: data.blocks.some(block => block.type === 'media-image'),
-            });
             const imageGeneration = mediaImageBlock
                 ? buildImageGenerationPreferences({
                       userMessage,

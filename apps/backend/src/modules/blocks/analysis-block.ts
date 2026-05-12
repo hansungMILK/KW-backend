@@ -379,11 +379,14 @@ async function runAIReview(scenes: NormalizedScene[], ruleIssues: Issue[], analy
 export const analysisBlock: BlockExecutor = {
     blockType: 'analysis',
 
-    async execute(input: unknown, _config?: Record<string, unknown>): Promise<BlockExecutorResult> {
+    async execute(input: unknown, config?: Record<string, unknown>): Promise<BlockExecutorResult> {
         const mode = env.orchestratorMode;
         if (mode === 'mock') return dummyAnalysis();
 
         const start = Date.now();
+        if (isLongformGateAInput(input, config)) {
+            return reviewLongformGateA(input, start);
+        }
 
         // Extract normalizedScenes from data-block output
         let scenes: NormalizedScene[] = [];
@@ -447,3 +450,65 @@ export const analysisBlock: BlockExecutor = {
         };
     },
 };
+
+function isLongformGateAInput(input: unknown, config?: Record<string, unknown>): boolean {
+    const values: unknown[] = [config?.['mode'], config?.['gate']];
+    if (input && typeof input === 'object' && !Array.isArray(input)) {
+        const obj = input as Record<string, unknown>;
+        values.push(obj['mode'], obj['gate'], obj['contentProfileId']);
+    }
+    const text = values
+        .filter((value): value is string => typeof value === 'string')
+        .join(' ')
+        .toLowerCase();
+    return text.includes('longform-gate-a') || text.includes('longform.');
+}
+
+function reviewLongformGateA(input: unknown, start: number): BlockExecutorResult {
+    const obj = isRecord(input) ? input : {};
+    const issues: Issue[] = [];
+
+    if (!Array.isArray(obj['outline']) || obj['outline'].length === 0) {
+        issues.push({ severity: 'high', message: '롱폼 outline이 없습니다.' });
+    }
+    if (typeof obj['fullScriptDraft'] !== 'string' || obj['fullScriptDraft'].trim().length < 20) {
+        issues.push({ severity: 'high', message: '롱폼 fullScriptDraft가 없거나 너무 짧습니다.' });
+    }
+    if (!Array.isArray(obj['scenePlan']) || obj['scenePlan'].length === 0) {
+        issues.push({ severity: 'high', message: '롱폼 scenePlan이 없습니다.' });
+    }
+    if (!readPositiveNumber(obj['estimatedDurationSec'])) {
+        issues.push({ severity: 'medium', message: '롱폼 estimatedDurationSec가 없습니다.' });
+    }
+    if (!isRecord(obj['estimatedCost'])) {
+        issues.push({ severity: 'medium', message: '롱폼 estimatedCost가 없습니다.' });
+    }
+    if (typeof obj['rendererRoute'] !== 'string' || obj['rendererRoute'].trim().length === 0) {
+        issues.push({ severity: 'medium', message: '롱폼 rendererRoute가 없습니다.' });
+    }
+    if (obj['mediaExecutionAllowed'] !== false) {
+        issues.push({ severity: 'critical', message: 'Gate A에서는 유료 media execution이 차단되어야 합니다.' });
+    }
+
+    const blockingIssues = issues.filter(issue => issue.severity === 'high' || issue.severity === 'critical');
+    const approved = blockingIssues.length === 0;
+
+    return {
+        output: {
+            ...obj,
+            gate: 'A',
+            mode: 'longform-gate-a',
+            safetyScore: issues.some(issue => issue.severity === 'critical') ? 0 : 100,
+            qualityScore: Math.max(0, 100 - issues.length * 10),
+            issues,
+            approved,
+            mediaExecutionAllowed: false,
+        },
+        durationMs: Date.now() - start,
+    };
+}
+
+function readPositiveNumber(input: unknown): number | undefined {
+    const value = Number(input);
+    return Number.isFinite(value) && value > 0 ? value : undefined;
+}

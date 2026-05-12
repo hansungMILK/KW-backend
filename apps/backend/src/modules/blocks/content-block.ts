@@ -100,6 +100,29 @@ Respond with JSON only — no markdown fences, no extra text:
   "sources": []
 }`;
 
+const LONGFORM_GATE_A_SYSTEM_PROMPT = `You are a Korean longform YouTube production planner inside a general workflow automation engine.
+This is Longform Gate A only: create planning artifacts for user review before any paid media execution.
+
+Requirements:
+- Do not create a Shorts scene contract.
+- Do not request image generation, TTS generation, HyperFrames render, MP4 render, or final upload metadata.
+- Produce source digest, outline, full script draft, scene plan, estimated duration, estimated cost, renderer route, and QA checklist.
+- Preserve targetDurationSec/maxDurationSec from the node config when present.
+- Keep rendererRoute as "hyperframes" unless the user explicitly asks for another renderer.
+- estimatedCost is Gate A planning cost only. Gate B paid media/render cost must not be included here.
+
+Respond with JSON only — no markdown fences, no extra text:
+{
+  "sourceDigest": ["source takeaway"],
+  "outline": [{ "title": "section title", "summary": "section summary" }],
+  "fullScriptDraft": "complete Korean longform narration draft",
+  "scenePlan": [{ "sceneNumber": 1, "title": "scene title", "visualPlan": "visual plan", "durationSec": 40 }],
+  "estimatedDurationSec": 300,
+  "estimatedCost": { "currency": "USD", "total": 0.2, "notes": ["Gate A planning only"] },
+  "rendererRoute": "hyperframes",
+  "qaChecklist": ["source check", "script review", "scene approval"]
+}`;
+
 // ── Dummy (mock mode) ─────────────────────────────────────────────────────────
 
 function dummyContent(): BlockExecutorResult {
@@ -245,8 +268,14 @@ export const contentBlock: BlockExecutor = {
         const start = Date.now();
         const userMessage = buildUserMessage(input);
         const rulepack = selectShortsRulepack(input);
+        const longformGateAMode = isLongformGateAMode(input, config);
         const reviewedOutput = parseReviewedOutput(config?.['reviewedOutput']);
         if (reviewedOutput) {
+            if (longformGateAMode) {
+                const normalized = normalizeLongformGateAOutput(reviewedOutput, input, config);
+                log.info('[content-block] Using reviewed longform Gate A output');
+                return { output: normalized, durationMs: Date.now() - start };
+            }
             const normalized = normalizeContentOutput(reviewedOutput, input, rulepack.id);
             const validated = ContentOutputSchema.safeParse(normalized);
             if (!validated.success) {
@@ -264,7 +293,13 @@ export const contentBlock: BlockExecutor = {
         log.info('[content-block] Starting AI script generation', {
             messageLength: userMessage.length,
             presetId: rulepack.id,
-            mode: singleImageMode ? 'single-image' : genericTextMode ? 'text' : 'shorts',
+            mode: longformGateAMode
+                ? 'longform-gate-a'
+                : singleImageMode
+                  ? 'single-image'
+                  : genericTextMode
+                    ? 'text'
+                    : 'shorts',
         });
 
         const directorPrompt = `${SCRIPT_WRITER_RULES}\n\n${SCRIPT_OUTPUT_RULES}\n\n${SHORTS_DIRECTOR_RULES}\n\n${DIRECTOR_OUTPUT_RULES}`;
@@ -272,11 +307,13 @@ export const contentBlock: BlockExecutor = {
         const scriptTonePrompt = buildScriptTonePrompt(config);
         const response = await openaiAdapter.chatJson({
             model: env.openaiModel,
-            systemPrompt: singleImageMode
-                ? `${SINGLE_IMAGE_SYSTEM_PROMPT}\n\n${contentPreferencePrompt}\n\n${directorPrompt}\n\n${rulepack.imagePrompt}`
-                : genericTextMode
-                  ? `${GENERIC_TEXT_SYSTEM_PROMPT}\n\n${contentPreferencePrompt}`
-                  : `${CONTENT_SYSTEM_PROMPT}\n\n${buildCombinedPrompt(rulepack, 'contentPrompt')}\n\n${scriptTonePrompt}\n\n${directorPrompt}\n\n${rulepack.sourcePolicy}`,
+            systemPrompt: longformGateAMode
+                ? `${LONGFORM_GATE_A_SYSTEM_PROMPT}\n\n${contentPreferencePrompt}\n\n${scriptTonePrompt}`
+                : singleImageMode
+                  ? `${SINGLE_IMAGE_SYSTEM_PROMPT}\n\n${contentPreferencePrompt}\n\n${directorPrompt}\n\n${rulepack.imagePrompt}`
+                  : genericTextMode
+                    ? `${GENERIC_TEXT_SYSTEM_PROMPT}\n\n${contentPreferencePrompt}`
+                    : `${CONTENT_SYSTEM_PROMPT}\n\n${buildCombinedPrompt(rulepack, 'contentPrompt')}\n\n${scriptTonePrompt}\n\n${directorPrompt}\n\n${rulepack.sourcePolicy}`,
             userMessage,
             maxTokens: 4096,
         });
@@ -286,6 +323,16 @@ export const contentBlock: BlockExecutor = {
             parsed = JSON.parse(response.content);
         } catch {
             throw new Error(`[content-block] OpenAI returned non-JSON response (length=${response.content.length})`);
+        }
+
+        if (longformGateAMode) {
+            const normalizedLongform = normalizeLongformGateAOutput(parsed, input, config);
+            log.info('[content-block] Longform Gate A generation complete', {
+                estimatedDurationSec: normalizedLongform['estimatedDurationSec'],
+                rendererRoute: normalizedLongform['rendererRoute'],
+                latencyMs: response.latencyMs,
+            });
+            return { output: normalizedLongform, durationMs: Date.now() - start };
         }
 
         if (genericTextMode) {
@@ -379,6 +426,19 @@ function isGenericTextMode(input: unknown, config?: Record<string, unknown>): bo
     );
 }
 
+function isLongformGateAMode(input: unknown, config?: Record<string, unknown>): boolean {
+    const values: unknown[] = [config?.['mode'], config?.['gate'], config?.['contentProfileId']];
+    if (input && typeof input === 'object' && !Array.isArray(input)) {
+        const obj = input as Record<string, unknown>;
+        values.push(obj['mode'], obj['gate'], obj['contentProfileId']);
+    }
+    const modeText = values
+        .filter((value): value is string => typeof value === 'string')
+        .join(' ')
+        .toLowerCase();
+    return modeText.includes('longform-gate-a') || modeText.includes('longform.');
+}
+
 function normalizeGenericTextOutput(parsed: unknown, input: unknown): Record<string, unknown> {
     const obj = isRecord(parsed) ? parsed : {};
     const text =
@@ -401,6 +461,66 @@ function normalizeGenericTextOutput(parsed: unknown, input: unknown): Record<str
         mode: typeof obj['mode'] === 'string' ? obj['mode'] : 'text',
         sources: Array.isArray(obj['sources']) && obj['sources'].length > 0 ? obj['sources'] : sources,
     };
+}
+
+function normalizeLongformGateAOutput(
+    parsed: unknown,
+    input: unknown,
+    config?: Record<string, unknown>
+): Record<string, unknown> {
+    const obj = isRecord(parsed) ? parsed : {};
+    const scenePlan = Array.isArray(obj['scenePlan']) ? obj['scenePlan'] : [];
+    const generatedDurationSec =
+        readPositiveNumber(obj['estimatedDurationSec']) ??
+        scenePlan.reduce((sum, scene) => {
+            const durationSec = isRecord(scene) ? readPositiveNumber(scene['durationSec']) : undefined;
+            return sum + (durationSec ?? 40);
+        }, 0) ??
+        300;
+    const configuredTargetDurationSec = readPositiveNumber(config?.['targetDurationSec']);
+    const configuredMaxDurationSec = readPositiveNumber(config?.['maxDurationSec']);
+    const requestedDurationSec = configuredTargetDurationSec ?? generatedDurationSec;
+    const estimatedDurationSec = configuredMaxDurationSec
+        ? Math.min(requestedDurationSec, configuredMaxDurationSec)
+        : requestedDurationSec;
+    const rendererRoute =
+        typeof obj['rendererRoute'] === 'string'
+            ? obj['rendererRoute']
+            : typeof config?.['rendererRoute'] === 'string'
+              ? config['rendererRoute']
+              : 'hyperframes';
+    const estimatedCost = isRecord(obj['estimatedCost'])
+        ? obj['estimatedCost']
+        : { currency: 'USD', total: 0.16, notes: ['Gate A planning only'] };
+
+    return {
+        ...obj,
+        gate: 'A',
+        mode: 'longform-gate-a',
+        sourceDigest: Array.isArray(obj['sourceDigest']) ? obj['sourceDigest'] : buildSourceDigest(input),
+        outline: Array.isArray(obj['outline']) ? obj['outline'] : [],
+        fullScriptDraft:
+            typeof obj['fullScriptDraft'] === 'string'
+                ? obj['fullScriptDraft']
+                : typeof obj['scriptDraft'] === 'string'
+                  ? obj['scriptDraft']
+                  : '',
+        scenePlan,
+        estimatedDurationSec: estimatedDurationSec || 300,
+        ...(configuredMaxDurationSec ? { maxDurationSec: configuredMaxDurationSec } : {}),
+        estimatedCost,
+        rendererRoute,
+        qaChecklist: Array.isArray(obj['qaChecklist']) ? obj['qaChecklist'] : ['출처 확인', '대본 검수', '씬 승인'],
+        mediaExecutionAllowed: false,
+        sources: Array.isArray(obj['sources']) && obj['sources'].length > 0 ? obj['sources'] : extractSources(input),
+    };
+}
+
+function buildSourceDigest(input: unknown): string[] {
+    return extractSources(input)
+        .slice(0, 5)
+        .map(source => [source['title'], source['summary']].filter(Boolean).join(': '))
+        .filter(text => text.trim().length > 0);
 }
 
 function normalizeContentOutput(parsed: unknown, input: unknown, presetId: string): unknown {
@@ -537,6 +657,11 @@ function compactPromptText(value: string, maxChars: number): string {
     const compact = value.replace(/\s+/g, ' ').trim();
     if (compact.length <= maxChars) return compact;
     return `${compact.slice(0, Math.max(1, maxChars - 1)).trim()}...`;
+}
+
+function readPositiveNumber(input: unknown): number | undefined {
+    const value = Number(input);
+    return Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
 function stripMarkdown(value: string): string {

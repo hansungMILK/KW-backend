@@ -798,6 +798,16 @@ const getRecordMimeType = (value: unknown): string | undefined =>
 const getRecordAssetType = (value: unknown): string | undefined =>
     isRecordValue(value) ? firstStringValue(value.type, value.assetType, value.kind)?.toLowerCase() : undefined;
 
+const isLongformGateARecord = (value: unknown): boolean => {
+    if (!isRecordValue(value)) return false;
+    const mode = firstStringValue(value.mode);
+    const hasLongformArtifactShape =
+        Boolean(firstStringValue(value.fullScriptDraft)) &&
+        asRecordArray(value.scenePlan).length > 0 &&
+        Boolean(firstStringValue(value.rendererRoute));
+    return mode === 'longform-gate-a' || hasLongformArtifactShape;
+};
+
 const isVideoRecord = (value: unknown): value is Record<string, unknown> => {
     if (!isRecordValue(value)) return false;
     const mimeType = getRecordMimeType(value);
@@ -837,6 +847,7 @@ const applyScriptDraft = (value: Record<string, unknown>, draft: string): Record
 const hasFriendlyOutputPreview = (value: unknown): boolean => {
     if (!isRecordValue(value)) return false;
     return (
+        isLongformGateARecord(value) ||
         isRecordValue(value.script) ||
         asRecordArray(value.scenes).length > 0 ||
         Boolean(value.title || value.hook) ||
@@ -845,6 +856,24 @@ const hasFriendlyOutputPreview = (value: unknown): boolean => {
         isRecordValue(value.video) ||
         Boolean(getVideoPreviewRecord(value))
     );
+};
+
+const formatDurationSec = (value: unknown): string | undefined => {
+    const durationSec = asNumberValue(value);
+    if (durationSec === undefined) return undefined;
+    const minutes = Math.floor(durationSec / 60);
+    const seconds = Math.round(durationSec % 60);
+    if (minutes <= 0) return `${seconds}초`;
+    if (seconds === 0) return `${minutes}분`;
+    return `${minutes}분 ${seconds}초`;
+};
+
+const formatCostTotal = (value: unknown): string | undefined => {
+    if (!isRecordValue(value)) return undefined;
+    const total = asNumberValue(value.total);
+    if (total === undefined) return undefined;
+    const currency = firstStringValue(value.currency) ?? 'USD';
+    return currency === 'USD' ? `$${total.toFixed(2)}` : `${currency} ${total.toFixed(2)}`;
 };
 
 const FriendlyOutputPreview: React.FC<{
@@ -856,7 +885,7 @@ const FriendlyOutputPreview: React.FC<{
 }> = ({ value, maxHeight, reviewEnabled = false, reviewedOutputSaved = false, onReviewedOutputSave }) => {
     const recordValue = isRecordValue(value) ? value : null;
     const scenes = asRecordArray(recordValue?.scenes);
-    const initialDraft = buildScriptDraft(scenes);
+    const initialDraft = buildScriptDraft(scenes) || firstStringValue(recordValue?.fullScriptDraft) || '';
     const [draft, setDraft] = useState(initialDraft);
 
     useEffect(() => {
@@ -864,6 +893,102 @@ const FriendlyOutputPreview: React.FC<{
     }, [initialDraft]);
 
     if (!recordValue) return null;
+
+    if (isLongformGateARecord(recordValue)) {
+        const outline = asRecordArray(recordValue.outline);
+        const scenePlan = asRecordArray(recordValue.scenePlan);
+        const duration = formatDurationSec(recordValue.estimatedDurationSec);
+        const cost = formatCostTotal(recordValue.estimatedCost);
+        const rendererRoute = firstStringValue(recordValue.rendererRoute) ?? 'renderer';
+
+        return (
+            <div
+                className="p-2.5 bg-sky-500/10 rounded-lg border border-sky-500/30 overflow-auto"
+                style={{ maxHeight }}
+            >
+                <div className="text-[11px] font-semibold text-sky-200">롱폼 Gate A 기획안</div>
+                <div className="mt-1 text-[10px] text-muted-foreground">
+                    {duration ? `예상 길이 ${duration}` : '예상 길이 산정 중'} · {rendererRoute} · 비용{' '}
+                    {cost ?? '산정 중'}
+                </div>
+                {outline.length > 0 && (
+                    <div className="mt-2">
+                        <div className="text-[10px] font-semibold text-foreground">아웃라인</div>
+                        <div className="mt-1 space-y-1">
+                            {outline.slice(0, 3).map((item, index) => {
+                                const title = firstStringValue(item.title) ?? `파트 ${index + 1}`;
+                                const summary = firstStringValue(item.summary, item.description);
+                                return (
+                                    <div key={`${index}-${title}`} className="text-[10px] text-foreground/80">
+                                        <span className="font-medium text-foreground">
+                                            {index + 1}. {title}
+                                        </span>
+                                        {summary ? <span className="block line-clamp-2">{summary}</span> : null}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+                {draft && (
+                    <div className="mt-2">
+                        <div className="text-[10px] font-semibold text-foreground">전체 대본 초안</div>
+                        <div className="mt-1 whitespace-pre-wrap text-[10px] text-foreground/80 line-clamp-5">
+                            {draft}
+                        </div>
+                    </div>
+                )}
+                {scenePlan.length > 0 && (
+                    <div className="mt-2">
+                        <div className="text-[10px] font-semibold text-foreground">씬 플랜</div>
+                        <div className="mt-1 space-y-1">
+                            {scenePlan.slice(0, 3).map((scene, index) => {
+                                const sceneNumber = asNumberValue(scene.sceneNumber) ?? index + 1;
+                                const title = firstStringValue(scene.title) ?? `씬 ${sceneNumber}`;
+                                const visualPlan = firstStringValue(scene.visualPlan, scene.visual, scene.description);
+                                return (
+                                    <div key={`${sceneNumber}-${title}`} className="text-[10px] text-foreground/80">
+                                        <span className="font-medium text-foreground">
+                                            {sceneNumber}. {title}
+                                        </span>
+                                        {visualPlan ? <span className="block line-clamp-2">{visualPlan}</span> : null}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+                <div className="mt-2 rounded bg-sky-500/10 px-2 py-1 text-[10px] text-sky-200">
+                    검수 전에는 이미지, TTS, 영상 렌더를 실행하지 않습니다.
+                </div>
+                {reviewEnabled && draft && (
+                    <div className="mt-2 space-y-1.5">
+                        <textarea
+                            className="min-h-20 w-full resize-y rounded border border-border bg-background/80 p-2 text-[10px] text-foreground outline-none focus:border-primary"
+                            value={draft}
+                            onChange={event => setDraft(event.target.value)}
+                            onWheel={event => event.stopPropagation()}
+                            aria-label="롱폼 대본 검수본"
+                        />
+                        <button
+                            type="button"
+                            className="w-full rounded bg-primary px-2 py-1.5 text-[10px] font-medium text-primary-foreground hover:bg-primary/90"
+                            onClick={event => {
+                                event.stopPropagation();
+                                onReviewedOutputSave?.({
+                                    ...recordValue,
+                                    fullScriptDraft: draft,
+                                    reviewedAt: new Date().toISOString(),
+                                });
+                            }}
+                        >
+                            {reviewedOutputSaved ? '롱폼 검수본 다시 저장' : '롱폼 대본 검수본 저장'}
+                        </button>
+                    </div>
+                )}
+            </div>
+        );
+    }
 
     const video = getVideoPreviewRecord(recordValue);
     if (video) {

@@ -304,4 +304,97 @@ describe('contentBlock', () => {
         expect(request?.systemPrompt).not.toContain('paid media generation');
         expect(request?.systemPrompt).not.toContain('Script Tone Rulepack');
     });
+
+    it('generates a longform Gate A artifact without forcing a Shorts scene contract', async () => {
+        vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
+            content: JSON.stringify({
+                sourceDigest: ['AI 에이전트 시장은 업무 자동화와 실행형 워크플로우로 확장 중입니다.'],
+                outline: [
+                    { title: '왜 지금 AI 에이전트인가', summary: '단순 챗봇에서 실행형 도구로 이동' },
+                    { title: '기존 자동화와 다른 점', summary: '계획, 실행, 검증을 연결' },
+                ],
+                fullScriptDraft:
+                    'AI 에이전트의 미래를 이해하려면 챗봇이 아니라 실행 흐름을 봐야 합니다. 앞으로 핵심은 대화가 아니라 업무 완결성입니다.',
+                scenePlan: [
+                    { sceneNumber: 1, title: '문제 제기', visualPlan: '업무 도구가 쌓인 데스크', durationSec: 35 },
+                    {
+                        sceneNumber: 2,
+                        title: '개념 설명',
+                        visualPlan: '에이전트가 앱을 연결하는 다이어그램',
+                        durationSec: 45,
+                    },
+                ],
+                estimatedDurationSec: 240,
+                estimatedCost: { currency: 'USD', total: 0.18, notes: ['Gate A planning only'] },
+                rendererRoute: 'hyperframes',
+                qaChecklist: ['출처 확인', '대본 검수', '씬 승인'],
+            }),
+            model: 'gpt-test',
+            inputTokens: 1,
+            outputTokens: 1,
+            latencyMs: 1,
+        });
+
+        const result = await contentBlock.execute(
+            {
+                keywords: ['AI 에이전트'],
+                articles: [
+                    { id: 'source-1', title: 'AI 에이전트 기사', url: 'https://example.com', source: 'Example' },
+                ],
+            },
+            {
+                mode: 'longform-gate-a',
+                contentProfileId: 'longform.explainer.v1',
+                rendererRoute: 'hyperframes',
+            }
+        );
+
+        const request = vi.mocked(openaiAdapter.chatJson).mock.calls[0]?.[0];
+        expect(request?.systemPrompt).toContain('Longform Gate A');
+        expect(request?.systemPrompt).not.toContain('10–15 scene');
+        expect(result.output).toMatchObject({
+            gate: 'A',
+            mode: 'longform-gate-a',
+            outline: expect.any(Array),
+            fullScriptDraft: expect.stringContaining('AI 에이전트의 미래'),
+            scenePlan: expect.any(Array),
+            estimatedDurationSec: 240,
+            estimatedCost: expect.objectContaining({ total: 0.18 }),
+            rendererRoute: 'hyperframes',
+            mediaExecutionAllowed: false,
+        });
+        expect(result.output['scenes']).toBeUndefined();
+    });
+
+    it('uses configured longform target duration instead of trusting a mismatched model estimate', async () => {
+        vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
+            content: JSON.stringify({
+                sourceDigest: ['자료 요약'],
+                outline: [{ title: '핵심', summary: '요약' }],
+                fullScriptDraft: 'AI 에이전트의 미래를 10분 분량으로 설명하는 롱폼 대본 초안입니다.',
+                scenePlan: [{ sceneNumber: 1, title: '도입', visualPlan: '업무 화면', durationSec: 35 }],
+                estimatedDurationSec: 240,
+                rendererRoute: 'hyperframes',
+            }),
+            model: 'gpt-test',
+            inputTokens: 1,
+            outputTokens: 1,
+            latencyMs: 1,
+        });
+
+        const result = await contentBlock.execute(
+            { keywords: ['AI 에이전트'] },
+            {
+                mode: 'longform-gate-a',
+                contentProfileId: 'longform.explainer.v1',
+                targetDurationSec: 600,
+                maxDurationSec: 600,
+            }
+        );
+
+        expect(result.output).toMatchObject({
+            estimatedDurationSec: 600,
+            maxDurationSec: 600,
+        });
+    });
 });

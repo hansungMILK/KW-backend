@@ -223,9 +223,13 @@ function normalizeContent(input: unknown): BlockExecutorResult {
 export const dataBlock: BlockExecutor = {
     blockType: 'data',
 
-    async execute(input: unknown, _config?: Record<string, unknown>): Promise<BlockExecutorResult> {
+    async execute(input: unknown, config?: Record<string, unknown>): Promise<BlockExecutorResult> {
         const mode = env.orchestratorMode;
         if (mode === 'mock') return dummyData();
+
+        if (isLongformGateAInput(input, config)) {
+            return normalizeLongformGateA(input);
+        }
 
         // Pure deterministic transform — same logic in every real provider mode.
         return normalizeContent(input);
@@ -263,4 +267,55 @@ function stripMarkdown(value: string): string {
         .replace(/__/g, '')
         .replace(/[`*_~]/g, '')
         .trim();
+}
+
+function isLongformGateAInput(input: unknown, config?: Record<string, unknown>): boolean {
+    const values: unknown[] = [config?.['mode'], config?.['gate']];
+    if (input && typeof input === 'object' && !Array.isArray(input)) {
+        const obj = input as Record<string, unknown>;
+        values.push(obj['mode'], obj['gate'], obj['contentProfileId']);
+    }
+    const text = values
+        .filter((value): value is string => typeof value === 'string')
+        .join(' ')
+        .toLowerCase();
+    return text.includes('longform-gate-a') || text.includes('longform.');
+}
+
+function normalizeLongformGateA(input: unknown): BlockExecutorResult {
+    const start = Date.now();
+    const obj = isRecord(input) ? input : {};
+    const output = {
+        ...obj,
+        gate: 'A',
+        mode: 'longform-gate-a',
+        outline: Array.isArray(obj['outline']) ? obj['outline'] : [],
+        fullScriptDraft: typeof obj['fullScriptDraft'] === 'string' ? obj['fullScriptDraft'] : '',
+        scenePlan: Array.isArray(obj['scenePlan']) ? obj['scenePlan'] : [],
+        estimatedDurationSec: readPositiveNumber(obj['estimatedDurationSec']) ?? 300,
+        estimatedCost: isRecord(obj['estimatedCost'])
+            ? obj['estimatedCost']
+            : { currency: 'USD', total: 0.16, notes: ['Gate A planning only'] },
+        rendererRoute: typeof obj['rendererRoute'] === 'string' ? obj['rendererRoute'] : 'hyperframes',
+        qaChecklist: Array.isArray(obj['qaChecklist']) ? obj['qaChecklist'] : ['출처 확인', '대본 검수', '씬 승인'],
+        mediaExecutionAllowed: false,
+        metadata: {
+            ...(isRecord(obj['metadata']) ? obj['metadata'] : {}),
+            source: 'longform-gate-a',
+            normalizedAt: new Date().toISOString(),
+        },
+    };
+
+    log.info('[data-block] Longform Gate A normalization complete', {
+        outlineCount: output.outline.length,
+        sceneCount: output.scenePlan.length,
+        estimatedDurationSec: output.estimatedDurationSec,
+    });
+
+    return { output, durationMs: Date.now() - start };
+}
+
+function readPositiveNumber(input: unknown): number | undefined {
+    const value = Number(input);
+    return Number.isFinite(value) && value > 0 ? value : undefined;
 }

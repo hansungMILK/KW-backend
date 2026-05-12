@@ -336,6 +336,345 @@ test.describe('Eureka Flow UI inspection', () => {
         });
     });
 
+    test('shows and runs longform Gate A without enabling paid media generation', async ({ page }) => {
+        prepareOutputDir();
+        const probe = attachProbe(page);
+        const flowId = await createFlowWithCanvas(page, { nodes: [], edges: [] });
+        const createdAt = new Date().toISOString();
+        const proposalId = 'proposal-longform-gate-a-e2e';
+        const runId = 'run-longform-gate-a-e2e';
+        const longformArtifact = {
+            gate: 'A',
+            mode: 'longform-gate-a',
+            sourceDigest: ['AI 에이전트는 단순 챗봇을 넘어 실제 업무 실행 계층으로 이동하고 있습니다.'],
+            outline: [
+                {
+                    title: '왜 지금 AI 에이전트인가',
+                    summary: '모델 성능보다 중요한 변화는 도구를 실제로 호출하는 실행 능력입니다.',
+                },
+                {
+                    title: '기존 자동화와의 차이',
+                    summary: '정해진 규칙만 따르는 자동화와 달리 목표를 해석하고 중간 결정을 내립니다.',
+                },
+            ],
+            fullScriptDraft:
+                'AI 에이전트의 미래를 이해하려면 먼저 챗봇과 실행형 소프트웨어를 구분해야 합니다.\n' +
+                '중요한 변화는 답변을 잘하는 모델이 아니라, 사용자의 목표를 받아 도구를 연결하고 결과를 검증하는 시스템입니다.\n' +
+                '정리하면 앞으로 중요한 건 더 긴 답변이 아니라, 믿고 맡길 수 있는 실행 흐름입니다.',
+            scenePlan: [
+                {
+                    sceneNumber: 1,
+                    title: '오프닝',
+                    visualPlan: '업무 도구가 연결되는 데스크톱 화면',
+                    durationSec: 35,
+                },
+                {
+                    sceneNumber: 2,
+                    title: '문제 재정의',
+                    visualPlan: '챗봇 답변과 실제 자동 실행 결과를 비교하는 화면',
+                    durationSec: 50,
+                },
+            ],
+            estimatedDurationSec: 300,
+            estimatedCost: { currency: 'USD', total: 0.16, notes: ['Gate A planning only'] },
+            rendererRoute: 'hyperframes',
+            mediaExecutionAllowed: false,
+        };
+        const longformNodes = [
+            {
+                id: 'node-longform-search',
+                type: 'search',
+                blockType: 'search',
+                name: '롱폼 자료 수집',
+                position: { x: 120, y: 160 },
+                state: 'IDLE',
+                config: { mode: 'longform-gate-a', query: 'AI 에이전트의 미래' },
+            },
+            {
+                id: 'node-longform-content',
+                type: 'content',
+                blockType: 'content',
+                name: '롱폼 기획안 작성',
+                position: { x: 440, y: 160 },
+                state: 'IDLE',
+                config: {
+                    mode: 'longform-gate-a',
+                    contentProfileId: 'longform.explainer.v1',
+                    reviewMode: 'script-first',
+                    rendererRoute: 'hyperframes',
+                    mediaExecutionAllowed: false,
+                    targetDurationSec: 300,
+                    maxDurationSec: 300,
+                },
+            },
+            {
+                id: 'node-longform-data',
+                type: 'data',
+                blockType: 'data',
+                name: '롱폼 Gate A 정규화',
+                position: { x: 760, y: 160 },
+                state: 'IDLE',
+                config: { mode: 'longform-gate-a', mediaExecutionAllowed: false },
+            },
+            {
+                id: 'node-longform-analysis',
+                type: 'analysis',
+                blockType: 'analysis',
+                name: '롱폼 Gate A 검수',
+                position: { x: 1080, y: 160 },
+                state: 'IDLE',
+                config: { mode: 'longform-gate-a', mediaExecutionAllowed: false },
+            },
+        ];
+        const longformEdges = [
+            {
+                id: 'edge-longform-search-content',
+                sourceNodeId: 'node-longform-search',
+                sourcePortId: 'out',
+                targetNodeId: 'node-longform-content',
+                targetPortId: 'in',
+            },
+            {
+                id: 'edge-longform-content-data',
+                sourceNodeId: 'node-longform-content',
+                sourcePortId: 'out',
+                targetNodeId: 'node-longform-data',
+                targetPortId: 'in',
+            },
+            {
+                id: 'edge-longform-data-analysis',
+                sourceNodeId: 'node-longform-data',
+                sourcePortId: 'out',
+                targetNodeId: 'node-longform-analysis',
+                targetPortId: 'in',
+            },
+        ];
+        const contentProfileMetadata = {
+            contentProfile: {
+                contentProfileId: 'longform.explainer.v1',
+                scriptToneId: 'calm-explainer',
+                scriptToneIntensity: 'medium',
+                reviewMode: 'script-first',
+                profileOptions: [
+                    { id: 'longform.explainer.v1', label: '롱폼 해설', description: '3-5분 이상 해설 영상' },
+                ],
+                toneOptions: [
+                    { id: 'calm-explainer', label: '차분한 해설형', description: '롱폼과 교육형 설명 기본값' },
+                ],
+                intensityOptions: [{ id: 'medium', label: '표준', description: '자연스럽게' }],
+                reviewModeOptions: [
+                    {
+                        id: 'script-first',
+                        label: '대본 검수 후 실행',
+                        description: '대본 단계에서 멈춰 사용자가 검수합니다.',
+                    },
+                ],
+            },
+        };
+        let approveRequestBody: Record<string, unknown> | null = null;
+        let runRequestBody: Record<string, unknown> | null = null;
+
+        await page.route(`**/_apis/flows/${flowId}/messages`, async route => {
+            if (route.request().method() !== 'POST') {
+                await route.continue();
+                return;
+            }
+
+            await route.fulfill({
+                status: 201,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    message: {
+                        messageId: 'msg-longform-user-e2e',
+                        flowId,
+                        role: 'USER',
+                        messageType: 'TEXT',
+                        content: '롱폼 제작해줘. 주제는 AI 에이전트의 미래',
+                        createdAt,
+                    },
+                    proposal: {
+                        proposalId,
+                        flowId,
+                        status: 'PENDING',
+                        estimatedCost: { currency: 'USD', total: 0.16 },
+                        estimatedCostUsd: 0.16,
+                        maxRunEstimatedCostUsd: 2,
+                        metadata: contentProfileMetadata,
+                        proposedNodes: longformNodes,
+                        proposedEdges: longformEdges,
+                        approvalRequired: true,
+                        createdAt,
+                    },
+                    assistantMessage: {
+                        messageId: 'msg-longform-agent-e2e',
+                        flowId,
+                        role: 'ASSISTANT',
+                        messageType: 'PROPOSAL',
+                        proposalId,
+                        content:
+                            '롱폼 Gate A입니다. 자료 수집, outline, full script draft, scene plan, 예상 길이/비용, HyperFrames 경로를 먼저 만들고 검수 전에는 이미지, TTS, 영상 렌더를 실행하지 않습니다.',
+                        createdAt,
+                    },
+                }),
+            });
+        });
+        await page.route(`**/_apis/proposals/${proposalId}/approve`, async route => {
+            approveRequestBody = route.request().postDataJSON() as Record<string, unknown>;
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    proposal: {
+                        proposalId,
+                        flowId,
+                        sourceMessageId: 'msg-longform-user-e2e',
+                        status: 'APPROVED',
+                        proposedNodes: longformNodes,
+                        proposedEdges: longformEdges,
+                        estimatedCost: { currency: 'USD', total: 0.16 },
+                        metadata: contentProfileMetadata,
+                        approvalRequired: true,
+                        createdAt,
+                        updatedAt: createdAt,
+                    },
+                    flow: {
+                        id: flowId,
+                        name: 'E2E longform Gate A',
+                        state: 'READY',
+                        nodes: longformNodes,
+                        edges: longformEdges,
+                        updatedAt: createdAt,
+                    },
+                }),
+            });
+        });
+        await page.route(`**/_apis/flows/${flowId}/runs`, async route => {
+            if (route.request().method() !== 'POST') {
+                await route.continue();
+                return;
+            }
+
+            runRequestBody = route.request().postDataJSON() as Record<string, unknown>;
+            await route.fulfill({
+                status: 202,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    runId,
+                    flowId,
+                    status: 'QUEUED',
+                    runType: 'FULL_FLOW',
+                    createdAt,
+                }),
+            });
+        });
+        await page.route(`**/_apis/runs/${runId}`, route =>
+            route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    runId,
+                    flowId,
+                    runType: 'FULL_FLOW',
+                    status: 'COMPLETED',
+                    triggerSource: 'MANUAL',
+                    executionMode: 'step',
+                    flowSnapshot: { nodes: longformNodes, edges: longformEdges },
+                    finalOutputSummary: {
+                        stoppedForReview: true,
+                        reviewNodeId: 'node-longform-content',
+                    },
+                    createdAt,
+                }),
+            })
+        );
+        await page.route(`**/_apis/runs/${runId}/nodes`, route =>
+            route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    items: [
+                        {
+                            runId,
+                            nodeId: 'node-longform-search',
+                            blockType: 'search',
+                            label: '롱폼 자료 수집',
+                            status: 'COMPLETED',
+                            progress: 100,
+                            retryCount: 0,
+                            parentNodeIds: [],
+                            outputPayload: { articles: longformArtifact.sourceDigest },
+                            updatedAt: createdAt,
+                        },
+                        {
+                            runId,
+                            nodeId: 'node-longform-content',
+                            blockType: 'content',
+                            label: '롱폼 기획안 작성',
+                            status: 'COMPLETED',
+                            progress: 100,
+                            retryCount: 0,
+                            parentNodeIds: ['node-longform-search'],
+                            outputPayload: longformArtifact,
+                            updatedAt: createdAt,
+                        },
+                    ],
+                }),
+            })
+        );
+
+        await openAuthenticatedEditor(page, '15-longform-gate-a', `/flows/${flowId}`);
+        await page.getByTitle('Flow Agent').click();
+        await expect(page.getByText('무엇을 만들까요?')).toBeVisible();
+        await capture(page, '16-longform-agent-open');
+
+        await page.locator('textarea').last().fill('롱폼 제작해줘. 주제는 AI 에이전트의 미래');
+        await page.keyboard.press('Enter');
+
+        await expect(page.getByText('4개 블록 생성')).toBeVisible({ timeout: 10000 });
+        await expect(page.getByText('롱폼 Gate A입니다')).toBeVisible();
+        await expect(page.getByText('롱폼 해설')).toBeVisible();
+        await expect(page.getByText('대본 검수 후 실행')).toBeVisible();
+        await expect(page.getByText('대본 단계에서 멈춰 사용자가 검수한 뒤 유료 생성으로 이어갑니다.')).toBeVisible();
+        await expect(page.getByText('이미지 설정')).toHaveCount(0);
+        await capture(page, '17-longform-gate-a-proposal');
+
+        await page.getByText('승인').click();
+        await expect(page.getByText('롱폼 자료 수집')).toBeVisible({ timeout: 10000 });
+        await expect(page.getByText('롱폼 기획안 작성')).toBeVisible();
+        await expect(page.getByText('이미지 생성', { exact: true })).toHaveCount(0);
+        await expect(page.getByText('음성 생성', { exact: true })).toHaveCount(0);
+        await expect(page.getByText('영상 합성', { exact: true })).toHaveCount(0);
+        await capture(page, '18-longform-gate-a-approved');
+
+        await page.getByRole('button', { name: /워크플로우 실행|Run Workflow/i }).click();
+        await expect(page.getByText('대본 검수 모드로 실행을 시작했습니다.')).toBeVisible({ timeout: 10000 });
+        await expect(page.getByText('롱폼 Gate A 기획안')).toBeVisible({ timeout: 10000 });
+        await expect(page.getByText('전체 대본 초안')).toBeVisible();
+        await expect(page.getByText('씬 플랜')).toBeVisible();
+        await expect(page.getByText(/hyperframes/i).first()).toBeVisible();
+        await capture(page, '19-longform-gate-a-run-completed');
+
+        expect(approveRequestBody).toMatchObject({
+            contentProfileId: 'longform.explainer.v1',
+            reviewMode: 'script-first',
+            scriptToneId: 'calm-explainer',
+        });
+        expect(runRequestBody).toMatchObject({ executionMode: 'step' });
+
+        writeProbeArtifacts(probe, {
+            mode: 'longform-gate-a-no-paid',
+            flowId,
+            approveRequestBody,
+            runRequestBody,
+            mediaNodesVisible: {
+                image: (await page.getByText('이미지 생성', { exact: true }).count()) > 0,
+                tts: (await page.getByText('음성 생성', { exact: true }).count()) > 0,
+                video: (await page.getByText('영상 합성', { exact: true }).count()) > 0,
+            },
+            apiStatuses: summarizeApiStatuses(probe.apiResponses),
+        });
+    });
+
     test('executes an approved workflow to final video when paid run is explicitly enabled', async ({ page }) => {
         test.skip(
             process.env.E2E_ALLOW_PAID_RUN !== '1',

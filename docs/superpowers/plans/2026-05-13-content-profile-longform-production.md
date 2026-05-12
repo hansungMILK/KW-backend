@@ -558,7 +558,7 @@ Review that this is not just UI state. Confirm the reviewed script is the produc
 - Modify: `apps/backend/src/modules/blocks/analysis-block.ts`
 - Add tests near the changed backend modules.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Tests must prove:
 
@@ -566,15 +566,15 @@ Tests must prove:
 - Gate A output contains outline, full script draft, scene plan, estimated duration, estimated cost, and renderer route.
 - Gate A does not include media-image, media-tts, or media-video execution before approval.
 
-- [ ] **Step 2: Confirm RED**
+- [x] **Step 2: Confirm RED**
 
 Run targeted backend tests and confirm failure.
 
-- [ ] **Step 3: Implement longform Gate A using existing blocks first**
+- [x] **Step 3: Implement longform Gate A using existing blocks first**
 
 Prefer existing `content`, `data`, `analysis` modes before adding new block types. Add new block types only if the existing block catalog becomes misleading.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 ```bash
 npx nx run @flows/backend:test --skip-nx-cache -- --run
@@ -582,7 +582,7 @@ npx nx run @flows/backend:typecheck --skip-nx-cache
 git diff --check
 ```
 
-- [ ] **Step 5: Playwright Gate A verification**
+- [x] **Step 5: Playwright Gate A verification**
 
 Browser flow:
 
@@ -591,7 +591,7 @@ Browser flow:
 - Confirm Gate A execution shows outline/script/scene plan.
 - Confirm paid Gate B controls are not enabled before review approval.
 
-- [ ] **Step 6: Code review checkpoint**
+- [x] **Step 6: Code review checkpoint**
 
 Review for paid boundary leaks.
 
