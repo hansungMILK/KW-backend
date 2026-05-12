@@ -58,6 +58,36 @@ type ImageGenerationMetadata = {
     };
 };
 
+type ScriptToneId = 'informative-reframe' | 'mz-viral' | 'news-anchor' | 'story-dialogue' | 'calm-explainer';
+type ScriptToneIntensity = 'low' | 'medium' | 'high';
+type ContentProfileId =
+    | 'text.explainer.v1'
+    | 'image.single.v1'
+    | 'shorts.info.v1'
+    | 'shorts.story.v1'
+    | 'longform.explainer.v1'
+    | 'longform.documentary.v1';
+type ReviewMode = 'direct-run' | 'script-first';
+
+type ContentProfileOption<T extends string> = {
+    id: T;
+    label: string;
+    description?: string;
+};
+
+type ContentProfileMetadata = {
+    contentProfile?: {
+        contentProfileId?: ContentProfileId;
+        scriptToneId?: ScriptToneId;
+        scriptToneIntensity?: ScriptToneIntensity;
+        reviewMode?: ReviewMode;
+        toneOptions?: ContentProfileOption<ScriptToneId>[];
+        intensityOptions?: ContentProfileOption<ScriptToneIntensity>[];
+        reviewModeOptions?: ContentProfileOption<ReviewMode>[];
+        profileOptions?: ContentProfileOption<ContentProfileId>[];
+    };
+};
+
 interface FlowAgentPanelProps {
     open: boolean;
     onClose: () => void;
@@ -92,6 +122,13 @@ const asImageGenerationMetadata = (metadata: unknown): ImageGenerationMetadata['
     const imageGeneration = (metadata as ImageGenerationMetadata).imageGeneration;
     if (!imageGeneration || typeof imageGeneration !== 'object') return undefined;
     return imageGeneration;
+};
+
+const asContentProfileMetadata = (metadata: unknown): ContentProfileMetadata['contentProfile'] | undefined => {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return undefined;
+    const contentProfile = (metadata as ContentProfileMetadata).contentProfile;
+    if (!contentProfile || typeof contentProfile !== 'object' || Array.isArray(contentProfile)) return undefined;
+    return contentProfile;
 };
 
 const formatUsd = (value: unknown): string | undefined => {
@@ -135,6 +172,12 @@ export const FlowAgentPanel = ({
     const [proposalImageStyles, setProposalImageStyles] = useState<Record<string, ImageStyleId>>({});
     const [proposalImageQualities, setProposalImageQualities] = useState<Record<string, ImageQuality>>({});
     const [proposalSceneCounts, setProposalSceneCounts] = useState<Record<string, number>>({});
+    const [proposalScriptTones, setProposalScriptTones] = useState<Record<string, ScriptToneId>>({});
+    const [proposalScriptToneIntensities, setProposalScriptToneIntensities] = useState<
+        Record<string, ScriptToneIntensity>
+    >({});
+    const [proposalReviewModes, setProposalReviewModes] = useState<Record<string, ReviewMode>>({});
+    const [proposalContentProfiles, setProposalContentProfiles] = useState<Record<string, ContentProfileId>>({});
     const [approvingProposalIds, setApprovingProposalIds] = useState<Record<string, boolean>>({});
     const [approvedProposalIds, setApprovedProposalIds] = useState<Record<string, boolean>>({});
     const bottomRef = useRef<HTMLDivElement>(null);
@@ -262,10 +305,15 @@ export const FlowAgentPanel = ({
         setApprovingProposalIds(prev => ({ ...prev, [proposal.id]: true }));
         try {
             const imageGeneration = asImageGenerationMetadata(proposal.metadata);
+            const contentProfile = asContentProfileMetadata(proposal.metadata);
             const result = await approveProposal(proposal.id, {
                 imageStyleId: proposalImageStyles[proposal.id] ?? imageGeneration?.imageStyleId,
                 imageQuality: proposalImageQualities[proposal.id] ?? imageGeneration?.imageQuality,
                 sceneCount: proposalSceneCounts[proposal.id] ?? imageGeneration?.sceneCount,
+                scriptToneId: proposalScriptTones[proposal.id] ?? contentProfile?.scriptToneId,
+                scriptToneIntensity: proposalScriptToneIntensities[proposal.id] ?? contentProfile?.scriptToneIntensity,
+                reviewMode: proposalReviewModes[proposal.id] ?? contentProfile?.reviewMode,
+                contentProfileId: proposalContentProfiles[proposal.id] ?? contentProfile?.contentProfileId,
             });
             await onApproveProposal?.(result.nodes, result.edges);
             setApprovedProposalIds(prev => ({ ...prev, [proposal.id]: true }));
@@ -398,6 +446,19 @@ export const FlowAgentPanel = ({
                         if (blocks.length === 0) return null;
                         const proposal = msg.proposal;
                         const imageGeneration = asImageGenerationMetadata(proposal.metadata);
+                        const contentProfile = asContentProfileMetadata(proposal.metadata);
+                        const selectedScriptToneId =
+                            proposalScriptTones[proposal.id] ?? contentProfile?.scriptToneId ?? 'informative-reframe';
+                        const selectedScriptToneIntensity =
+                            proposalScriptToneIntensities[proposal.id] ??
+                            contentProfile?.scriptToneIntensity ??
+                            'medium';
+                        const selectedReviewMode =
+                            proposalReviewModes[proposal.id] ?? contentProfile?.reviewMode ?? 'direct-run';
+                        const selectedContentProfileId =
+                            proposalContentProfiles[proposal.id] ??
+                            contentProfile?.contentProfileId ??
+                            'shorts.info.v1';
                         const selectedStyleId =
                             proposalImageStyles[proposal.id] ??
                             imageGeneration?.imageStyleId ??
@@ -442,6 +503,138 @@ export const FlowAgentPanel = ({
                                             <div key={i}>{b.label}</div>
                                         ))}
                                     </div>
+                                    {contentProfile && (
+                                        <div className="rounded-md border border-border bg-background/40 p-2 space-y-2">
+                                            <div className="text-[11px] font-semibold text-foreground">
+                                                대본/콘텐츠 설정
+                                            </div>
+                                            {contentProfile.profileOptions?.length ? (
+                                                <div className="space-y-1">
+                                                    <div className="text-[10px] font-medium text-muted-foreground">
+                                                        콘텐츠 종류
+                                                    </div>
+                                                    <div className="flex flex-wrap gap-1">
+                                                        {contentProfile.profileOptions.map(option => (
+                                                            <button
+                                                                key={option.id}
+                                                                type="button"
+                                                                className={`rounded-md border px-2 py-1 text-[10px] transition-colors ${
+                                                                    selectedContentProfileId === option.id
+                                                                        ? 'border-primary bg-primary/20 text-primary'
+                                                                        : 'border-border bg-muted/30 text-muted-foreground hover:text-foreground'
+                                                                }`}
+                                                                disabled={isApproved}
+                                                                title={option.description}
+                                                                onClick={() =>
+                                                                    setProposalContentProfiles(prev => ({
+                                                                        ...prev,
+                                                                        [proposal.id]: option.id,
+                                                                    }))
+                                                                }
+                                                            >
+                                                                {option.label}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ) : null}
+                                            {contentProfile.toneOptions?.length ? (
+                                                <div className="space-y-1">
+                                                    <div className="text-[10px] font-medium text-muted-foreground">
+                                                        대본 톤
+                                                    </div>
+                                                    <div className="flex flex-wrap gap-1">
+                                                        {contentProfile.toneOptions.map(option => (
+                                                            <button
+                                                                key={option.id}
+                                                                type="button"
+                                                                className={`rounded-full border px-2 py-1 text-[10px] transition-colors ${
+                                                                    selectedScriptToneId === option.id
+                                                                        ? 'border-primary bg-primary text-primary-foreground'
+                                                                        : 'border-border bg-muted/40 text-muted-foreground hover:text-foreground'
+                                                                }`}
+                                                                disabled={isApproved}
+                                                                title={option.description}
+                                                                onClick={() =>
+                                                                    setProposalScriptTones(prev => ({
+                                                                        ...prev,
+                                                                        [proposal.id]: option.id,
+                                                                    }))
+                                                                }
+                                                            >
+                                                                {option.label}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ) : null}
+                                            {contentProfile.intensityOptions?.length ? (
+                                                <div className="space-y-1">
+                                                    <div className="text-[10px] font-medium text-muted-foreground">
+                                                        톤 강도
+                                                    </div>
+                                                    <div className="flex flex-wrap gap-1">
+                                                        {contentProfile.intensityOptions.map(option => (
+                                                            <button
+                                                                key={option.id}
+                                                                type="button"
+                                                                className={`rounded-md border px-2 py-1 text-[10px] transition-colors ${
+                                                                    selectedScriptToneIntensity === option.id
+                                                                        ? 'border-primary bg-primary/20 text-primary'
+                                                                        : 'border-border bg-muted/30 text-muted-foreground hover:text-foreground'
+                                                                }`}
+                                                                disabled={isApproved}
+                                                                title={option.description}
+                                                                onClick={() =>
+                                                                    setProposalScriptToneIntensities(prev => ({
+                                                                        ...prev,
+                                                                        [proposal.id]: option.id,
+                                                                    }))
+                                                                }
+                                                            >
+                                                                {option.label}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ) : null}
+                                            {contentProfile.reviewModeOptions?.length ? (
+                                                <div className="space-y-1">
+                                                    <div className="text-[10px] font-medium text-muted-foreground">
+                                                        실행 방식
+                                                    </div>
+                                                    <div className="flex flex-wrap gap-1">
+                                                        {contentProfile.reviewModeOptions.map(option => (
+                                                            <button
+                                                                key={option.id}
+                                                                type="button"
+                                                                className={`rounded-md border px-2 py-1 text-[10px] transition-colors ${
+                                                                    selectedReviewMode === option.id
+                                                                        ? 'border-primary bg-primary/20 text-primary'
+                                                                        : 'border-border bg-muted/30 text-muted-foreground hover:text-foreground'
+                                                                }`}
+                                                                disabled={isApproved}
+                                                                title={option.description}
+                                                                onClick={() =>
+                                                                    setProposalReviewModes(prev => ({
+                                                                        ...prev,
+                                                                        [proposal.id]: option.id,
+                                                                    }))
+                                                                }
+                                                            >
+                                                                {option.label}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ) : null}
+                                            {selectedReviewMode === 'script-first' && (
+                                                <div className="rounded-md bg-primary/10 px-2 py-1 text-[10px] text-primary">
+                                                    대본 단계에서 멈춰 사용자가 검수한 뒤 유료 생성으로 이어갑니다.
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
                                     {imageGeneration && (
                                         <div className="rounded-md border border-border bg-background/40 p-2 space-y-2">
                                             <div className="text-[11px] font-semibold text-foreground">이미지 설정</div>
