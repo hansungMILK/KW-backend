@@ -183,6 +183,26 @@ function buildSingleNodeInputPayload(
     return Object.keys(payload).length > 0 ? payload : null;
 }
 
+function mergeExecutionPayloadForCostGuard(
+    node: Record<string, unknown>,
+    inputPayload: Record<string, unknown> | null | undefined
+): Record<string, unknown> {
+    if (!inputPayload || Object.keys(inputPayload).length === 0) return node;
+
+    const nestedConfig = isRecord(inputPayload['config']) ? inputPayload['config'] : {};
+    return {
+        ...node,
+        config: {
+            ...getNodeConfig(node),
+            ...nestedConfig,
+        },
+        data: {
+            ...getNodeData(node),
+            ...inputPayload,
+        },
+    };
+}
+
 // ============================================================================
 // Block → Provider mapping (F-34)
 // ============================================================================
@@ -239,9 +259,26 @@ const getNodeConfig = (node: Record<string, unknown>): Record<string, unknown> =
     return config ?? {};
 };
 
+const getNodeData = (node: Record<string, unknown>): Record<string, unknown> => {
+    const data = node['data'] as Record<string, unknown> | undefined;
+    return data ?? {};
+};
+
 const readPositiveNumber = (value: unknown): number | null => {
     const number = Number(value);
     return Number.isFinite(number) && number > 0 ? number : null;
+};
+
+const readFirstPositiveNumber = (
+    record: Record<string, unknown>,
+    keys: string[],
+    fallbackRecord?: Record<string, unknown>
+): number | null => {
+    for (const key of keys) {
+        const value = readPositiveNumber(record[key]) ?? readPositiveNumber(fallbackRecord?.[key]);
+        if (value !== null) return value;
+    }
+    return null;
 };
 
 const getMediaImageSceneCount = (node: Record<string, unknown>): number => {
@@ -254,6 +291,14 @@ const getMediaImageSceneCount = (node: Record<string, unknown>): number => {
         12;
     return Math.max(1, Math.floor(count));
 };
+
+const LONGFORM_HTML_RENDER_BLOCK_TYPES = new Set([
+    'html-compose',
+    'html-render',
+    'hyperframes-compose',
+    'hyperframes-render',
+    'mp4-render',
+]);
 
 const estimateRunCostUsd = (nodes: Array<Record<string, unknown>>): number => {
     let total = 0;
@@ -294,6 +339,71 @@ const estimateRunCostUsd = (nodes: Array<Record<string, unknown>>): number => {
     }
 
     return Math.round(total * 100) / 100;
+};
+
+const isLongformHtmlRenderNode = (node: Record<string, unknown>): boolean => {
+    const config = getNodeConfig(node);
+    const data = getNodeData(node);
+    const blockType = getBlockType(node);
+    const renderer = String(
+        config['renderer'] ?? config['rendererRoute'] ?? config['renderRoute'] ?? data['renderer'] ?? ''
+    );
+
+    if (LONGFORM_HTML_RENDER_BLOCK_TYPES.has(blockType)) return true;
+    return blockType === 'media-video' && /hyperframes|html/i.test(renderer);
+};
+
+const estimateLongformHtmlRenderCostUsd = (nodes: Array<Record<string, unknown>>): number => {
+    let total = 0;
+
+    for (const node of nodes) {
+        if (!isLongformHtmlRenderNode(node)) continue;
+
+        const config = getNodeConfig(node);
+        const data = getNodeData(node);
+        const combined =
+            readFirstPositiveNumber(
+                config,
+                [
+                    'longformHtmlRenderEstimatedCostUsd',
+                    'htmlRenderEstimatedCostUsd',
+                    'renderGenerationEstimatedCostUsd',
+                ],
+                data
+            ) ?? 0;
+        const compose =
+            readFirstPositiveNumber(
+                config,
+                ['htmlComposeEstimatedCostUsd', 'composeEstimatedCostUsd', 'hyperframesComposeEstimatedCostUsd'],
+                data
+            ) ?? 0;
+        const render =
+            readFirstPositiveNumber(
+                config,
+                ['hyperframesRenderEstimatedCostUsd', 'renderEstimatedCostUsd', 'mp4RenderEstimatedCostUsd'],
+                data
+            ) ?? 0;
+
+        total += Math.max(combined, compose + render);
+    }
+
+    return Math.round(total * 100) / 100;
+};
+
+const checkLongformHtmlRenderCostLimit = (nodes: Array<Record<string, unknown>>): RunServiceFailure | null => {
+    const maxCostUsd = env.maxLongformHtmlRenderEstimatedCostUsd;
+    if (maxCostUsd <= 0) return null;
+
+    const estimatedCostUsd = estimateLongformHtmlRenderCostUsd(nodes);
+    if (estimatedCostUsd <= maxCostUsd) return null;
+
+    return {
+        ok: false,
+        error: 'LONGFORM_HTML_RENDER_COST_LIMIT_EXCEEDED',
+        status: 422,
+        estimatedCostUsd,
+        maxCostUsd,
+    };
 };
 
 const checkRunCostLimit = (nodes: Array<Record<string, unknown>>): RunServiceFailure | null => {
@@ -380,6 +490,9 @@ export const runService = {
         if (executableNodes.length === 0) {
             return { ok: false, error: `Flow ${flowId} has no executable nodes`, status: 422 };
         }
+
+        const longformCostLimitResult = checkLongformHtmlRenderCostLimit(executableNodes);
+        if (longformCostLimitResult) return longformCostLimitResult;
 
         const costLimitResult = checkRunCostLimit(executableNodes);
         if (costLimitResult) return costLimitResult;
@@ -474,6 +587,11 @@ export const runService = {
         const targetNode = executableNodes.find(n => getNodeId(n) === nodeId);
         if (!targetNode) return { ok: false, error: `Node ${nodeId} not found in flow ${flowId}`, status: 404 };
 
+        const targetInputPayload = buildSingleNodeInputPayload(targetNode, snapshotNodes, overrides);
+        const costGuardTargetNode = mergeExecutionPayloadForCostGuard(targetNode, targetInputPayload);
+        const longformCostLimitResult = checkLongformHtmlRenderCostLimit([costGuardTargetNode]);
+        if (longformCostLimitResult) return longformCostLimitResult;
+
         const costLimitResult = checkRunCostLimit([targetNode]);
         if (costLimitResult) return costLimitResult;
 
@@ -517,7 +635,7 @@ export const runService = {
             progress: 0,
             retryCount: 0,
             parentNodeIds: [],
-            inputPayload: buildSingleNodeInputPayload(targetNode, snapshotNodes, overrides),
+            inputPayload: targetInputPayload,
             updatedAt: now,
         };
         await runRepo.putRunNode(runNode);
@@ -617,11 +735,7 @@ export const runService = {
      * 3. If run was FAILED, transition back to RUNNING
      * 4. Resume DAG execution so downstream nodes run with fresh parent output
      */
-    async retryNode(
-        runId: string,
-        nodeId: string,
-        _reason?: string
-    ): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
+    async retryNode(runId: string, nodeId: string, _reason?: string): Promise<{ ok: true } | RunServiceFailure> {
         const node = await runRepo.getRunNode(runId, nodeId);
         if (!node) return { ok: false, error: `RunNode ${runId}#${nodeId} not found`, status: 404 };
 
@@ -635,6 +749,20 @@ export const runService = {
         const nodeIds = allNodes.map(n => n.nodeId);
         const edges = run.flowSnapshot.edges as Array<Record<string, unknown>>;
         const descendantNodeIds = collectDescendantNodeIds(nodeId, nodeIds, edges);
+        const retryScopeNodeIds = new Set([nodeId, ...descendantNodeIds]);
+        const runNodeById = new Map(allNodes.map(runNode => [runNode.nodeId, runNode]));
+        const snapshotNodes = (run.flowSnapshot.nodes ?? []) as Array<Record<string, unknown>>;
+        const retryScopeNodes = snapshotNodes
+            .filter(snapshotNode => retryScopeNodeIds.has(getNodeId(snapshotNode)))
+            .map(snapshotNode =>
+                mergeExecutionPayloadForCostGuard(
+                    snapshotNode,
+                    runNodeById.get(getNodeId(snapshotNode))?.inputPayload ?? undefined
+                )
+            );
+
+        const longformCostLimitResult = checkLongformHtmlRenderCostLimit(retryScopeNodes);
+        if (longformCostLimitResult) return longformCostLimitResult;
 
         // FAILED → PENDING (retryCount incremented inside updateRunNodeStatus)
         const result = await runRepo.updateRunNodeStatus(runId, nodeId, 'PENDING');

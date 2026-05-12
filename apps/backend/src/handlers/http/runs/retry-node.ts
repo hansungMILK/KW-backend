@@ -2,7 +2,7 @@ import { RunNodeRetryParamsSchema, RunNodeRetryRequestSchema } from '@flows/cont
 
 import { runService } from '../../../services/run-service';
 import { getBody, getPathParam, withMiddleware } from '../../../utils/middleware';
-import { badRequest, conflict, notFound, ok } from '../../../utils/response';
+import { badRequest, conflict, notFound, ok, unprocessableJson } from '../../../utils/response';
 
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 
@@ -28,6 +28,14 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
     if (!result.ok) {
         if (result.status === 404) return notFound(result.error);
         if (result.status === 409) return conflict(result.error);
+        if (result.error === 'LONGFORM_HTML_RENDER_COST_LIMIT_EXCEEDED') {
+            return unprocessableJson({
+                error: result.error,
+                message: `Estimated longform HTML/HyperFrames generation cost $${(result.estimatedCostUsd ?? 0).toFixed(2)} exceeds the per-attempt cap $${(result.maxCostUsd ?? 0).toFixed(2)}.`,
+                estimatedCostUsd: result.estimatedCostUsd,
+                maxCostUsd: result.maxCostUsd,
+            });
+        }
         return badRequest(result.error);
     }
 

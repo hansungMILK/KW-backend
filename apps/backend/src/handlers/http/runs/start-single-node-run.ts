@@ -74,6 +74,14 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
                     maxCostUsd: result.maxCostUsd,
                 });
             }
+            if (result.error === 'LONGFORM_HTML_RENDER_COST_LIMIT_EXCEEDED') {
+                return unprocessableJson({
+                    error: 'LONGFORM_HTML_RENDER_COST_LIMIT_EXCEEDED',
+                    message: `Estimated longform HTML/HyperFrames generation cost $${(result.estimatedCostUsd ?? 0).toFixed(2)} exceeds the per-attempt cap $${(result.maxCostUsd ?? 0).toFixed(2)}.`,
+                    estimatedCostUsd: result.estimatedCostUsd,
+                    maxCostUsd: result.maxCostUsd,
+                });
+            }
             const missingProviders = result.missingProviders ?? [];
             return unprocessableJson({
                 error: 'MISSING_API_KEYS',

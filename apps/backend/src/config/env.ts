@@ -55,6 +55,7 @@ export const env = {
     openaiTextTimeoutMs: readIntEnv('OPENAI_TEXT_TIMEOUT_MS', 60000, 1),
     allowPaidOpenAI: readBoolEnv('ALLOW_PAID_OPENAI', false),
     maxRunEstimatedCostUsd: readNumberEnv('MAX_RUN_ESTIMATED_COST_USD', 2, 0),
+    maxLongformHtmlRenderEstimatedCostUsd: readNumberEnv('MAX_LONGFORM_HTML_RENDER_ESTIMATED_COST_USD', 5, 0),
     openaiImageModel: readEnv('OPENAI_IMAGE_MODEL', 'gpt-image-2'),
     openaiImageQuality: readEnv('OPENAI_IMAGE_QUALITY', 'medium'),
     openaiImageTimeoutMs: readIntEnv('OPENAI_IMAGE_TIMEOUT_MS', 120000, 1),

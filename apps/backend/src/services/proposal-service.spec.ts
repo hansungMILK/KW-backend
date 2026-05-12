@@ -371,4 +371,84 @@ describe('proposalService.approve image generation overrides', () => {
             })
         );
     });
+
+    it('copies longform HTML render cost breakdown into the approved render node config', async () => {
+        const proposal: Proposal = {
+            proposalId: 'proposal-4',
+            flowId: 'flow-4',
+            sourceMessageId: 'message-4',
+            status: 'PENDING',
+            proposedNodes: [
+                {
+                    id: 'node-content',
+                    blockType: 'content',
+                    type: 'content',
+                    config: {},
+                },
+                {
+                    id: 'node-video',
+                    blockType: 'media-video',
+                    type: 'media-video',
+                    config: {
+                        contentProfileId: 'longform.explainer.v1',
+                        renderer: 'hyperframes',
+                    },
+                },
+            ],
+            proposedEdges: [],
+            estimatedCost: {
+                currency: 'USD',
+                total: 5.2,
+                breakdown: [
+                    { blockType: 'content', amount: 0.1 },
+                    { blockType: 'hyperframes-compose', amount: 2.7 },
+                    { blockType: 'hyperframes-render', amount: 2.4 },
+                ],
+            },
+            metadata: {
+                contentProfile: {
+                    contentProfileId: 'longform.explainer.v1',
+                    scriptToneId: 'calm-explainer',
+                    scriptToneIntensity: 'medium',
+                    reviewMode: 'script-first',
+                },
+            },
+            approvalRequired: true,
+            createdAt: '2026-05-11T00:00:00.000Z',
+            updatedAt: '2026-05-11T00:00:00.000Z',
+        };
+
+        getProposal.mockResolvedValue(proposal);
+        getFlow.mockResolvedValue({
+            id: 'flow-4',
+            name: 'Flow',
+            state: 'DRAFT',
+            nodes: [],
+            edges: [],
+            createdAt: '2026-05-11T00:00:00.000Z',
+            updatedAt: '2026-05-11T00:00:00.000Z',
+        });
+
+        const result = await proposalService.approve('proposal-4');
+
+        expect(result.ok).toBe(true);
+        const savedFlow = putFlow.mock.calls[0]?.[0];
+        expect(savedFlow?.nodes).toEqual([
+            expect.objectContaining({
+                id: 'node-content',
+                config: expect.not.objectContaining({
+                    longformHtmlRenderEstimatedCostUsd: expect.any(Number),
+                }),
+            }),
+            expect.objectContaining({
+                id: 'node-video',
+                config: expect.objectContaining({
+                    renderer: 'hyperframes',
+                    htmlComposeEstimatedCostUsd: 2.7,
+                    hyperframesRenderEstimatedCostUsd: 2.4,
+                    longformHtmlRenderEstimatedCostUsd: 5.1,
+                }),
+            }),
+        ]);
+    });
 });

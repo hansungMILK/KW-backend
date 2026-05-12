@@ -96,7 +96,10 @@ export const proposalService = {
         }
         // 'vertical' or default: use existing positions (y-spaced by orchestrator)
 
-        const overriddenNodes = applyApprovalOverrides(layoutNodes, overrides, proposal.metadata);
+        const overriddenNodes = applyApprovalRenderCostBreakdown(
+            applyApprovalOverrides(layoutNodes, overrides, proposal.metadata),
+            proposal.estimatedCost
+        );
         const updatedMetadata = applyApprovalMetadataOverrides(proposal.metadata, overriddenNodes, overrides);
         const updatedEstimatedCost = applyApprovalEstimatedCostOverrides(
             proposal.estimatedCost,
@@ -223,6 +226,111 @@ function applyApprovalOverrides(
 }
 
 type ProposalCost = Proposal['estimatedCost'];
+type ProposalCostBreakdownItem = { blockType: string; amount: number };
+
+const LONGFORM_RENDER_COST_KEYS = {
+    compose: new Set(['html-compose', 'hyperframes-compose', 'longform-html-compose']),
+    render: new Set(['html-render', 'hyperframes-render', 'mp4-render', 'longform-html-render']),
+    combined: new Set(['longform-html-render-generation', 'longform-render', 'hyperframes-generation']),
+};
+
+function applyApprovalRenderCostBreakdown(
+    nodes: Array<Record<string, unknown>>,
+    estimatedCost: ProposalCost
+): Array<Record<string, unknown>> {
+    const breakdown = estimatedCost?.breakdown;
+    if (!breakdown?.length) return nodes;
+
+    const composeCost = sumBreakdownAmount(breakdown, LONGFORM_RENDER_COST_KEYS.compose);
+    const renderCost = sumBreakdownAmount(breakdown, LONGFORM_RENDER_COST_KEYS.render);
+    const combinedCost = sumBreakdownAmount(breakdown, LONGFORM_RENDER_COST_KEYS.combined);
+    const totalRenderCost = combinedCost || roundUsd(composeCost + renderCost);
+    if (totalRenderCost <= 0) return nodes;
+
+    let appliedMediaVideoCost = false;
+
+    return nodes.map(node => {
+        const blockType = node['blockType'] ?? node['type'];
+        if (typeof blockType !== 'string') return node;
+
+        const config = getNodeConfig(node);
+        const costConfig = getApprovalRenderCostConfig(blockType, config, {
+            composeCost,
+            renderCost,
+            totalRenderCost,
+            appliedMediaVideoCost,
+        });
+        if (!costConfig) return node;
+        if (blockType === 'media-video') appliedMediaVideoCost = true;
+
+        return {
+            ...node,
+            config: {
+                ...config,
+                ...costConfig,
+            },
+        };
+    });
+}
+
+function sumBreakdownAmount(breakdown: ProposalCostBreakdownItem[], keys: Set<string>): number {
+    return roundUsd(
+        breakdown.reduce((sum, item) => {
+            const blockType = String(item.blockType ?? '')
+                .trim()
+                .toLowerCase();
+            return keys.has(blockType) ? sum + readNumber(item.amount, 0) : sum;
+        }, 0)
+    );
+}
+
+function isApprovalRenderNode(blockType: string, config: Record<string, unknown>): boolean {
+    if (LONGFORM_RENDER_COST_KEYS.compose.has(blockType) || LONGFORM_RENDER_COST_KEYS.render.has(blockType))
+        {return true;}
+    if (blockType !== 'media-video') return false;
+
+    const renderer = String(config['renderer'] ?? config['rendererRoute'] ?? config['renderRoute'] ?? '');
+    const contentProfileId = String(config['contentProfileId'] ?? '');
+    return /hyperframes|html/i.test(renderer) || contentProfileId.startsWith('longform.');
+}
+
+function getApprovalRenderCostConfig(
+    blockType: string,
+    config: Record<string, unknown>,
+    costs: {
+        composeCost: number;
+        renderCost: number;
+        totalRenderCost: number;
+        appliedMediaVideoCost: boolean;
+    }
+): Record<string, unknown> | null {
+    if (LONGFORM_RENDER_COST_KEYS.compose.has(blockType)) {
+        return costs.composeCost > 0
+            ? {
+                  htmlComposeEstimatedCostUsd: costs.composeCost,
+                  longformHtmlRenderEstimatedCostUsd: costs.composeCost,
+              }
+            : null;
+    }
+
+    if (LONGFORM_RENDER_COST_KEYS.render.has(blockType)) {
+        return costs.renderCost > 0
+            ? {
+                  hyperframesRenderEstimatedCostUsd: costs.renderCost,
+                  longformHtmlRenderEstimatedCostUsd: costs.renderCost,
+              }
+            : null;
+    }
+
+    if (!isApprovalRenderNode(blockType, config) || costs.appliedMediaVideoCost) return null;
+
+    return {
+        ...(blockType === 'media-video' && !config['renderer'] ? { renderer: 'hyperframes' } : {}),
+        ...(costs.composeCost > 0 ? { htmlComposeEstimatedCostUsd: costs.composeCost } : {}),
+        ...(costs.renderCost > 0 ? { hyperframesRenderEstimatedCostUsd: costs.renderCost } : {}),
+        longformHtmlRenderEstimatedCostUsd: costs.totalRenderCost,
+    };
+}
 
 type ImageGenerationMetadata = {
     model?: string;
@@ -385,11 +493,14 @@ function findMediaImageNode(nodes: Array<Record<string, unknown>>): Record<strin
     return nodes.find(node => (node['blockType'] ?? node['type']) === 'media-image');
 }
 
+function getNodeConfig(node: Record<string, unknown>): Record<string, unknown> {
+    return node['config'] && typeof node['config'] === 'object' && !Array.isArray(node['config'])
+        ? (node['config'] as Record<string, unknown>)
+        : {};
+}
+
 function getMediaImageSceneCount(node: Record<string, unknown> | undefined): number {
-    const config =
-        node?.['config'] && typeof node['config'] === 'object' && !Array.isArray(node['config'])
-            ? (node['config'] as Record<string, unknown>)
-            : undefined;
+    const config = node ? getNodeConfig(node) : undefined;
     return readPositiveInt(
         config?.['count'] ?? config?.['scenes'] ?? config?.['sceneCount'] ?? config?.['frameCount'],
         12

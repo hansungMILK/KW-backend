@@ -147,6 +147,9 @@ const toUserVisibleAgentError = (error: unknown): string => {
     if (/RUN_COST_LIMIT_EXCEEDED|exceeds the per-run cap/i.test(message)) {
         return '예상 실행 비용이 1회 한도 $2.00를 넘어 실행을 차단했습니다. 장면 수나 이미지 품질을 낮추거나 한도를 조정해주세요.';
     }
+    if (/LONGFORM_HTML_RENDER_COST_LIMIT_EXCEEDED|longform HTML\/HyperFrames generation cost/i.test(message)) {
+        return '롱폼 HTML/HyperFrames 생성 예상 비용이 1회 한도 $5.00를 넘어 실행을 차단했습니다. 렌더 길이, 해상도, 장면 수를 낮춰주세요.';
+    }
     return message;
 };
 
