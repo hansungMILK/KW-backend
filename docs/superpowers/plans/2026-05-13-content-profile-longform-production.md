@@ -184,7 +184,7 @@ describe('content profile preferences', () => {
 Run:
 
 ```bash
-npx nx run @flows/backend:test --skip-nx-cache -- --run apps/backend/src/modules/content-profile/content-profile.spec.ts
+npx nx run @flows/backend:test --skip-nx-cache -- --run src/modules/content-profile/content-profile.spec.ts
 ```
 
 Expected: FAIL because `content-profile.ts` does not exist.
@@ -260,7 +260,7 @@ reviewMode: ReviewModeSchema.optional(),
 Run:
 
 ```bash
-npx nx run @flows/backend:test --skip-nx-cache -- --run apps/backend/src/modules/content-profile/content-profile.spec.ts
+npx nx run @flows/backend:test --skip-nx-cache -- --run src/modules/content-profile/content-profile.spec.ts
 npx nx run @flows/backend:typecheck --skip-nx-cache
 npx nx run @flows/flows:typecheck --skip-nx-cache
 ```

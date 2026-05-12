@@ -10,6 +10,23 @@ import { z } from 'zod';
 // ============================================================================
 
 export const ProposalStatusSchema = z.enum(['PENDING', 'APPROVED', 'REJECTED', 'EXPIRED']);
+export const ScriptToneIdSchema = z.enum([
+    'informative-reframe',
+    'mz-viral',
+    'news-anchor',
+    'story-dialogue',
+    'calm-explainer',
+]);
+export const ScriptToneIntensitySchema = z.enum(['low', 'medium', 'high']);
+export const ContentProfileIdSchema = z.enum([
+    'text.explainer.v1',
+    'image.single.v1',
+    'shorts.info.v1',
+    'shorts.story.v1',
+    'longform.explainer.v1',
+    'longform.documentary.v1',
+]);
+export const ReviewModeSchema = z.enum(['direct-run', 'script-first']);
 export const ImageStyleIdSchema = z.enum([
     'explainer-comic',
     'animation',
@@ -98,6 +115,10 @@ export const ProposalApproveRequestSchema = z.object({
     imageStyleId: ImageStyleIdSchema.optional(),
     imageQuality: ImageQualitySchema.optional(),
     sceneCount: z.number().int().min(1).max(24).optional(),
+    scriptToneId: ScriptToneIdSchema.optional(),
+    scriptToneIntensity: ScriptToneIntensitySchema.optional(),
+    contentProfileId: ContentProfileIdSchema.optional(),
+    reviewMode: ReviewModeSchema.optional(),
 });
 
 /**
