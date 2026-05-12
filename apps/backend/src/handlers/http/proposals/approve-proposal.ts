@@ -32,6 +32,10 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
             imageStyleId: bodyParsed.data.imageStyleId,
             imageQuality: bodyParsed.data.imageQuality,
             sceneCount: bodyParsed.data.sceneCount,
+            scriptToneId: bodyParsed.data.scriptToneId,
+            scriptToneIntensity: bodyParsed.data.scriptToneIntensity,
+            contentProfileId: bodyParsed.data.contentProfileId,
+            reviewMode: bodyParsed.data.reviewMode,
         }
     );
 

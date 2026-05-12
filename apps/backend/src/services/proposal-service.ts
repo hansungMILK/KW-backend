@@ -1,4 +1,8 @@
 import {
+    buildContentProfilePreferences,
+    enrichContentProfileNodeConfig,
+} from '../modules/content-profile/content-profile';
+import {
     GPT_IMAGE_MODEL,
     estimateGptImage2CostUsd,
     getImageStylePreset,
@@ -12,6 +16,13 @@ import { messageRepo } from '../repositories/message-repository';
 import { proposalRepo } from '../repositories/proposal-repository';
 import { generateNumericId } from '../utils/id-generator';
 
+import type {
+    ContentProfileId,
+    ContentProfilePreferences,
+    ReviewMode,
+    ScriptToneId,
+    ScriptToneIntensity,
+} from '../modules/content-profile/content-profile';
 import type { Message, Proposal } from '@flows/contracts';
 
 /**
@@ -35,6 +46,10 @@ type ApprovalOverrides = {
     imageStyleId?: string;
     imageQuality?: 'low' | 'medium' | 'high';
     sceneCount?: number;
+    scriptToneId?: ScriptToneId;
+    scriptToneIntensity?: ScriptToneIntensity;
+    contentProfileId?: ContentProfileId;
+    reviewMode?: ReviewMode;
 };
 
 export const proposalService = {
@@ -81,7 +96,7 @@ export const proposalService = {
         }
         // 'vertical' or default: use existing positions (y-spaced by orchestrator)
 
-        const overriddenNodes = applyApprovalOverrides(layoutNodes, overrides);
+        const overriddenNodes = applyApprovalOverrides(layoutNodes, overrides, proposal.metadata);
         const updatedMetadata = applyApprovalMetadataOverrides(proposal.metadata, overriddenNodes, overrides);
         const updatedEstimatedCost = applyApprovalEstimatedCostOverrides(
             proposal.estimatedCost,
@@ -171,33 +186,38 @@ export const proposalService = {
 
 function applyApprovalOverrides(
     nodes: Array<Record<string, unknown>>,
-    overrides: ApprovalOverrides | undefined
+    overrides: ApprovalOverrides | undefined,
+    metadata: Record<string, unknown> | undefined
 ): Array<Record<string, unknown>> {
     const imageStyleId = normalizeImageStyleId(overrides?.imageStyleId);
     const imageQuality = overrides?.imageQuality ? normalizeImageQuality(overrides.imageQuality) : undefined;
     const sceneCount = overrides?.sceneCount ? normalizeSceneCount(overrides.sceneCount, 12) : undefined;
-    if (!imageStyleId && !imageQuality && !sceneCount) return nodes;
+    const contentProfile = buildApprovalContentProfilePreferences(overrides, nodes, metadata);
+    if (!imageStyleId && !imageQuality && !sceneCount && !contentProfile) return nodes;
 
     return nodes.map(node => {
         const blockType = node['blockType'] ?? node['type'];
-        if (blockType !== 'media-image' && blockType !== 'content') return node;
+        if (typeof blockType !== 'string') return node;
+        const shouldApplyImageOverrides = blockType === 'media-image' || blockType === 'content';
+        if (!shouldApplyImageOverrides && !contentProfile) return node;
 
         const config =
             node['config'] && typeof node['config'] === 'object' && !Array.isArray(node['config'])
                 ? (node['config'] as Record<string, unknown>)
                 : {};
         const preset = blockType === 'media-image' && imageStyleId ? getImageStylePreset(imageStyleId) : undefined;
+        const overriddenConfig = {
+            ...config,
+            ...(blockType === 'media-image' && imageStyleId ? { imageStyleId, imageStyleLabel: preset?.label } : {}),
+            ...(blockType === 'media-image' && imageQuality ? { imageQuality } : {}),
+            ...(sceneCount ? (blockType === 'media-image' ? { count: sceneCount } : { scenes: sceneCount }) : {}),
+        };
 
         return {
             ...node,
-            config: {
-                ...config,
-                ...(blockType === 'media-image' && imageStyleId
-                    ? { imageStyleId, imageStyleLabel: preset?.label }
-                    : {}),
-                ...(blockType === 'media-image' && imageQuality ? { imageQuality } : {}),
-                ...(sceneCount ? (blockType === 'media-image' ? { count: sceneCount } : { scenes: sceneCount }) : {}),
-            },
+            config: contentProfile
+                ? enrichContentProfileNodeConfig(overriddenConfig, contentProfile, blockType)
+                : overriddenConfig,
         };
     });
 }
@@ -222,6 +242,8 @@ type ImageGenerationMetadata = {
     }>;
 };
 
+type ContentProfileMetadata = Partial<ContentProfilePreferences>;
+
 function applyApprovalMetadataOverrides(
     metadata: Record<string, unknown> | undefined,
     nodes: Array<Record<string, unknown>>,
@@ -229,8 +251,26 @@ function applyApprovalMetadataOverrides(
 ): Record<string, unknown> | undefined {
     const existingImageGeneration = getImageGenerationMetadata(metadata);
     const imageNode = findMediaImageNode(nodes);
-    if (!existingImageGeneration && !imageNode) return metadata;
+    const contentProfile = buildApprovalContentProfilePreferences(overrides, nodes, metadata);
+    if (!existingImageGeneration && !imageNode && !contentProfile) return metadata;
 
+    const imageGeneration =
+        existingImageGeneration || imageNode
+            ? buildApprovalImageGenerationMetadata(existingImageGeneration, imageNode, overrides)
+            : undefined;
+
+    return {
+        ...(metadata ?? {}),
+        ...(imageGeneration ? { imageGeneration } : {}),
+        ...(contentProfile ? { contentProfile } : {}),
+    };
+}
+
+function buildApprovalImageGenerationMetadata(
+    existingImageGeneration: ImageGenerationMetadata | undefined,
+    imageNode: Record<string, unknown> | undefined,
+    overrides: ApprovalOverrides | undefined
+): ImageGenerationMetadata {
     const sceneCount = normalizeSceneCount(
         overrides?.sceneCount ?? existingImageGeneration?.sceneCount,
         getMediaImageSceneCount(imageNode)
@@ -245,7 +285,7 @@ function applyApprovalMetadataOverrides(
     const textAndOtherEstimatedCostUsd = roundUsd(readNumber(existingImageGeneration?.textAndOtherEstimatedCostUsd, 0));
     const estimatedTotalCostUsd = roundUsd(imageEstimatedCostUsd + textAndOtherEstimatedCostUsd);
 
-    const imageGeneration: ImageGenerationMetadata = {
+    return {
         ...(existingImageGeneration ?? {}),
         model: GPT_IMAGE_MODEL,
         imageStyleId,
@@ -261,11 +301,32 @@ function applyApprovalMetadataOverrides(
             estimatedImageCostUsd: estimateGptImage2CostUsd(sceneCount, quality),
         })),
     };
+}
 
-    return {
-        ...(metadata ?? {}),
-        imageGeneration,
-    };
+function buildApprovalContentProfilePreferences(
+    overrides: ApprovalOverrides | undefined,
+    nodes: Array<Record<string, unknown>>,
+    metadata?: Record<string, unknown> | undefined
+): ContentProfilePreferences | undefined {
+    const existing = getContentProfileMetadata(metadata);
+    const hasOverrides = Boolean(
+        overrides?.scriptToneId ||
+            overrides?.scriptToneIntensity ||
+            overrides?.contentProfileId ||
+            overrides?.reviewMode
+    );
+    if (!existing && !hasOverrides) return undefined;
+
+    return buildContentProfilePreferences({
+        userMessage: '',
+        outputType: nodes.some(node => (node['blockType'] ?? node['type']) === 'media-video') ? 'video' : undefined,
+        hasMediaVideo: nodes.some(node => (node['blockType'] ?? node['type']) === 'media-video'),
+        hasMediaImage: nodes.some(node => (node['blockType'] ?? node['type']) === 'media-image'),
+        contentProfileId: overrides?.contentProfileId ?? existing?.contentProfileId,
+        scriptToneId: overrides?.scriptToneId ?? existing?.scriptToneId,
+        scriptToneIntensity: overrides?.scriptToneIntensity ?? existing?.scriptToneIntensity,
+        reviewMode: overrides?.reviewMode ?? existing?.reviewMode,
+    });
 }
 
 function applyApprovalEstimatedCostOverrides(
@@ -312,6 +373,12 @@ function getImageGenerationMetadata(
     const imageGeneration = metadata?.['imageGeneration'];
     if (!imageGeneration || typeof imageGeneration !== 'object' || Array.isArray(imageGeneration)) return undefined;
     return imageGeneration as ImageGenerationMetadata;
+}
+
+function getContentProfileMetadata(metadata: Record<string, unknown> | undefined): ContentProfileMetadata | undefined {
+    const contentProfile = metadata?.['contentProfile'];
+    if (!contentProfile || typeof contentProfile !== 'object' || Array.isArray(contentProfile)) return undefined;
+    return contentProfile as ContentProfileMetadata;
 }
 
 function findMediaImageNode(nodes: Array<Record<string, unknown>>): Record<string, unknown> | undefined {

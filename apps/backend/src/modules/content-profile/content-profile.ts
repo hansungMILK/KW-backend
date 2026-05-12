@@ -1,11 +1,6 @@
-import {
-    ContentProfileIdSchema,
-    ScriptToneIdSchema
-} from '@flows/contracts';
+import { ContentProfileIdSchema, ScriptToneIdSchema } from '@flows/contracts';
 
-import type {
-    ReviewModeSchema,
-    ScriptToneIntensitySchema} from '@flows/contracts';
+import type { ReviewModeSchema, ScriptToneIntensitySchema } from '@flows/contracts';
 import type { z } from 'zod';
 
 export type ScriptToneId = z.infer<typeof ScriptToneIdSchema>;
@@ -173,11 +168,45 @@ export const buildContentProfilePreferences = (params: {
     return {
         contentProfileId,
         scriptToneId: normalizeScriptToneId(params.scriptToneId ?? params.userMessage),
-        scriptToneIntensity: normalizeScriptToneIntensity(params.scriptToneIntensity),
-        reviewMode: normalizeReviewMode(params.reviewMode),
+        scriptToneIntensity: normalizeScriptToneIntensity(params.scriptToneIntensity ?? params.userMessage),
+        reviewMode: normalizeReviewMode(params.reviewMode ?? params.userMessage),
         toneOptions: SCRIPT_TONE_OPTIONS,
         intensityOptions: SCRIPT_TONE_INTENSITY_OPTIONS,
         reviewModeOptions: REVIEW_MODE_OPTIONS,
         profileOptions: CONTENT_PROFILE_OPTIONS,
+    };
+};
+
+const CONTENT_PROFILE_CONTEXT_BLOCKS = new Set([
+    'search',
+    'content',
+    'data',
+    'analysis',
+    'media-image',
+    'media-tts',
+    'media-video',
+    'integration',
+]);
+
+export const enrichContentProfileNodeConfig = (
+    config: Record<string, unknown> | undefined,
+    preferences: Pick<
+        ContentProfilePreferences,
+        'contentProfileId' | 'scriptToneId' | 'scriptToneIntensity' | 'reviewMode'
+    >,
+    blockType: string
+): Record<string, unknown> | undefined => {
+    if (!CONTENT_PROFILE_CONTEXT_BLOCKS.has(blockType)) return config;
+    const base = config ?? {};
+    return {
+        ...base,
+        contentProfileId: preferences.contentProfileId,
+        reviewMode: preferences.reviewMode,
+        ...(blockType === 'content'
+            ? {
+                  scriptToneId: preferences.scriptToneId,
+                  scriptToneIntensity: preferences.scriptToneIntensity,
+              }
+            : {}),
     };
 };

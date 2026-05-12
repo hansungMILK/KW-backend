@@ -1,4 +1,5 @@
 import { generateNumericId } from '../../utils/id-generator';
+import { buildContentProfilePreferences, enrichContentProfileNodeConfig } from '../content-profile/content-profile';
 import { recommendImageStyleId } from '../image-generation/image-style';
 
 import type { Orchestrator, ProposalResult } from './types';
@@ -50,6 +51,11 @@ export const mockOrchestrator: Orchestrator = {
         _currentContext?: Record<string, unknown>
     ): Promise<ProposalResult> {
         if (isImageOnlyRequest(userMessage)) {
+            const contentProfile = buildContentProfilePreferences({
+                userMessage,
+                outputType: 'image',
+                hasMediaImage: true,
+            });
             const nodes = IMAGE_BLOCKS.map((block, i) => ({
                 id: generateNumericId(),
                 blockId: `blk-${block.type}`,
@@ -57,10 +63,14 @@ export const mockOrchestrator: Orchestrator = {
                 blockType: block.type,
                 position: { x: 300, y: 100 + i * 120 },
                 state: 'IDLE',
-                config: {
-                    ...block.config,
-                    ...(block.type === 'content' ? { topic: userMessage } : {}),
-                },
+                config: enrichContentProfileNodeConfig(
+                    {
+                        ...block.config,
+                        ...(block.type === 'content' ? { topic: userMessage } : {}),
+                    },
+                    contentProfile,
+                    block.type
+                ),
             }));
             const edges = [
                 {
@@ -85,12 +95,19 @@ export const mockOrchestrator: Orchestrator = {
                     total: Math.round(total * 100) / 100,
                     breakdown,
                 },
+                metadata: { contentProfile },
                 approvalRequired: true,
                 assistantMessage: `이미지 생성용 2개 블록이 필요합니다. 예상 비용: $${total.toFixed(2)}. 승인하시겠습니까?`,
             };
         }
 
         const imageStyleId = recommendImageStyleId(userMessage);
+        const contentProfile = buildContentProfilePreferences({
+            userMessage,
+            outputType: 'video',
+            hasMediaVideo: true,
+            hasMediaImage: true,
+        });
 
         // Generate 8 nodes in a vertical layout
         const nodes = SHORTS_BLOCKS.map((block, i) => ({
@@ -100,12 +117,16 @@ export const mockOrchestrator: Orchestrator = {
             blockType: block.type,
             position: { x: 300, y: 100 + i * 120 },
             state: 'IDLE',
-            config: {
-                ...block.config,
-                ...(block.type === 'search' ? { query: userMessage } : {}),
-                ...(block.type === 'content' ? { topic: userMessage } : {}),
-                ...(block.type === 'media-image' ? { imageStyleId } : {}),
-            },
+            config: enrichContentProfileNodeConfig(
+                {
+                    ...block.config,
+                    ...(block.type === 'search' ? { query: userMessage } : {}),
+                    ...(block.type === 'content' ? { topic: userMessage } : {}),
+                    ...(block.type === 'media-image' ? { imageStyleId } : {}),
+                },
+                contentProfile,
+                block.type
+            ),
         }));
 
         // Linear edges: each node connects to the next
@@ -176,6 +197,7 @@ export const mockOrchestrator: Orchestrator = {
                 total: Math.round(total * 100) / 100,
                 breakdown,
             },
+            metadata: { contentProfile },
             approvalRequired: true,
             assistantMessage: `10~15장 이미지 기반 1분 쇼츠 파이프라인 8개 블록이 필요합니다. 예상 비용: $${total.toFixed(2)}. 승인하시겠습니까?`,
         };

@@ -6,6 +6,7 @@ import { env } from '../../config/env';
 import { traceService } from '../../services/trace-service';
 import { generateNumericId } from '../../utils/id-generator';
 import { log } from '../../utils/logger';
+import { buildContentProfilePreferences, enrichContentProfileNodeConfig } from '../content-profile/content-profile';
 import {
     DEFAULT_SHORTS_SCENE_COUNT,
     buildImageGenerationPreferences,
@@ -105,6 +106,12 @@ export const claudeOrchestrator: Orchestrator = {
             const mediaImageBlock = data.blocks.find(block => block.type === 'media-image');
             const sceneCount = resolveProposalSceneCount(userMessage, data);
             const textAndOtherEstimatedCostUsd = estimateNonImageCostUsd(data.blocks);
+            const contentProfile = buildContentProfilePreferences({
+                userMessage,
+                outputType: data.plan.outputType,
+                hasMediaVideo: data.blocks.some(block => block.type === 'media-video'),
+                hasMediaImage: data.blocks.some(block => block.type === 'media-image'),
+            });
             const imageGeneration = mediaImageBlock
                 ? buildImageGenerationPreferences({
                       userMessage,
@@ -114,18 +121,21 @@ export const claudeOrchestrator: Orchestrator = {
                       textAndOtherEstimatedCostUsd,
                   })
                 : undefined;
-            const nodes = data.blocks.map((block, i) => ({
-                id: generateNumericId(),
-                blockId: `blk-${block.type}`,
-                name: block.label,
-                blockType: block.type,
-                position: { x: 300, y: 100 + i * 120 },
-                state: 'IDLE',
-                config:
+            const nodes = data.blocks.map((block, i) => {
+                const config =
                     block.type === 'media-image' && imageGeneration
                         ? enrichImageNodeConfig(block.config, imageGeneration)
-                        : block.config,
-            }));
+                        : block.config;
+                return {
+                    id: generateNumericId(),
+                    blockId: `blk-${block.type}`,
+                    name: block.label,
+                    blockType: block.type,
+                    position: { x: 300, y: 100 + i * 120 },
+                    state: 'IDLE',
+                    config: enrichContentProfileNodeConfig(config, contentProfile, block.type),
+                };
+            });
 
             const edges = data.edges
                 .map(edge => ({
@@ -152,6 +162,9 @@ export const claudeOrchestrator: Orchestrator = {
                 blockCount: nodes.length,
                 edgeCount: edges.length,
                 estimatedCost: total,
+                contentProfileId: contentProfile.contentProfileId,
+                scriptToneId: contentProfile.scriptToneId,
+                reviewMode: contentProfile.reviewMode,
                 plan: data.plan,
                 latencyMs: Date.now() - startMs,
             });
@@ -164,7 +177,10 @@ export const claudeOrchestrator: Orchestrator = {
                     total: roundUsd(total),
                     breakdown,
                 },
-                metadata: imageGeneration ? { imageGeneration } : undefined,
+                metadata: {
+                    ...(imageGeneration ? { imageGeneration } : {}),
+                    contentProfile,
+                },
                 approvalRequired: true,
                 assistantMessage:
                     data.summary ||

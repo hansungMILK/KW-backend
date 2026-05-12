@@ -158,4 +158,217 @@ describe('proposalService.approve image generation overrides', () => {
         );
         expect(putMessage).toHaveBeenCalledOnce();
     });
+
+    it('applies selected content profile preferences to approved nodes and proposal metadata', async () => {
+        const proposal: Proposal = {
+            proposalId: 'proposal-2',
+            flowId: 'flow-2',
+            sourceMessageId: 'message-2',
+            status: 'PENDING',
+            proposedNodes: [
+                {
+                    id: 'node-content',
+                    blockType: 'content',
+                    type: 'content',
+                    config: {
+                        scenes: 12,
+                    },
+                },
+                {
+                    id: 'node-data',
+                    blockType: 'data',
+                    type: 'data',
+                    config: {},
+                },
+                {
+                    id: 'node-tts',
+                    blockType: 'media-tts',
+                    type: 'media-tts',
+                    config: {
+                        lang: 'ko',
+                    },
+                },
+                {
+                    id: 'node-video',
+                    blockType: 'media-video',
+                    type: 'media-video',
+                    config: {
+                        format: '9:16',
+                    },
+                },
+            ],
+            proposedEdges: [],
+            estimatedCost: {
+                currency: 'USD',
+                total: 0.34,
+            },
+            metadata: {},
+            approvalRequired: true,
+            createdAt: '2026-05-11T00:00:00.000Z',
+            updatedAt: '2026-05-11T00:00:00.000Z',
+        };
+
+        getProposal.mockResolvedValue(proposal);
+        getFlow.mockResolvedValue({
+            id: 'flow-2',
+            name: 'Flow',
+            state: 'DRAFT',
+            nodes: [],
+            edges: [],
+            createdAt: '2026-05-11T00:00:00.000Z',
+            updatedAt: '2026-05-11T00:00:00.000Z',
+        });
+
+        const result = await proposalService.approve('proposal-2', undefined, undefined, {
+            contentProfileId: 'shorts.info.v1',
+            scriptToneId: 'news-anchor',
+            scriptToneIntensity: 'high',
+            reviewMode: 'script-first',
+        });
+
+        expect(result.ok).toBe(true);
+        const savedFlow = putFlow.mock.calls[0]?.[0];
+        expect(savedFlow?.nodes).toEqual([
+            expect.objectContaining({
+                id: 'node-content',
+                config: expect.objectContaining({
+                    contentProfileId: 'shorts.info.v1',
+                    scriptToneId: 'news-anchor',
+                    scriptToneIntensity: 'high',
+                    reviewMode: 'script-first',
+                }),
+            }),
+            expect.objectContaining({
+                id: 'node-data',
+                config: expect.objectContaining({
+                    contentProfileId: 'shorts.info.v1',
+                    reviewMode: 'script-first',
+                }),
+            }),
+            expect.objectContaining({
+                id: 'node-tts',
+                config: expect.objectContaining({
+                    contentProfileId: 'shorts.info.v1',
+                    reviewMode: 'script-first',
+                }),
+            }),
+            expect.objectContaining({
+                id: 'node-video',
+                config: expect.objectContaining({
+                    contentProfileId: 'shorts.info.v1',
+                    reviewMode: 'script-first',
+                }),
+            }),
+        ]);
+
+        const savedProposal = putProposal.mock.calls[0]?.[0];
+        expect(savedProposal?.metadata?.['contentProfile']).toEqual(
+            expect.objectContaining({
+                contentProfileId: 'shorts.info.v1',
+                scriptToneId: 'news-anchor',
+                scriptToneIntensity: 'high',
+                reviewMode: 'script-first',
+            })
+        );
+    });
+
+    it('preserves existing content profile metadata when approval sends only a partial preference override', async () => {
+        const proposal: Proposal = {
+            proposalId: 'proposal-3',
+            flowId: 'flow-3',
+            sourceMessageId: 'message-3',
+            status: 'PENDING',
+            proposedNodes: [
+                {
+                    id: 'node-search',
+                    blockType: 'search',
+                    type: 'search',
+                    config: {
+                        query: '롱폼 제작',
+                    },
+                },
+                {
+                    id: 'node-content',
+                    blockType: 'content',
+                    type: 'content',
+                    config: {
+                        scenes: 8,
+                    },
+                },
+                {
+                    id: 'node-video',
+                    blockType: 'media-video',
+                    type: 'media-video',
+                    config: {
+                        format: '16:9',
+                    },
+                },
+            ],
+            proposedEdges: [],
+            metadata: {
+                contentProfile: {
+                    contentProfileId: 'longform.explainer.v1',
+                    scriptToneId: 'calm-explainer',
+                    scriptToneIntensity: 'low',
+                    reviewMode: 'direct-run',
+                },
+            },
+            approvalRequired: true,
+            createdAt: '2026-05-11T00:00:00.000Z',
+            updatedAt: '2026-05-11T00:00:00.000Z',
+        };
+
+        getProposal.mockResolvedValue(proposal);
+        getFlow.mockResolvedValue({
+            id: 'flow-3',
+            name: 'Flow',
+            state: 'DRAFT',
+            nodes: [],
+            edges: [],
+            createdAt: '2026-05-11T00:00:00.000Z',
+            updatedAt: '2026-05-11T00:00:00.000Z',
+        });
+
+        const result = await proposalService.approve('proposal-3', undefined, undefined, {
+            reviewMode: 'script-first',
+        });
+
+        expect(result.ok).toBe(true);
+        const savedFlow = putFlow.mock.calls[0]?.[0];
+        expect(savedFlow?.nodes).toEqual([
+            expect.objectContaining({
+                id: 'node-search',
+                config: expect.objectContaining({
+                    contentProfileId: 'longform.explainer.v1',
+                    reviewMode: 'script-first',
+                }),
+            }),
+            expect.objectContaining({
+                id: 'node-content',
+                config: expect.objectContaining({
+                    contentProfileId: 'longform.explainer.v1',
+                    scriptToneId: 'calm-explainer',
+                    scriptToneIntensity: 'low',
+                    reviewMode: 'script-first',
+                }),
+            }),
+            expect.objectContaining({
+                id: 'node-video',
+                config: expect.objectContaining({
+                    contentProfileId: 'longform.explainer.v1',
+                    reviewMode: 'script-first',
+                }),
+            }),
+        ]);
+
+        const savedProposal = putProposal.mock.calls[0]?.[0];
+        expect(savedProposal?.metadata?.['contentProfile']).toEqual(
+            expect.objectContaining({
+                contentProfileId: 'longform.explainer.v1',
+                scriptToneId: 'calm-explainer',
+                scriptToneIntensity: 'low',
+                reviewMode: 'script-first',
+            })
+        );
+    });
 });
