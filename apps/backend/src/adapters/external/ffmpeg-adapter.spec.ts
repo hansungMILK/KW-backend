@@ -5,7 +5,7 @@ import { join } from 'path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { isSupportedFontFile } from './ffmpeg-adapter';
+import { isSupportedFontFile, splitOverlayLines } from './ffmpeg-adapter';
 
 afterEach(() => {
     vi.doUnmock('child_process');
@@ -55,5 +55,14 @@ describe('ffmpeg process wrapper', () => {
 
         await expect(execution).resolves.toBeUndefined();
         expect(spawn.mock.calls[0]?.[2]).toEqual({ stdio: ['ignore', 'ignore', 'pipe'] });
+    });
+});
+
+describe('shorts overlay text wrapping', () => {
+    it('keeps the last title word when the first line is full', () => {
+        expect(splitOverlayLines('모수 와인 바꿔치기, 안성재 사과', 11, 2)).toEqual([
+            '모수 와인 바꿔치기,',
+            '안성재 사과',
+        ]);
     });
 });

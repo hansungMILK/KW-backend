@@ -409,22 +409,29 @@ function compactOverlayText(value: string | undefined, maxLength: number): strin
     return `${compact.slice(0, maxLength - 1)}...`;
 }
 
-function splitOverlayLines(value: string, maxCharsPerLine: number, maxLines: number): string[] {
+export function splitOverlayLines(value: string, maxCharsPerLine: number, maxLines: number): string[] {
     if (!value) return [];
     if (value.length <= maxCharsPerLine) return [value];
 
     const words = value.split(/\s+/).filter(Boolean);
+    const useWords = words.length > 1;
+    const tokens = useWords ? words : value.split('');
+    const joiner = useWords ? ' ' : '';
     const lines: string[] = [];
     let current = '';
-    for (const word of words.length > 1 ? words : value.split('')) {
-        const next = current ? `${current}${words.length > 1 ? ' ' : ''}${word}` : word;
+    for (const word of tokens) {
+        const next = current ? `${current}${joiner}${word}` : word;
         if (next.length <= maxCharsPerLine) {
             current = next;
             continue;
         }
-        if (current) lines.push(current);
+        if (current && lines.length < maxLines - 1) {
+            lines.push(current);
+            current = word;
+            continue;
+        }
+        if (current) break;
         current = word;
-        if (lines.length >= maxLines - 1) break;
     }
     if (current && lines.length < maxLines) lines.push(current);
     return lines.slice(0, maxLines);
