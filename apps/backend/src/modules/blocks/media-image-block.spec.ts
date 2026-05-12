@@ -120,6 +120,21 @@ describe('mediaImageBlock', () => {
         expect(prompt).toContain('이 논란은 숫자보다 신뢰 문제입니다.');
     });
 
+    it('keeps selected photorealistic style from being overridden by stale comic scene words', () => {
+        const prompt = buildGptImage2ScenePrompt({
+            styleId: 'photo-real',
+            title: '세레브라스 상장',
+            caption: '나스닥 간다',
+            narration: '세레브라스가 IPO 절차에 들어갔습니다.',
+            visualPrompt: 'comic-style newsroom scene with cartoon presenter holding a chip document',
+        });
+
+        expect(prompt).toContain('photorealistic editorial image');
+        expect(prompt).not.toContain('comic-style');
+        expect(prompt).not.toContain('cartoon');
+        expect(prompt).toContain('newsroom scene with presenter holding a chip document');
+    });
+
     it('fails fast when one parallel scene fails instead of waiting for hung scenes', async () => {
         const startedAt = Date.now();
 
@@ -414,5 +429,41 @@ describe('mediaImageBlock', () => {
                 }),
             ])
         );
+    });
+
+    it('enforces batch timeout even if timeout trace reporting hangs', async () => {
+        traceRecord.mockImplementation(async (_runId, _nodeId, _traceType, message) => {
+            if (message === 'media-image:batch.timeout') {
+                return await new Promise(() => undefined);
+            }
+            return undefined;
+        });
+        const startedAt = Date.now();
+
+        await expect(
+            mediaImageBlock.execute(
+                {
+                    normalizedScenes: [
+                        {
+                            sceneNumber: 1,
+                            caption: '멈춘 장면',
+                            imagePrompt: 'hang',
+                            sourceRefs: [],
+                            durationSec: 5,
+                        },
+                    ],
+                },
+                { imageBatchTimeoutMs: 20 },
+                {
+                    runId: 'run-hanging-timeout-trace',
+                    nodeId: 'node-image',
+                    onProgress: vi.fn(async () => undefined),
+                    onAsset: vi.fn(async () => undefined),
+                    isCancelled: vi.fn(async () => false),
+                }
+            )
+        ).rejects.toThrow(/batch timed out/i);
+
+        expect(Date.now() - startedAt).toBeLessThan(200);
     });
 });

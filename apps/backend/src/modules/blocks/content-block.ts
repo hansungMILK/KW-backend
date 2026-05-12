@@ -12,8 +12,8 @@ import type { BlockExecutor, BlockExecutorResult } from './types';
 
 // ── Prompts ──────────────────────────────────────────────────────────────────
 
-const CONTENT_SYSTEM_PROMPT = `You are a Korean YouTube Shorts scriptwriter.
-Given keywords and/or article summaries, generate a complete 10–15 scene, one-minute vertical comic Shorts plan in Korean.
+const CONTENT_SYSTEM_PROMPT = `You are a Korean YouTube Shorts scriptwriter and scene planner.
+Given keywords and/or article summaries, generate a complete 10–15 scene, one-minute vertical Shorts plan in Korean.
 
 Requirements:
 - If the user message contains "PRIMARY SOURCE", treat that source as the main brief. Supporting sources may verify or add caveats, but must not replace the primary source's angle.
@@ -23,7 +23,7 @@ Requirements:
 - title: a short high-impact Korean title that can stay at the top of every frame
 - hook: a punchy opening question or statement (one short sentence, max 32 Korean characters)
 - script: structured script metadata with hook, angle, and cta
-- style: structured visual style metadata for vertical-comic-shorts
+- style: structured visual style metadata for vertical-shorts
 - scenes: 10–15 scenes, each with:
   - sceneNumber
   - imageSlot: "[Image #1]" through "[Image #12]" or "[Image #15]"
@@ -31,7 +31,7 @@ Requirements:
   - topTitle: the same persistent Korean top title for every scene
   - caption: a short bold Korean on-screen subtitle (8–22 Korean characters)
   - narration: Korean voice-over text (one short spoken sentence, 18–42 Korean characters)
-  - imagePrompt: English AI image generation prompt for the central illustration only. Final title/subtitle overlays are added by the video compositor, but short in-scene Korean/English signage or document text is allowed when it clarifies the scene.
+  - imagePrompt: English style-neutral visual content brief for the central scene only. Describe subject, setting, action, props, and emotion. Do not bake in a visual style such as comic, animation, photorealistic, iPhone photo, illustration, manga, or cartoon unless the user explicitly requested it. The media-image block applies the selected visual style later. Final title/subtitle overlays are added by the video compositor, but short in-scene Korean/English signage or document text is allowed when it clarifies the scene.
   - visualText: backward-compatible short Korean main caption string
   - visual: { topTitle, mainCaption, sourceLabel? }
   - claimType: fact|hypothetical|opinion|joke
@@ -47,7 +47,7 @@ Respond with JSON only — no markdown fences, no extra text:
   "title": "...",
   "hook": "...",
   "script": { "hook": "...", "angle": "...", "cta": "..." },
-  "style": { "format": "vertical-comic-shorts", "aspectRatio": "9:16", "sceneCount": 12, "visualGrammar": {} },
+  "style": { "format": "vertical-shorts", "aspectRatio": "9:16", "sceneCount": 12, "visualGrammar": {} },
   "scenes": [
     { "sceneNumber": 1, "imageSlot": "[Image #1]", "storyBeat": "hook", "topTitle": "...", "caption": "...", "narration": "...", "imagePrompt": "...", "visualText": "...", "visual": { "topTitle": "...", "mainCaption": "...", "sourceLabel": "..." }, "claimType": "fact", "sourceRefs": ["source-1"], "durationSec": 5 },
     ...
@@ -111,7 +111,7 @@ function dummyContent(): BlockExecutorResult {
                 sceneNumber: 1,
                 caption: '[dummy] 먼저 배경',
                 narration: '[dummy] 이 주제가 왜 나왔는지 배경부터 짚어봅니다.',
-                imagePrompt: '[dummy] Clear Korean explainer scene, person reading article on laptop, comic style',
+                imagePrompt: '[dummy] Clear Korean explainer scene, person reading article on laptop',
                 visualText: '[dummy] 먼저 배경',
                 sourceRefs: ['source-1'],
                 durationSec: 6,
@@ -129,7 +129,7 @@ function dummyContent(): BlockExecutorResult {
                 sceneNumber: 3,
                 caption: '[dummy] 왜 중요하냐',
                 narration: '[dummy] 이 변화가 실제 사용자에게 주는 영향을 봅니다.',
-                imagePrompt: '[dummy] People comparing before and after outcomes, simple comic explainer',
+                imagePrompt: '[dummy] People comparing before and after outcomes in a clear explainer scene',
                 visualText: '[dummy] 왜 중요하냐',
                 sourceRefs: ['source-2'],
                 durationSec: 6,
@@ -138,7 +138,7 @@ function dummyContent(): BlockExecutorResult {
                 sceneNumber: 4,
                 caption: '[dummy] 주의할 점',
                 narration: '[dummy] 확인되지 않은 내용은 단정하지 않고 따로 표시합니다.',
-                imagePrompt: '[dummy] Caution sign beside a fact-check checklist, clean comic style',
+                imagePrompt: '[dummy] Caution sign beside a fact-check checklist in a clean explainer scene',
                 visualText: '[dummy] 주의할 점',
                 sourceRefs: ['source-2'],
                 durationSec: 6,
@@ -244,6 +244,19 @@ export const contentBlock: BlockExecutor = {
         const start = Date.now();
         const userMessage = buildUserMessage(input);
         const rulepack = selectShortsRulepack(input);
+        const reviewedOutput = parseReviewedOutput(config?.['reviewedOutput']);
+        if (reviewedOutput) {
+            const normalized = normalizeContentOutput(reviewedOutput, input, rulepack.id);
+            const validated = ContentOutputSchema.safeParse(normalized);
+            if (!validated.success) {
+                throw new Error(`[content-block] Reviewed output schema validation failed: ${validated.error.message}`);
+            }
+            log.info('[content-block] Using reviewed script output', {
+                sceneCount: validated.data.scenes.length,
+            });
+            return { output: validated.data as Record<string, unknown>, durationMs: Date.now() - start };
+        }
+
         const singleImageMode = isSingleImageMode(input, config);
         const genericTextMode = isGenericTextMode(input, config);
 
@@ -306,6 +319,18 @@ export const contentBlock: BlockExecutor = {
         return { output: validated.data as Record<string, unknown>, durationMs: Date.now() - start };
     },
 };
+
+function parseReviewedOutput(input: unknown): unknown | null {
+    if (!input) return null;
+    if (typeof input === 'object' && !Array.isArray(input)) return input;
+    if (typeof input !== 'string' || input.trim().length === 0) return null;
+    try {
+        const parsed = JSON.parse(input);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+    } catch {
+        throw new Error('[content-block] reviewedOutput must be valid JSON');
+    }
+}
 
 function isSingleImageMode(input: unknown, config?: Record<string, unknown>): boolean {
     const values: unknown[] = [config?.['mode'], config?.['type'], config?.['format'], config?.['scenario']];
@@ -458,7 +483,7 @@ function normalizeStyle(input: unknown, sceneCount?: number): Record<string, unk
     const style = isRecord(input) ? input : {};
     return {
         ...style,
-        format: typeof style['format'] === 'string' ? style['format'] : 'vertical-comic-shorts',
+        format: typeof style['format'] === 'string' ? style['format'] : 'vertical-shorts',
         aspectRatio: typeof style['aspectRatio'] === 'string' ? style['aspectRatio'] : '9:16',
         sceneCount: typeof style['sceneCount'] === 'number' ? style['sceneCount'] : sceneCount,
     };

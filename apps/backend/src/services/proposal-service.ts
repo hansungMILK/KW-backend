@@ -4,6 +4,7 @@ import {
     getImageStylePreset,
     normalizeImageQuality,
     normalizeImageStyleId,
+    normalizeSceneCount,
     roundUsd,
 } from '../modules/image-generation/image-style';
 import { type FlowRecord, flowRepo } from '../repositories/flow-repository';
@@ -33,6 +34,7 @@ export interface RejectResult {
 type ApprovalOverrides = {
     imageStyleId?: string;
     imageQuality?: 'low' | 'medium' | 'high';
+    sceneCount?: number;
 };
 
 export const proposalService = {
@@ -173,24 +175,28 @@ function applyApprovalOverrides(
 ): Array<Record<string, unknown>> {
     const imageStyleId = normalizeImageStyleId(overrides?.imageStyleId);
     const imageQuality = overrides?.imageQuality ? normalizeImageQuality(overrides.imageQuality) : undefined;
-    if (!imageStyleId && !imageQuality) return nodes;
+    const sceneCount = overrides?.sceneCount ? normalizeSceneCount(overrides.sceneCount, 12) : undefined;
+    if (!imageStyleId && !imageQuality && !sceneCount) return nodes;
 
     return nodes.map(node => {
         const blockType = node['blockType'] ?? node['type'];
-        if (blockType !== 'media-image') return node;
+        if (blockType !== 'media-image' && blockType !== 'content') return node;
 
         const config =
             node['config'] && typeof node['config'] === 'object' && !Array.isArray(node['config'])
                 ? (node['config'] as Record<string, unknown>)
                 : {};
-        const preset = imageStyleId ? getImageStylePreset(imageStyleId) : undefined;
+        const preset = blockType === 'media-image' && imageStyleId ? getImageStylePreset(imageStyleId) : undefined;
 
         return {
             ...node,
             config: {
                 ...config,
-                ...(imageStyleId ? { imageStyleId, imageStyleLabel: preset?.label } : {}),
-                ...(imageQuality ? { imageQuality } : {}),
+                ...(blockType === 'media-image' && imageStyleId
+                    ? { imageStyleId, imageStyleLabel: preset?.label }
+                    : {}),
+                ...(blockType === 'media-image' && imageQuality ? { imageQuality } : {}),
+                ...(sceneCount ? (blockType === 'media-image' ? { count: sceneCount } : { scenes: sceneCount }) : {}),
             },
         };
     });
@@ -225,7 +231,10 @@ function applyApprovalMetadataOverrides(
     const imageNode = findMediaImageNode(nodes);
     if (!existingImageGeneration && !imageNode) return metadata;
 
-    const sceneCount = readPositiveInt(existingImageGeneration?.sceneCount, getMediaImageSceneCount(imageNode));
+    const sceneCount = normalizeSceneCount(
+        overrides?.sceneCount ?? existingImageGeneration?.sceneCount,
+        getMediaImageSceneCount(imageNode)
+    );
     const imageQuality = normalizeImageQuality(overrides?.imageQuality ?? existingImageGeneration?.imageQuality);
     const imageStyleId =
         normalizeImageStyleId(overrides?.imageStyleId ?? existingImageGeneration?.imageStyleId) ??
@@ -269,7 +278,10 @@ function applyApprovalEstimatedCostOverrides(
 
     const imageGeneration = getImageGenerationMetadata(metadata);
     const imageNode = findMediaImageNode(nodes);
-    const sceneCount = readPositiveInt(imageGeneration?.sceneCount, getMediaImageSceneCount(imageNode));
+    const sceneCount = normalizeSceneCount(
+        overrides?.sceneCount ?? imageGeneration?.sceneCount,
+        getMediaImageSceneCount(imageNode)
+    );
     const imageQuality = normalizeImageQuality(overrides?.imageQuality ?? imageGeneration?.imageQuality);
     const imageEstimatedCostUsd = estimateGptImage2CostUsd(sceneCount, imageQuality);
 

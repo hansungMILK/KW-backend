@@ -156,6 +156,39 @@ describe('searchBlock', () => {
         expect(article['keyClaims']).toEqual(expect.arrayContaining([expect.stringContaining('2000년 빈티지')]));
     });
 
+    it('extracts article-view-content-div bodies instead of the first decorative article tag', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(
+                async () =>
+                    new Response(
+                        String.raw`<html><head>
+                          <meta property="og:title" content="세계 최대 AI 칩 세레브라스 나스닥 입성 가시화" />
+                          <meta property="article:published_time" content="2026-04-22T17:52:25+09:00" />
+                        </head><body>
+                          <article class="item"><span>기자명 최광민 기자 입력 2026.04.22 17:52 댓글 0</span></article>
+                          <article id="article-view-content-div" class="article-veiw-body view-page" itemprop="articleBody">
+                            <p>세레브라스 시스템즈가 미국 증권거래위원회에 IPO를 위한 증권신고서 Form S-1을 제출했습니다.</p>
+                            <p>종목명은 CBRS로 나스닥 글로벌 셀렉트 마켓 상장을 추진합니다.</p>
+                            <p>WSE-3는 일반 GPU 칩보다 58배 크고 추론 속도는 최대 15배 빠르다고 소개됐습니다.</p>
+                          </article>
+                        </body></html>`,
+                        { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } }
+                    )
+            )
+        );
+
+        const result = await searchBlock.execute({
+            query: '세레브라스 나스닥 https://www.aitimes.kr/news/articleView.html?idxno=39696',
+        });
+
+        const article = (result.output['articles'] as Array<Record<string, unknown>>)[0];
+        expect(article['fullText']).toContain('세레브라스 시스템즈가 미국 증권거래위원회에 IPO');
+        expect(article['fullText']).toContain('종목명은 CBRS');
+        expect(article['fullText']).toContain('58배 크고 추론 속도는 최대 15배');
+        expect(article['fullText']).not.toBe('기자명 최광민 기자 입력 2026.04.22 17:52 댓글 0');
+    });
+
     it('keeps web search for broad topics without a URL', async () => {
         const result = await searchBlock.execute({ query: 'KTX 예매가 어려워진 이유' });
 

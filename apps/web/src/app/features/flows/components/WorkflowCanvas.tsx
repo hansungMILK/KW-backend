@@ -781,8 +781,8 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     setSelectedConnectionId(null);
                 },
                 getWorkflow: () => ({
-                    nodes,
-                    edges: connections.filter(c => !c.id || !pendingEdgeIds.has(c.id)),
+                    nodes: nodesRef.current,
+                    edges: connectionsRef.current.filter(c => !c.id || !pendingEdgeIds.has(c.id)),
                 }),
                 loadWorkflow: async (state: WorkflowStateWithPorts) => {
                     lastPlacedPosRef.current = null;
@@ -907,6 +907,8 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                     suppressNextOnChangeRef.current = true;
                     setNodes(nodesReadyToRender);
                     setConnections(loadedConnections);
+                    nodesRef.current = nodesReadyToRender;
+                    connectionsRef.current = loadedConnections;
                     pastRef.current = [];
                     futureRef.current = [];
                     handleSelectionChange(null);

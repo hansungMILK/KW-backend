@@ -204,6 +204,19 @@ describe('compileWorkflowPlan', () => {
         expect(prefs.imageEstimatedCostUsd).toBe(0.492);
         expect(prefs.estimatedTotalCostUsd).toBe(0.672);
         expect(prefs.styleOptions.some(option => option.id === 'animation')).toBe(true);
+        expect(prefs.sceneCountOptions.map(option => option.count)).toEqual([8, 12, 16]);
+    });
+
+    it('lets the user requested visual style override planner defaults', () => {
+        const prefs = buildImageGenerationPreferences({
+            userMessage: '쇼츠 만들어줘. 실사 그림풍으로, 아이폰으로 찍은 것처럼.',
+            sceneCount: 12,
+            imageQuality: 'medium',
+            imageStyleId: 'explainer-comic',
+        });
+
+        expect(prefs.imageStyleId).toBe('photo-real');
+        expect(prefs.imageStyleLabel).toBe('실사풍');
     });
 
     it('does not leak invalid scene counts into media-image node config', () => {

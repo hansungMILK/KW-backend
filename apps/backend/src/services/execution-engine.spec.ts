@@ -59,6 +59,9 @@ vi.mock('../repositories/asset-repository', () => ({
 vi.mock('../repositories/run-repository', () => ({
     runRepo: {
         getRun: vi.fn(),
+        listRunNodes: vi.fn(),
+        putRunNode: vi.fn(),
+        updateRunStatus: vi.fn(),
         getRunNode: vi.fn(),
         updateRunNodeStatus: vi.fn(),
     },
@@ -71,6 +74,9 @@ const updateAssetStatus = vi.mocked(assetRepo.updateStatus);
 const deleteAsset = vi.mocked(assetRepo.delete);
 const broadcastToFlow = vi.mocked(wsService.broadcastToFlow);
 const getRun = vi.mocked(runRepo.getRun);
+const listRunNodes = vi.mocked(runRepo.listRunNodes);
+const putRunNode = vi.mocked(runRepo.putRunNode);
+const updateRunStatus = vi.mocked(runRepo.updateRunStatus);
 const getRunNode = vi.mocked(runRepo.getRunNode);
 const updateRunNodeStatus = vi.mocked(runRepo.updateRunNodeStatus);
 
@@ -106,6 +112,14 @@ describe('executionEngine asset publication', () => {
         } as RunNode;
 
         getRun.mockImplementation(async () => run);
+        listRunNodes.mockImplementation(async () => [node]);
+        putRunNode.mockImplementation(async updatedNode => {
+            node = updatedNode;
+        });
+        updateRunStatus.mockImplementation(async (_runId, status, extra) => {
+            run = { ...run, ...extra, status } as Run;
+            return { ok: true, run };
+        });
         getRunNode.mockImplementation(async () => node);
         updateRunNodeStatus.mockImplementation(async (_runId, _nodeId, status, extra) => {
             sequence.push(`node.status:${status}`);
@@ -434,7 +448,7 @@ describe('executionEngine asset publication', () => {
 
         const execution = executionEngine.handleNodeExecution(run.runId, node.nodeId, 'exec-timeout');
         await vi.advanceTimersByTimeAsync(0);
-        await vi.advanceTimersByTimeAsync(180000);
+        await vi.runOnlyPendingTimersAsync();
         await execution;
 
         expect(sequence).toContain('node.status:FAILED');
@@ -451,4 +465,92 @@ describe('executionEngine asset publication', () => {
             true
         );
     });
+
+    it('stops a step run after the content node so the script can be reviewed before media nodes spend money', async () => {
+        run = {
+            runId: 'run-step-review',
+            flowId: 'flow-step-review',
+            runType: 'FULL_FLOW',
+            status: 'QUEUED',
+            triggerSource: 'MANUAL',
+            executionMode: 'step',
+            flowSnapshot: {
+                nodes: [],
+                edges: [
+                    { sourceNodeId: 'node-search', targetNodeId: 'node-content' },
+                    { sourceNodeId: 'node-content', targetNodeId: 'node-data' },
+                    { sourceNodeId: 'node-data', targetNodeId: 'node-image' },
+                ],
+            },
+            createdAt: new Date().toISOString(),
+        } as Run;
+
+        const runNodes: RunNode[] = [
+            makeRunNode('node-search', 'search', []),
+            makeRunNode('node-content', 'content', ['node-search']),
+            makeRunNode('node-data', 'data', ['node-content']),
+            makeRunNode('node-image', 'media-image', ['node-data']),
+        ];
+
+        getRun.mockImplementation(async () => run);
+        listRunNodes.mockImplementation(async () => runNodes);
+        getRunNode.mockImplementation(async (_runId, nodeId) => runNodes.find(item => item.nodeId === nodeId) ?? null);
+        putRunNode.mockImplementation(async updatedNode => {
+            const index = runNodes.findIndex(item => item.nodeId === updatedNode.nodeId);
+            if (index >= 0) runNodes[index] = updatedNode;
+        });
+        updateRunStatus.mockImplementation(async (_runId, status, extra) => {
+            run = { ...run, ...extra, status } as Run;
+            return { ok: true, run };
+        });
+        updateRunNodeStatus.mockImplementation(async (_runId, nodeId, status, extra) => {
+            const index = runNodes.findIndex(item => item.nodeId === nodeId);
+            if (index < 0) return { ok: false, error: 'missing node' };
+            runNodes[index] = {
+                ...runNodes[index],
+                ...extra,
+                status,
+            } as RunNode;
+            sequence.push(`node.status:${nodeId}:${status}`);
+            return { ok: true, node: runNodes[index] };
+        });
+        executeBlock.mockImplementation(async blockType => ({
+            output:
+                blockType === 'content'
+                    ? {
+                          title: '검수 대상 대본',
+                          scenes: Array.from({ length: 10 }, (_, index) => ({ sceneNumber: index + 1 })),
+                      }
+                    : { ok: true },
+            durationMs: 1,
+        }));
+
+        await executionEngine.handleRunExecution(run.runId, 'exec-step-review');
+
+        expect(executeBlock.mock.calls.map(call => call[0])).toEqual(['search', 'content']);
+        expect(run.status).toBe('COMPLETED');
+        expect(run.finalOutputSummary).toMatchObject({
+            stoppedForReview: true,
+            reviewNodeId: 'node-content',
+        });
+        expect(runNodes.find(item => item.nodeId === 'node-data')?.status).toBe('SKIPPED');
+        expect(runNodes.find(item => item.nodeId === 'node-image')?.status).toBe('SKIPPED');
+        expect(broadcastToFlow.mock.calls.some(([, msg]) => (msg as { type?: string }).type === 'run.completed')).toBe(
+            true
+        );
+    });
 });
+
+function makeRunNode(nodeId: string, blockType: string, parentNodeIds: string[]): RunNode {
+    return {
+        runId: 'run-step-review',
+        nodeId,
+        blockType,
+        label: nodeId,
+        status: 'PENDING',
+        progress: 0,
+        retryCount: 0,
+        parentNodeIds,
+        updatedAt: new Date().toISOString(),
+    } as RunNode;
+}

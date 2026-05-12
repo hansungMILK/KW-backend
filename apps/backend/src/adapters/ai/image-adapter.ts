@@ -1,3 +1,5 @@
+import { request as undiciRequest } from 'undici';
+
 import { ensurePaidOpenAIAllowed } from './paid-openai-guard';
 import { env } from '../../config/env';
 import { GPT_IMAGE_MODEL, normalizeImageQuality } from '../../modules/image-generation/image-style';
@@ -178,13 +180,17 @@ async function fetchOpenAIImageData(
                     `OpenAI image API timed out after ${Math.round(IMAGE_TIMEOUT_MS / 1000)} seconds`
                 );
                 timeoutError.name = 'TimeoutError';
+                log.warn('OpenAI image API timeout fired', {
+                    model,
+                    timeoutMs: IMAGE_TIMEOUT_MS,
+                });
                 controller.abort(timeoutError);
                 reject(timeoutError);
             }, IMAGE_TIMEOUT_MS);
         });
 
         const requestPromise = (async () => {
-            const response = await fetch(`${env.openaiBaseUrl}/images/generations`, {
+            const response = await undiciRequest(`${env.openaiBaseUrl}/images/generations`, {
                 method: 'POST',
                 headers: {
                     Authorization: `Bearer ${apiKey}`,
@@ -198,26 +204,32 @@ async function fetchOpenAIImageData(
                     quality,
                     output_format: 'png',
                 }),
+                headersTimeout: IMAGE_TIMEOUT_MS,
+                bodyTimeout: IMAGE_TIMEOUT_MS,
                 signal: controller.signal,
             });
-            const text = await response.text();
+            const text = await Promise.race([response.body.text(), timeoutPromise]);
 
-            return { response, text };
+            return {
+                ok: response.statusCode >= 200 && response.statusCode < 300,
+                status: response.statusCode,
+                text,
+            };
         })();
         void requestPromise.catch(() => {
             /* timeout/cancel path already reports the primary error */
         });
 
-        const { response, text } = await Promise.race([requestPromise, timeoutPromise]);
+        const { ok, status, text } = await Promise.race([requestPromise, timeoutPromise]);
 
-        if (!response.ok) {
-            if (response.status === 403 && /verified|verification|organization/i.test(text)) {
+        if (!ok) {
+            if (status === 403 && /verified|verification|organization/i.test(text)) {
                 throw new Error(
                     `OpenAI image API error 403: ${model} requires OpenAI organization verification. Verify the organization at https://platform.openai.com/settings/organization/general, then rerun. Raw: ${text.slice(0, 180)}`
                 );
             }
 
-            throw new Error(`OpenAI image API error ${response.status}: ${text.slice(0, 260)}`);
+            throw new Error(`OpenAI image API error ${status}: ${text.slice(0, 260)}`);
         }
 
         try {

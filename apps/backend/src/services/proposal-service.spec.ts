@@ -50,6 +50,14 @@ describe('proposalService.approve image generation overrides', () => {
             status: 'PENDING',
             proposedNodes: [
                 {
+                    id: 'node-content',
+                    blockType: 'content',
+                    type: 'content',
+                    config: {
+                        scenes: 12,
+                    },
+                },
+                {
                     id: 'node-image',
                     blockType: 'media-image',
                     type: 'media-image',
@@ -101,6 +109,7 @@ describe('proposalService.approve image generation overrides', () => {
         const result = await proposalService.approve('proposal-1', undefined, undefined, {
             imageStyleId: 'animation',
             imageQuality: 'high',
+            sceneCount: 8,
         });
 
         expect(result.ok).toBe(true);
@@ -108,8 +117,15 @@ describe('proposalService.approve image generation overrides', () => {
         const savedFlow = putFlow.mock.calls[0]?.[0];
         expect(savedFlow?.nodes).toEqual([
             expect.objectContaining({
+                id: 'node-content',
                 config: expect.objectContaining({
-                    count: 12,
+                    scenes: 8,
+                }),
+            }),
+            expect.objectContaining({
+                id: 'node-image',
+                config: expect.objectContaining({
+                    count: 8,
                     imageStyleId: 'animation',
                     imageStyleLabel: '애니메이션',
                     imageQuality: 'high',
@@ -121,10 +137,10 @@ describe('proposalService.approve image generation overrides', () => {
         const savedProposal = putProposal.mock.calls[0]?.[0];
         expect(savedProposal?.estimatedCost).toEqual({
             currency: 'USD',
-            total: 2.21,
+            total: 1.55,
             breakdown: [
                 { blockType: 'content', amount: 0.03 },
-                { blockType: 'media-image', amount: 1.98 },
+                { blockType: 'media-image', amount: 1.32 },
                 { blockType: 'media-video', amount: 0.2 },
             ],
         });
@@ -134,10 +150,10 @@ describe('proposalService.approve image generation overrides', () => {
                 imageStyleId: 'animation',
                 imageStyleLabel: '애니메이션',
                 imageQuality: 'high',
-                sceneCount: 12,
-                imageEstimatedCostUsd: 1.98,
+                sceneCount: 8,
+                imageEstimatedCostUsd: 1.32,
                 textAndOtherEstimatedCostUsd: 0.23,
-                estimatedTotalCostUsd: 2.21,
+                estimatedTotalCostUsd: 1.55,
             })
         );
         expect(putMessage).toHaveBeenCalledOnce();

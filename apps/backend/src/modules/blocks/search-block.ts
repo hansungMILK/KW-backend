@@ -216,6 +216,7 @@ async function collectPrimaryUrl(url: string, topic: string, index: number): Pro
     const raw = await readResponseText(response, contentType);
     const text = contentType.includes('html') ? extractReadableText(raw) : normalizeWhitespace(raw);
     if (!text) throw new Error('URL fetch returned no readable text');
+    if (!isReadableArticleText(text)) throw new Error('URL fetch returned insufficient readable article text');
 
     const title = extractHtmlMeta(raw, 'og:title') || extractTagText(raw, 'title') || sourceFromUrl(url);
     const publishedAt = extractHtmlMeta(raw, 'article:published_time') || extractHtmlMeta(raw, 'og:regDate') || null;
@@ -331,16 +332,43 @@ async function readResponseText(response: Response, contentType: string): Promis
 }
 
 function extractReadableText(input: string): string {
-    const articleBody = extractHtmlRegion(input, /<[^>]+(?:id=["']article_body["']|class=["'][^"']*article_body)/i, [
-        /<aside\b/i,
-        /<div\b[^>]+class=["'][^"']*article_footer/i,
-        /<\/article>/i,
-    ]);
-    const article = articleBody ?? input.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)?.[1];
-    const body = article || input.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)?.[1] || input;
+    const preferredArticleBody = extractHtmlRegion(
+        input,
+        /<[^>]+(?:id=["'](?:article_body|article-view-content-div)["']|itemprop=["']articleBody["']|class=["'][^"']*(?:article_body|article-veiw-body|article-view-body|view-page)[^"']*["'])/i,
+        [/<aside\b/i, /<div\b[^>]+class=["'][^"']*article_footer/i, /<\/article>/i]
+    );
+    const preferredText = preferredArticleBody ? stripHtmlToText(preferredArticleBody) : '';
+    if (isReadableArticleText(preferredText)) return preferredText;
+
+    const articleTexts = [...input.matchAll(/<article\b[^>]*>([\s\S]*?)<\/article>/gi)]
+        .map(match => stripHtmlToText(match[1] ?? ''))
+        .filter(isReadableArticleText);
+    if (articleTexts.length > 0) {
+        return articleTexts.sort((a, b) => b.length - a.length)[0];
+    }
+
+    const body = input.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)?.[1] || input;
+    return stripHtmlToText(body);
+}
+
+function extractHtmlRegion(html: string, startPattern: RegExp, endPatterns: RegExp[]): string | null {
+    const startMatch = startPattern.exec(html);
+    if (!startMatch || startMatch.index < 0) return null;
+
+    const start = startMatch.index;
+    const closeOffset = html.indexOf('>', start);
+    const contentStart = closeOffset >= 0 ? closeOffset + 1 : start + startMatch[0].length;
+    const tail = html.slice(contentStart);
+    const endOffsets = endPatterns.map(pattern => tail.search(pattern)).filter(offset => offset >= 0);
+    const end = endOffsets.length > 0 ? contentStart + Math.min(...endOffsets) : html.length;
+    const region = html.slice(start, end);
+    return region.trim() ? region : null;
+}
+
+function stripHtmlToText(html: string): string {
     return normalizeWhitespace(
         decodeHtmlEntities(
-            body
+            html
                 .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
                 .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
                 .replace(/<noscript\b[\s\S]*?<\/noscript>/gi, ' ')
@@ -351,17 +379,10 @@ function extractReadableText(input: string): string {
     );
 }
 
-function extractHtmlRegion(html: string, startPattern: RegExp, endPatterns: RegExp[]): string | null {
-    const startMatch = startPattern.exec(html);
-    if (!startMatch || startMatch.index < 0) return null;
-
-    const start = startMatch.index;
-    const contentStart = start + startMatch[0].length;
-    const tail = html.slice(contentStart);
-    const endOffsets = endPatterns.map(pattern => tail.search(pattern)).filter(offset => offset >= 0);
-    const end = endOffsets.length > 0 ? contentStart + Math.min(...endOffsets) : html.length;
-    const region = html.slice(start, end);
-    return region.trim() ? region : null;
+function isReadableArticleText(text: string): boolean {
+    if (text.length < 40) return false;
+    if (/^기자명\s+.+입력\s+\d{4}\.\d{2}\.\d{2}/.test(text)) return false;
+    return true;
 }
 
 function extractHtmlMeta(html: string, property: string): string | null {

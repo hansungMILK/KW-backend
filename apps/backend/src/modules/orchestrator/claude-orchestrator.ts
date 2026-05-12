@@ -7,6 +7,7 @@ import { traceService } from '../../services/trace-service';
 import { generateNumericId } from '../../utils/id-generator';
 import { log } from '../../utils/logger';
 import {
+    DEFAULT_SHORTS_SCENE_COUNT,
     buildImageGenerationPreferences,
     enrichImageNodeConfig,
     estimateGptImage2CostUsd,
@@ -102,7 +103,7 @@ export const claudeOrchestrator: Orchestrator = {
             // 4. Convert to ProposalResult
             const data = seedRootBlockInputs(compileResult.data, userMessage);
             const mediaImageBlock = data.blocks.find(block => block.type === 'media-image');
-            const sceneCount = getMediaImageSceneCount(mediaImageBlock?.config);
+            const sceneCount = resolveProposalSceneCount(userMessage, data);
             const textAndOtherEstimatedCostUsd = estimateNonImageCostUsd(data.blocks);
             const imageGeneration = mediaImageBlock
                 ? buildImageGenerationPreferences({
@@ -199,9 +200,29 @@ function buildFallbackProposal(errorMessage: string): ProposalResult {
     };
 }
 
+function resolveProposalSceneCount(
+    userMessage: string,
+    data: { plan: { outputType: string }; blocks: Array<{ type: string; config?: Record<string, unknown> }> }
+): number {
+    const explicit = detectRequestedSceneCount(userMessage);
+    if (explicit) return explicit;
+    if (data.plan.outputType === 'video' || data.blocks.some(block => block.type === 'media-video')) {
+        return DEFAULT_SHORTS_SCENE_COUNT;
+    }
+    const mediaImageBlock = data.blocks.find(block => block.type === 'media-image');
+    return getMediaImageSceneCount(mediaImageBlock?.config);
+}
+
+function detectRequestedSceneCount(userMessage: string): number | undefined {
+    const match = userMessage.match(/(\d{1,2})\s*(?:장|컷|씬|scene|scenes|images?)/i);
+    if (!match) return undefined;
+    const count = Number(match[1]);
+    return Number.isFinite(count) && count > 0 ? Math.min(24, Math.floor(count)) : undefined;
+}
+
 function getMediaImageSceneCount(config: Record<string, unknown> | undefined): number {
     const count = Number(config?.['count'] ?? config?.['scenes'] ?? config?.['sceneCount'] ?? config?.['frameCount']);
-    return Number.isFinite(count) && count > 0 ? Math.floor(count) : 12;
+    return Number.isFinite(count) && count > 0 ? Math.floor(count) : DEFAULT_SHORTS_SCENE_COUNT;
 }
 
 function estimateNonImageCostUsd(blocks: Array<{ type: AllowedBlockType }>): number {

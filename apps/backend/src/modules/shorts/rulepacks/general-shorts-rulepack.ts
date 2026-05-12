@@ -14,7 +14,8 @@ export const GENERAL_SHORTS_RULEPACK: ShortsRulepack = {
 - Audience depends on the user request.
 - Use a fast hook, short captions, clear narration, and one idea per scene.
 - Avoid misleading certainty, fabricated statistics, or invented source references.
-- Each scene should include sourceRefs when it contains factual claims.`,
+- Each scene should include sourceRefs when it contains factual claims.
+- Keep imagePrompt style-neutral. Do not force comic, animation, photo-real, newspaper, or any other art style here.`,
     imagePrompt: `General visual rules:
 - The FFmpeg video compositor is responsible for final title/caption/source overlays.
 - Short Korean/English in-scene text is allowed when it helps explain the scene, but do not add unrelated text, fake logos, URLs, or watermark-like marks.

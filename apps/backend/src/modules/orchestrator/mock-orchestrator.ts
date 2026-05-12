@@ -1,4 +1,5 @@
 import { generateNumericId } from '../../utils/id-generator';
+import { recommendImageStyleId } from '../image-generation/image-style';
 
 import type { Orchestrator, ProposalResult } from './types';
 
@@ -15,7 +16,7 @@ const SHORTS_BLOCKS = [
     {
         type: 'media-image',
         label: '이미지 생성',
-        config: { count: 12, imageStyleId: 'explainer-comic', imageQuality: 'medium' },
+        config: { count: 12, imageQuality: 'medium' },
     },
     { type: 'media-tts', label: '음성 생성', config: { lang: 'ko' } },
     { type: 'media-video', label: '영상 합성', config: { format: '9:16', backgroundMusic: true } },
@@ -89,6 +90,8 @@ export const mockOrchestrator: Orchestrator = {
             };
         }
 
+        const imageStyleId = recommendImageStyleId(userMessage);
+
         // Generate 8 nodes in a vertical layout
         const nodes = SHORTS_BLOCKS.map((block, i) => ({
             id: generateNumericId(),
@@ -97,7 +100,12 @@ export const mockOrchestrator: Orchestrator = {
             blockType: block.type,
             position: { x: 300, y: 100 + i * 120 },
             state: 'IDLE',
-            config: block.config,
+            config: {
+                ...block.config,
+                ...(block.type === 'search' ? { query: userMessage } : {}),
+                ...(block.type === 'content' ? { topic: userMessage } : {}),
+                ...(block.type === 'media-image' ? { imageStyleId } : {}),
+            },
         }));
 
         // Linear edges: each node connects to the next

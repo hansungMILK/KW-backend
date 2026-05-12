@@ -87,6 +87,7 @@ type NodeExecutionMessage = {
     runId?: string;
     status?: string;
     progress?: number;
+    message?: string;
     errorCode?: string;
     errorMessage?: string;
     timestamp?: number;
@@ -203,6 +204,10 @@ export interface NodeUpdateInfo {
      */
     prevState?: NodeState;
     progress?: number;
+    /**
+     * Human-readable execution message, e.g. "이미지 4/12 생성 중".
+     */
+    message?: string;
     errorCode?: string;
     errorMessage?: string;
     /**
@@ -410,6 +415,7 @@ export const useInitFlowSocket = (options: UseInitFlowSocketOptions = {}) => {
                         state: effectiveState,
                         prevState: effectivePrevState,
                         progress: data.progress,
+                        message: typeof data.message === 'string' ? data.message : undefined,
                         stereo: data.stereo,
                     });
                 }
@@ -431,6 +437,7 @@ export const useInitFlowSocket = (options: UseInitFlowSocketOptions = {}) => {
                         isPort: false,
                         state: getNodeExecutionState(data),
                         progress: data.progress,
+                        message: data.message,
                         errorCode: data.errorCode,
                         errorMessage: data.errorMessage,
                         stereo: 0,

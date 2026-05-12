@@ -1,6 +1,12 @@
 import { api } from '@flows/web-core';
 
-import type { RunCreateResponse, RunGetResponse, RunNode, RunNodesListResponse } from '@flows/contracts';
+import type {
+    RunCreateResponse,
+    RunGetResponse,
+    RunListResponse,
+    RunNode,
+    RunNodesListResponse,
+} from '@flows/contracts';
 
 const _log = console.log.bind(console, '[runs-api]');
 
@@ -11,14 +17,21 @@ export interface RunView {
     createdAt: number;
 }
 
+export interface CreateFlowRunOptions {
+    executionMode?: 'full' | 'step';
+    triggerSource?: string;
+}
+
+export type FlowRunSummary = RunListResponse['items'][number];
+
 /**
  * Start a flow run
  * POST /flows/{flowId}/runs
  *
  */
-export const createFlowRun = async (flowId: string): Promise<RunView> => {
-    _log(`> createFlowRun(${flowId})`);
-    const response = await api.post<RunCreateResponse>(`/flows/${flowId}/runs`);
+export const createFlowRun = async (flowId: string, options?: CreateFlowRunOptions): Promise<RunView> => {
+    _log(`> createFlowRun(${flowId})`, options);
+    const response = await api.post<RunCreateResponse>(`/flows/${flowId}/runs`, options ?? {});
     return {
         id: response.data.runId,
         flowId: response.data.flowId,
@@ -35,6 +48,16 @@ export const getRun = async (runId: string): Promise<RunGetResponse> => {
     _log(`> getRun(${runId})`);
     const response = await api.get<RunGetResponse>(`/runs/${runId}`);
     return response.data;
+};
+
+/**
+ * List recent runs for a flow.
+ * GET /flows/{flowId}/runs
+ */
+export const listFlowRuns = async (flowId: string, limit = 20): Promise<FlowRunSummary[]> => {
+    _log(`> listFlowRuns(${flowId})`, { limit });
+    const response = await api.get<RunListResponse>(`/flows/${flowId}/runs`, { params: { limit } });
+    return response.data.items;
 };
 
 /**

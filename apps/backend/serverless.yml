@@ -24,7 +24,7 @@ provider:
         EXECUTION_QUEUE_URL: !If [IsLocalStage, '', !Ref ExecutionQueue]
         S3_BUCKET: !If [IsLocalStage, 'eureka-flows-local', !Ref AssetsBucket]
         CLOUDFRONT_DOMAIN: !If [IsLocalStage, '', !GetAtt AssetsDistribution.DomainName]
-        LOCAL_QUEUE_MODE: ${env:LOCAL_QUEUE_MODE, 'async'}
+        LOCAL_QUEUE_MODE: ${env:LOCAL_QUEUE_MODE, 'worker'}
         WS_CALLBACK_ENDPOINT:
             !If [
                 IsLocalStage,
@@ -53,7 +53,7 @@ provider:
         OPENAI_IMAGE_TIMEOUT_MS: ${env:OPENAI_IMAGE_TIMEOUT_MS, '120000'}
         OPENAI_IMAGE_MAX_ATTEMPTS: ${env:OPENAI_IMAGE_MAX_ATTEMPTS, '1'}
         OPENAI_IMAGE_SCENE_TIMEOUT_MS: ${env:OPENAI_IMAGE_SCENE_TIMEOUT_MS, '120000'}
-        OPENAI_IMAGE_SCENE_MAX_ATTEMPTS: ${env:OPENAI_IMAGE_SCENE_MAX_ATTEMPTS, '1'}
+        OPENAI_IMAGE_SCENE_MAX_ATTEMPTS: ${env:OPENAI_IMAGE_SCENE_MAX_ATTEMPTS, '2'}
         OPENAI_IMAGE_SCENE_CONCURRENCY: ${env:OPENAI_IMAGE_SCENE_CONCURRENCY, '12'}
         OPENAI_IMAGE_BATCH_TIMEOUT_BUFFER_MS: ${env:OPENAI_IMAGE_BATCH_TIMEOUT_BUFFER_MS, '30000'}
         OPENAI_TTS_MODEL: ${env:OPENAI_TTS_MODEL, 'gpt-4o-mini-tts'}

@@ -27,6 +27,48 @@ describe('contentBlock', () => {
         vi.clearAllMocks();
     });
 
+    it('uses a saved reviewed script without calling the AI writer again', async () => {
+        const reviewedOutput = {
+            title: '검수된 대본',
+            hook: '검수된 훅입니다',
+            script: {
+                hook: '검수된 훅입니다',
+                angle: '사용자가 직접 검수한 대본을 사용',
+                cta: '검수본으로 이어갑니다',
+            },
+            scenes: Array.from({ length: 10 }, (_, index) => ({
+                sceneNumber: index + 1,
+                imageSlot: `[Image #${index + 1}]`,
+                storyBeat: index === 0 ? 'hook' : 'setup',
+                topTitle: '검수된 대본',
+                caption: `검수 자막 ${index + 1}`,
+                narration: `검수된 내레이션 ${index + 1}입니다.`,
+                imagePrompt: `reviewed scene ${index + 1}`,
+                visualText: `검수 자막 ${index + 1}`,
+                visual: { topTitle: '검수된 대본', mainCaption: `검수 자막 ${index + 1}` },
+                claimType: 'fact',
+                sourceRefs: ['source-1'],
+                durationSec: 5,
+            })),
+            cta: '검수본으로 이어갑니다',
+            totalDurationSec: 50,
+        };
+
+        const result = await contentBlock.execute(
+            {
+                articles: [{ id: 'source-1', title: '원문', url: 'https://example.com', source: 'Example' }],
+            },
+            { reviewedOutput: JSON.stringify(reviewedOutput) }
+        );
+
+        expect(openaiAdapter.chatJson).not.toHaveBeenCalled();
+        expect(result.output).toMatchObject({
+            title: '검수된 대본',
+            hook: '검수된 훅입니다',
+            scenes: expect.arrayContaining([expect.objectContaining({ narration: '검수된 내레이션 1입니다.' })]),
+        });
+    });
+
     it('supports generic text explanation mode without forcing a Shorts scene contract', async () => {
         const result = await contentBlock.execute(
             {
@@ -66,7 +108,8 @@ describe('contentBlock', () => {
                     topTitle: '마누스 특가',
                     caption: '특가 확인',
                     narration: '마누스 특가 조건을 원문 기준으로 확인합니다.',
-                    imagePrompt: 'comic style AI subscription scene, concise in-scene text allowed',
+                    imagePrompt:
+                        'AI subscription checkout scene with app screen and cautious user, concise in-scene text allowed',
                     visualText: '특가 확인',
                     visual: { topTitle: '마누스 특가', mainCaption: '특가 확인' },
                     claimType: 'fact',
@@ -106,6 +149,9 @@ describe('contentBlock', () => {
         const request = vi.mocked(openaiAdapter.chatJson).mock.calls[0]?.[0];
         expect(request?.systemPrompt).toContain('PRIMARY SOURCE');
         expect(request?.systemPrompt).toContain("article's factual spine");
+        expect(request?.systemPrompt).toContain('style-neutral visual content brief');
+        expect(request?.systemPrompt).toContain('media-image block applies the selected visual style later');
+        expect(request?.systemPrompt).not.toContain('vertical comic Shorts plan');
         expect(request?.userMessage).toContain('PRIMARY SOURCE');
         expect(request?.userMessage).toContain('96% 할인된 연 32,000원');
         expect(request?.userMessage).toContain('primarySource=true');
@@ -124,7 +170,8 @@ describe('contentBlock', () => {
                     topTitle: '우로보로스',
                     caption: '핵심 정리',
                     narration: '국산 하네스 엔지니어링과 우로보로스를 원문 기준으로 봅니다.',
-                    imagePrompt: 'comic style engineering workflow, concise in-scene text allowed',
+                    imagePrompt:
+                        'engineering workflow scene with wiring harness and software diagram, concise in-scene text allowed',
                     visualText: '핵심 정리',
                     visual: { topTitle: '우로보로스', mainCaption: '핵심 정리' },
                     claimType: 'fact',

@@ -764,7 +764,233 @@ const getFirstOutputData = (node: NodeData, definition: BlockDefinitionWithFront
     return outputPortId ? node.outputData?.[outputPortId] : Object.values(node.outputData ?? {})[0];
 };
 
-const OutputPreview: React.FC<VisualizationProps> = ({ node, definition, contentHeight }) => {
+const isRecordValue = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const asRecordArray = (value: unknown): Record<string, unknown>[] =>
+    Array.isArray(value) ? value.filter(isRecordValue) : [];
+
+const asStringValue = (value: unknown): string | undefined =>
+    typeof value === 'string' && value.trim() ? value : undefined;
+
+const asNumberValue = (value: unknown): number | undefined =>
+    typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+
+const firstStringValue = (...values: unknown[]): string | undefined => {
+    for (const value of values) {
+        const stringValue = asStringValue(value);
+        if (stringValue) return stringValue;
+    }
+    return undefined;
+};
+
+const getUrlFromRecord = (value: unknown): string | undefined => {
+    if (!isRecordValue(value)) return undefined;
+    return firstStringValue(value.url, value.publicUrl, value.data);
+};
+
+const buildScriptDraft = (scenes: Record<string, unknown>[]): string =>
+    scenes
+        .map(scene => firstStringValue(scene.narration, scene.caption, scene.visualText))
+        .filter((line): line is string => Boolean(line))
+        .join('\n');
+
+const applyScriptDraft = (value: Record<string, unknown>, draft: string): Record<string, unknown> => {
+    const lines = draft.split('\n').map(line => line.trim());
+    const scenes = asRecordArray(value.scenes).map((scene, index) => {
+        const narration =
+            index < lines.length ? lines[index] : firstStringValue(scene.narration, scene.caption, scene.visualText);
+        return narration !== undefined ? { ...scene, narration } : scene;
+    });
+
+    return {
+        ...value,
+        scenes,
+        reviewedAt: new Date().toISOString(),
+    };
+};
+
+const hasFriendlyOutputPreview = (value: unknown): boolean => {
+    if (!isRecordValue(value)) return false;
+    return (
+        isRecordValue(value.script) ||
+        asRecordArray(value.scenes).length > 0 ||
+        Boolean(value.title || value.hook) ||
+        asRecordArray(value.images).length > 0 ||
+        isRecordValue(value.audio) ||
+        isRecordValue(value.video) ||
+        asRecordArray(value.artifacts).some(artifact => artifact.type === 'video')
+    );
+};
+
+const FriendlyOutputPreview: React.FC<{
+    value: unknown;
+    maxHeight: number;
+    reviewEnabled?: boolean;
+    reviewedOutputSaved?: boolean;
+    onReviewedOutputSave?: (value: Record<string, unknown>) => void;
+}> = ({ value, maxHeight, reviewEnabled = false, reviewedOutputSaved = false, onReviewedOutputSave }) => {
+    const recordValue = isRecordValue(value) ? value : null;
+    const scenes = asRecordArray(recordValue?.scenes);
+    const initialDraft = buildScriptDraft(scenes);
+    const [draft, setDraft] = useState(initialDraft);
+
+    useEffect(() => {
+        setDraft(initialDraft);
+    }, [initialDraft]);
+
+    if (!recordValue) return null;
+
+    const script = isRecordValue(recordValue.script) ? recordValue.script : undefined;
+    if (script || scenes.length > 0 || recordValue.title || recordValue.hook) {
+        const title = firstStringValue(recordValue.title, script?.hook, recordValue.hook) ?? '생성된 대본';
+        const angle = firstStringValue(script?.angle, recordValue.angle);
+        const cta = firstStringValue(script?.cta, recordValue.cta);
+        const lines = scenes
+            .map(scene => firstStringValue(scene.narration, scene.caption, scene.topTitle))
+            .filter((line): line is string => Boolean(line))
+            .slice(0, 4);
+
+        return (
+            <div
+                className="p-2.5 bg-amber-500/10 rounded-lg border border-amber-500/30 overflow-auto"
+                style={{ maxHeight }}
+            >
+                <div className="text-[11px] font-semibold text-amber-200 line-clamp-2">{title}</div>
+                {angle && <div className="mt-1 text-[10px] text-foreground/70 line-clamp-2">{angle}</div>}
+                {lines.length > 0 && (
+                    <div className="mt-2 space-y-1">
+                        {lines.map((line, index) => (
+                            <div key={`${index}-${line}`} className="text-[10px] text-foreground/85 line-clamp-2">
+                                {index + 1}. {line}
+                            </div>
+                        ))}
+                    </div>
+                )}
+                {cta && <div className="mt-2 text-[10px] text-muted-foreground line-clamp-1">마무리: {cta}</div>}
+                {reviewEnabled && scenes.length > 0 && (
+                    <div className="mt-2 space-y-1.5">
+                        <textarea
+                            className="min-h-20 w-full resize-y rounded border border-border bg-background/80 p-2 text-[10px] text-foreground outline-none focus:border-primary"
+                            value={draft}
+                            onChange={event => setDraft(event.target.value)}
+                            onWheel={event => event.stopPropagation()}
+                            aria-label="대본 검수본"
+                        />
+                        <button
+                            type="button"
+                            className="w-full rounded bg-primary px-2 py-1.5 text-[10px] font-medium text-primary-foreground hover:bg-primary/90"
+                            onClick={event => {
+                                event.stopPropagation();
+                                onReviewedOutputSave?.(applyScriptDraft(recordValue, draft));
+                            }}
+                        >
+                            {reviewedOutputSaved ? '검수본 다시 저장' : '대본 검수본 저장'}
+                        </button>
+                        {reviewedOutputSaved && (
+                            <div className="text-[10px] text-emerald-300">
+                                저장된 검수본으로 다음 전체 실행이 이어집니다.
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    const images = asRecordArray(recordValue.images);
+    if (images.length > 0) {
+        return (
+            <div className="p-2 bg-muted/10 rounded-lg border border-border/30 overflow-auto" style={{ maxHeight }}>
+                <div className="mb-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                    <span>이미지 {images.length}장 생성됨</span>
+                    <span>{images[0]?.sceneNumber ? `씬 ${String(images[0].sceneNumber)}부터` : '갤러리'}</span>
+                </div>
+                <div className="grid grid-cols-3 gap-1.5">
+                    {images.slice(0, 6).map((image, index) => {
+                        const url = getUrlFromRecord(image);
+                        return (
+                            <div
+                                key={`${url ?? 'image'}-${index}`}
+                                className="aspect-[9/16] overflow-hidden rounded bg-black/30"
+                            >
+                                {url ? (
+                                    <S3Image
+                                        src={url}
+                                        className="h-full w-full object-cover"
+                                        alt={`Scene ${index + 1}`}
+                                    />
+                                ) : (
+                                    <div className="flex h-full items-center justify-center text-[9px] text-muted-foreground">
+                                        이미지
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+        );
+    }
+
+    const audio = isRecordValue(recordValue.audio) ? recordValue.audio : undefined;
+    if (audio) {
+        const url = getUrlFromRecord(audio);
+        const durationSec = asNumberValue(audio.durationSec);
+        return (
+            <div className="p-2.5 bg-muted/10 rounded-lg border border-border/30 overflow-auto" style={{ maxHeight }}>
+                <div className="text-[11px] font-semibold text-foreground">나레이션 음성</div>
+                {durationSec !== undefined && (
+                    <div className="mt-1 text-[10px] text-muted-foreground">길이 약 {Math.round(durationSec)}초</div>
+                )}
+                {url ? (
+                    <audio className="mt-2 w-full" controls src={url} />
+                ) : (
+                    <div className="mt-2 text-[10px]">음성 생성 완료</div>
+                )}
+            </div>
+        );
+    }
+
+    const video = isRecordValue(recordValue.video) ? recordValue.video : undefined;
+    const artifactVideo = asRecordArray(recordValue.artifacts).find(artifact => artifact.type === 'video');
+    if (video || artifactVideo) {
+        const url = getUrlFromRecord(video ?? artifactVideo);
+        const durationSec = asNumberValue(video?.durationSec);
+        return (
+            <div className="p-2.5 bg-muted/10 rounded-lg border border-border/30 overflow-auto" style={{ maxHeight }}>
+                <div className="text-[11px] font-semibold text-foreground">최종 영상</div>
+                {durationSec !== undefined && (
+                    <div className="mt-1 text-[10px] text-muted-foreground">길이 약 {Math.round(durationSec)}초</div>
+                )}
+                {url ? (
+                    <>
+                        <video className="mt-2 max-h-36 w-full rounded bg-black" controls src={url} />
+                        <a
+                            className="mt-2 block text-[10px] text-primary underline"
+                            href={url}
+                            target="_blank"
+                            rel="noreferrer"
+                        >
+                            MP4 열기/다운로드
+                        </a>
+                    </>
+                ) : (
+                    <div className="mt-2 text-[10px]">영상 생성 완료</div>
+                )}
+            </div>
+        );
+    }
+
+    return null;
+};
+
+const OutputPreview: React.FC<VisualizationProps & { onConfigChange?: (key: string, value: ConfigValue) => void }> = ({
+    node,
+    definition,
+    contentHeight,
+    onConfigChange,
+}) => {
     const { t } = useTranslation(['nodes']);
     const packet = getFirstOutputData(node, definition);
 
@@ -809,6 +1035,19 @@ const OutputPreview: React.FC<VisualizationProps> = ({ node, definition, content
 
     // JSON type or object value
     if (packet.type === 'json' || (packet.value !== null && typeof packet.value === 'object')) {
+        if (hasFriendlyOutputPreview(packet.value)) {
+            return (
+                <FriendlyOutputPreview
+                    value={packet.value}
+                    maxHeight={maxH}
+                    reviewEnabled={definition.type === 'content'}
+                    reviewedOutputSaved={
+                        typeof node.config?.reviewedOutput === 'string' && node.config.reviewedOutput.length > 0
+                    }
+                    onReviewedOutputSave={updated => onConfigChange?.('reviewedOutput', JSON.stringify(updated))}
+                />
+            );
+        }
         return (
             <div className="p-2 bg-muted/10 rounded-lg border border-border/30" onWheel={e => e.stopPropagation()}>
                 <JsonViewer data={packet.value} maxHeight={maxH} collapsed={2} />
@@ -1421,7 +1660,12 @@ export const NodeBlock: React.FC<NodeBlockProps> = ({
                         })}
 
                     {/* Output Preview for process nodes */}
-                    <OutputPreview node={node} definition={definition} contentHeight={contentAreaHeight} />
+                    <OutputPreview
+                        node={node}
+                        definition={definition}
+                        contentHeight={contentAreaHeight}
+                        onConfigChange={onConfigChange}
+                    />
                 </div>
 
                 {/* State status text */}

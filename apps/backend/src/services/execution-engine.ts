@@ -90,7 +90,9 @@ function resolveNodeExecutionTimeoutMs(
         const waveCount = Math.ceil(sceneCount / Math.max(1, env.openaiImageSceneConcurrency));
         return Math.max(
             env.nodeExecutionTimeoutMs,
-            waveCount * env.openaiImageSceneTimeoutMs + env.openaiImageBatchTimeoutBufferMs + 30000
+            waveCount * env.openaiImageSceneTimeoutMs * env.openaiImageSceneMaxAttempts +
+                env.openaiImageBatchTimeoutBufferMs +
+                30000
         );
     }
 
@@ -111,6 +113,19 @@ function arrayLength(value: unknown): number | undefined {
 
 function positiveNumber(value: unknown): number | undefined {
     return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined;
+}
+
+async function skipPendingNodes(runId: string): Promise<void> {
+    const remainingNodes = await runRepo.listRunNodes(runId);
+    for (const node of remainingNodes) {
+        if (node.status === 'PENDING') {
+            await runRepo.putRunNode({
+                ...node,
+                status: 'SKIPPED',
+                updatedAt: new Date().toISOString(),
+            });
+        }
+    }
 }
 
 // ============================================================================
@@ -284,6 +299,45 @@ export const executionEngine = {
                 hasFailed = true;
             }
 
+            const reviewNode = waveResults.find(
+                nodeAfter =>
+                    run.executionMode === 'step' &&
+                    nodeAfter?.blockType === 'content' &&
+                    nodeAfter.status === 'COMPLETED'
+            );
+            if (reviewNode) {
+                await skipPendingNodes(runId);
+                await runRepo.updateRunStatus(runId, 'COMPLETED', {
+                    completedAt: new Date().toISOString(),
+                    finalOutputSummary: {
+                        stoppedForReview: true,
+                        reviewNodeId: reviewNode.nodeId,
+                        message: 'Script review step completed',
+                    },
+                });
+
+                try {
+                    await wsService.broadcastToFlow(run.flowId, {
+                        type: 'run.completed',
+                        id: runId,
+                        runId,
+                        flowId: run.flowId,
+                        status: 'COMPLETED',
+                        reviewNodeId: reviewNode.nodeId,
+                        message: '대본 검수 단계가 완료되었습니다.',
+                        timestamp: Date.now(),
+                    });
+                } catch {
+                    /* non-fatal */
+                }
+                try {
+                    await traceService.record(runId, reviewNode.nodeId, 'STATUS', 'Script review step completed');
+                } catch {
+                    /* non-fatal */
+                }
+                return;
+            }
+
             if (hasFailed) break;
         }
 
@@ -293,17 +347,7 @@ export const executionEngine = {
 
         if (hasFailed) {
             // Mark all remaining PENDING nodes as SKIPPED
-            const remainingNodes = await runRepo.listRunNodes(runId);
-            for (const node of remainingNodes) {
-                if (node.status === 'PENDING') {
-                    // PENDING → SKIPPED: not a defined transition, so we do a direct put
-                    await runRepo.putRunNode({
-                        ...node,
-                        status: 'SKIPPED',
-                        updatedAt: new Date().toISOString(),
-                    });
-                }
-            }
+            await skipPendingNodes(runId);
 
             const failedNode = (await runRepo.listRunNodes(runId)).find(n => n.status === 'FAILED');
             const failedNodeId = failedNode?.nodeId ?? 'unknown';

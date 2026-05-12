@@ -46,6 +46,10 @@ type ImageGenerationMetadata = {
         textAndOtherEstimatedCostUsd?: number;
         estimatedTotalCostUsd?: number;
         styleOptions?: ImageStyleOption[];
+        sceneCountOptions?: Array<{
+            count: number;
+            label: string;
+        }>;
         qualityOptions?: Array<{
             id: ImageQuality;
             label: string;
@@ -59,7 +63,7 @@ interface FlowAgentPanelProps {
     onClose: () => void;
     flowId: string | null;
     /** Called after proposal approved — passes nodes/edges to place on canvas */
-    onApproveProposal?: (nodes: unknown[], edges: unknown[]) => void;
+    onApproveProposal?: (nodes: unknown[], edges: unknown[]) => void | Promise<void>;
     /** Externally pushed proposal.created WS event */
     externalProposal?: ProposalCreatedMessage | null;
     runStatus?: 'running' | 'completed' | 'failed' | null;
@@ -67,6 +71,7 @@ interface FlowAgentPanelProps {
         nodeLabel?: string;
         progress?: number;
         state?: 'queued' | 'running' | 'completed' | 'failed';
+        message?: string;
         error?: string | null;
     } | null;
 }
@@ -129,6 +134,9 @@ export const FlowAgentPanel = ({
     const [isThinking, setIsThinking] = useState(false);
     const [proposalImageStyles, setProposalImageStyles] = useState<Record<string, ImageStyleId>>({});
     const [proposalImageQualities, setProposalImageQualities] = useState<Record<string, ImageQuality>>({});
+    const [proposalSceneCounts, setProposalSceneCounts] = useState<Record<string, number>>({});
+    const [approvingProposalIds, setApprovingProposalIds] = useState<Record<string, boolean>>({});
+    const [approvedProposalIds, setApprovedProposalIds] = useState<Record<string, boolean>>({});
     const bottomRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const isComposingRef = useRef(false);
@@ -250,14 +258,27 @@ export const FlowAgentPanel = ({
     };
 
     const handleApprove = async (proposal: MessageProposal) => {
+        if (approvingProposalIds[proposal.id]) return;
+        setApprovingProposalIds(prev => ({ ...prev, [proposal.id]: true }));
         try {
             const imageGeneration = asImageGenerationMetadata(proposal.metadata);
             const result = await approveProposal(proposal.id, {
                 imageStyleId: proposalImageStyles[proposal.id] ?? imageGeneration?.imageStyleId,
                 imageQuality: proposalImageQualities[proposal.id] ?? imageGeneration?.imageQuality,
+                sceneCount: proposalSceneCounts[proposal.id] ?? imageGeneration?.sceneCount,
             });
-            onApproveProposal?.(result.nodes, result.edges);
-            setMessages(prev => prev.filter(m => m.proposal?.id !== proposal.id));
+            await onApproveProposal?.(result.nodes, result.edges);
+            setApprovedProposalIds(prev => ({ ...prev, [proposal.id]: true }));
+            setMessages(prev =>
+                prev.map(message =>
+                    message.proposal?.id === proposal.id
+                        ? {
+                              ...message,
+                              text: `제안이 승인되었습니다. ${result.nodes.length}개 블록이 캔버스에 배치되었습니다.`,
+                          }
+                        : message
+                )
+            );
         } catch (error) {
             setMessages(prev => [
                 ...prev,
@@ -267,6 +288,8 @@ export const FlowAgentPanel = ({
                     text: toUserVisibleAgentError(error),
                 },
             ]);
+        } finally {
+            setApprovingProposalIds(prev => ({ ...prev, [proposal.id]: false }));
         }
     };
 
@@ -322,6 +345,7 @@ export const FlowAgentPanel = ({
                                 현재 노드: <span className="text-foreground">{runActivity.nodeLabel}</span>
                             </div>
                         )}
+                        {runActivity?.message && <div className="mt-1 text-foreground/90">{runActivity.message}</div>}
                         {typeof runActivity?.progress === 'number' && (
                             <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
                                 <div
@@ -380,14 +404,29 @@ export const FlowAgentPanel = ({
                             imageGeneration?.recommendedStyleId;
                         const selectedQuality =
                             proposalImageQualities[proposal.id] ?? imageGeneration?.imageQuality ?? 'medium';
+                        const selectedSceneCount =
+                            proposalSceneCounts[proposal.id] ?? imageGeneration?.sceneCount ?? 12;
                         const selectedQualityOption = imageGeneration?.qualityOptions?.find(
                             option => option.id === selectedQuality
                         );
-                        const totalCost =
+                        const baseSceneCount = Math.max(1, imageGeneration?.sceneCount ?? 12);
+                        const selectedImageCost =
                             typeof selectedQualityOption?.estimatedImageCostUsd === 'number'
-                                ? selectedQualityOption.estimatedImageCostUsd +
-                                  (imageGeneration?.textAndOtherEstimatedCostUsd ?? 0)
+                                ? (selectedQualityOption.estimatedImageCostUsd / baseSceneCount) * selectedSceneCount
+                                : undefined;
+                        const totalCost =
+                            typeof selectedImageCost === 'number'
+                                ? selectedImageCost + (imageGeneration?.textAndOtherEstimatedCostUsd ?? 0)
                                 : imageGeneration?.estimatedTotalCostUsd;
+                        const sceneCountOptions = imageGeneration?.sceneCountOptions?.length
+                            ? imageGeneration.sceneCountOptions
+                            : [
+                                  { count: 8, label: '8장' },
+                                  { count: 12, label: '12장' },
+                                  { count: 16, label: '16장' },
+                              ];
+                        const isApproving = Boolean(approvingProposalIds[proposal.id]);
+                        const isApproved = Boolean(approvedProposalIds[proposal.id]);
                         return (
                             <div key={msg.id} className="flex items-start gap-2">
                                 <div className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center shrink-0 mt-0.5">
@@ -408,7 +447,29 @@ export const FlowAgentPanel = ({
                                             <div className="text-[11px] font-semibold text-foreground">이미지 설정</div>
                                             <div className="text-[10px] text-muted-foreground">
                                                 모델: {imageGeneration.model ?? 'gpt-image-2'} · 장면:{' '}
-                                                {imageGeneration.sceneCount ?? 12}장
+                                                {selectedSceneCount}장
+                                            </div>
+                                            <div className="flex flex-wrap gap-1">
+                                                {sceneCountOptions.map(option => (
+                                                    <button
+                                                        key={option.count}
+                                                        type="button"
+                                                        className={`rounded-md border px-2 py-1 text-[10px] transition-colors ${
+                                                            selectedSceneCount === option.count
+                                                                ? 'border-primary bg-primary/20 text-primary'
+                                                                : 'border-border bg-muted/30 text-muted-foreground hover:text-foreground'
+                                                        }`}
+                                                        disabled={isApproved}
+                                                        onClick={() =>
+                                                            setProposalSceneCounts(prev => ({
+                                                                ...prev,
+                                                                [proposal.id]: option.count,
+                                                            }))
+                                                        }
+                                                    >
+                                                        {option.label}
+                                                    </button>
+                                                ))}
                                             </div>
                                             <div className="flex flex-wrap gap-1">
                                                 {imageGeneration.styleOptions?.map(option => (
@@ -420,6 +481,7 @@ export const FlowAgentPanel = ({
                                                                 ? 'border-primary bg-primary text-primary-foreground'
                                                                 : 'border-border bg-muted/40 text-muted-foreground hover:text-foreground'
                                                         }`}
+                                                        disabled={isApproved}
                                                         title={option.description}
                                                         onClick={() =>
                                                             setProposalImageStyles(prev => ({
@@ -433,28 +495,34 @@ export const FlowAgentPanel = ({
                                                 ))}
                                             </div>
                                             <div className="flex gap-1">
-                                                {imageGeneration.qualityOptions?.map(option => (
-                                                    <button
-                                                        key={option.id}
-                                                        type="button"
-                                                        className={`rounded-md border px-2 py-1 text-[10px] transition-colors ${
-                                                            selectedQuality === option.id
-                                                                ? 'border-primary bg-primary/20 text-primary'
-                                                                : 'border-border bg-muted/30 text-muted-foreground hover:text-foreground'
-                                                        }`}
-                                                        onClick={() =>
-                                                            setProposalImageQualities(prev => ({
-                                                                ...prev,
-                                                                [proposal.id]: option.id,
-                                                            }))
-                                                        }
-                                                    >
-                                                        {option.label}
-                                                        {formatUsd(option.estimatedImageCostUsd)
-                                                            ? ` ${formatUsd(option.estimatedImageCostUsd)}`
-                                                            : ''}
-                                                    </button>
-                                                ))}
+                                                {imageGeneration.qualityOptions?.map(option => {
+                                                    const optionCost =
+                                                        typeof option.estimatedImageCostUsd === 'number'
+                                                            ? (option.estimatedImageCostUsd / baseSceneCount) *
+                                                              selectedSceneCount
+                                                            : undefined;
+                                                    return (
+                                                        <button
+                                                            key={option.id}
+                                                            type="button"
+                                                            className={`rounded-md border px-2 py-1 text-[10px] transition-colors ${
+                                                                selectedQuality === option.id
+                                                                    ? 'border-primary bg-primary/20 text-primary'
+                                                                    : 'border-border bg-muted/30 text-muted-foreground hover:text-foreground'
+                                                            }`}
+                                                            disabled={isApproved}
+                                                            onClick={() =>
+                                                                setProposalImageQualities(prev => ({
+                                                                    ...prev,
+                                                                    [proposal.id]: option.id,
+                                                                }))
+                                                            }
+                                                        >
+                                                            {option.label}
+                                                            {formatUsd(optionCost) ? ` ${formatUsd(optionCost)}` : ''}
+                                                        </button>
+                                                    );
+                                                })}
                                             </div>
                                             {formatUsd(totalCost) && (
                                                 <div className="text-[10px] text-muted-foreground">
@@ -465,19 +533,26 @@ export const FlowAgentPanel = ({
                                     )}
                                     {estimatedCost && (
                                         <div className="text-muted-foreground">
-                                            예상 비용 : {estimatedCost}
+                                            예상 비용 : {formatUsd(totalCost) ?? estimatedCost}
                                             <br />
                                             1회 실행 한도 : $2.00
                                             <br />
                                             생성 하시겠습니까?
                                         </div>
                                     )}
+                                    {isApproved && (
+                                        <div className="rounded-md border border-primary/30 bg-primary/10 px-2 py-1.5 text-[11px] text-primary">
+                                            제안이 승인되어 캔버스에 배치되었습니다. 아래 워크플로우 실행 버튼으로 바로
+                                            실행할 수 있습니다.
+                                        </div>
+                                    )}
                                     <div className="flex gap-2 mt-1">
                                         <button
                                             className="flex-1 text-[11px] py-1.5 rounded-md bg-foreground text-background hover:bg-foreground/80 transition-colors"
+                                            disabled={isApproving || isApproved}
                                             onClick={() => void handleApprove(proposal)}
                                         >
-                                            승인
+                                            {isApproved ? '승인 완료' : isApproving ? '배치 중' : '승인'}
                                         </button>
                                         <button
                                             className="flex-1 text-[11px] py-1.5 rounded-md bg-muted-foreground/10 hover:bg-muted-foreground/20 text-foreground transition-colors border border-border"

@@ -148,7 +148,7 @@ Assistant:
     { "type": "content", "label": "쇼츠 대본 생성", "config": { "format": "shorts", "scenes": 12, "durationSec": 60 } },
     { "type": "data", "label": "장면 데이터 정규화", "config": {} },
     { "type": "analysis", "label": "품질 검수", "config": { "mode": "safety" } },
-    { "type": "media-image", "label": "이미지 생성", "config": { "count": 12, "imageStyleId": "explainer-comic", "imageQuality": "medium" } },
+    { "type": "media-image", "label": "이미지 생성", "config": { "count": 12, "imageQuality": "medium" } },
     { "type": "media-tts", "label": "음성 생성", "config": { "lang": "ko" } },
     { "type": "media-video", "label": "영상 합성", "config": { "format": "9:16", "backgroundMusic": true } },
     { "type": "integration", "label": "메타데이터 생성", "config": {} }

@@ -23,7 +23,7 @@ export const BASE_SHORTS_RULES = `Base Shorts Engine Rules:
 - Default to ${BASE_SHORTS_DEFAULTS.defaultSceneCount} scenes and about ${BASE_SHORTS_DEFAULTS.durationSec} seconds unless the user asks otherwise.
 - Keep each scene visually simple: one strong idea, one short caption, one clear image prompt.
 - Keep one persistent topTitle across all scenes.
-- Use the same final-video grammar across topics: black top title band, bold yellow/white Korean title, central visual evidence/artwork area, and a black lower subtitle band.
+- Use the same final-video grammar across topics: black top title band, bold yellow/white Korean title, central visual area, and a black lower subtitle band.
 - Lower subtitles must come from the spoken narration, not from a separate teaser caption.
 - Use [Image #1] through [Image #12] or [Image #15] slots in order.
 - Use a fast opening hook, dense but accurate narration, and a short CTA.
@@ -35,7 +35,7 @@ export const BASE_SHORTS_RULES = `Base Shorts Engine Rules:
 export const GPT_IMAGE_2_KOREAN_TEXT_RULES = `GPT-image-2 visual-only rules:
 - Do not rely on GPT-image for the final title band, lower subtitle band, URLs, watermarks, or source overlays; the video compositor owns those overlays.
 - Short Korean/English in-scene signage, labels, screen text, or document text is allowed when it directly supports the scene.
-- Generate the central comic/meme/situation artwork first; text should never be unrelated decoration.
+- Generate the central subject/action/evidence image first; text should never be unrelated decoration.
 - Prefer central 16:9-friendly artwork or evidence images inside the vertical canvas.
 - Leave mobile-safe negative space near the top and bottom because the video compositor will add title/subtitle/source overlays.
 - Put exact claims, URLs, and detailed source notes in structured metadata and narration.`;

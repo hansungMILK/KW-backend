@@ -30,6 +30,10 @@ export type ImageGenerationPreferences = {
     textAndOtherEstimatedCostUsd: number;
     estimatedTotalCostUsd: number;
     styleOptions: Array<Pick<ImageStylePreset, 'id' | 'label' | 'description'>>;
+    sceneCountOptions: Array<{
+        count: number;
+        label: string;
+    }>;
     qualityOptions: Array<{
         id: ImageQuality;
         label: string;
@@ -38,6 +42,8 @@ export type ImageGenerationPreferences = {
 };
 
 export const GPT_IMAGE_MODEL = 'gpt-image-2' as const;
+export const DEFAULT_SHORTS_SCENE_COUNT = 12;
+export const SHORTS_SCENE_COUNT_OPTIONS = [8, 12, 16] as const;
 
 export const IMAGE_STYLE_PRESETS: ImageStylePreset[] = [
     {
@@ -132,12 +138,13 @@ export const estimateGptImage2CostUsd = (sceneCount: number, quality: unknown): 
 };
 
 export const recommendImageStyleId = (userMessage: string, explicitStyle?: unknown): ImageStyleId => {
+    const userRequestedStyle = detectUserRequestedImageStyleId(userMessage);
+    if (userRequestedStyle) return userRequestedStyle;
+
     const explicit = normalizeImageStyleId(explicitStyle);
     if (explicit) return explicit;
 
     const text = userMessage.toLowerCase();
-    if (/애니|animation|anime|cel[- ]?shade|셀/.test(text)) return 'animation';
-    if (/실사|사진|photo|photoreal|현실/.test(text)) return 'photo-real';
     if (/리서치|자료|분석|대시보드|research/.test(text)) return 'research-visual';
     if (/청사진|블루프린트|설계도|blueprint|기술|엔지니어/.test(text)) return 'blueprint';
     if (/신문|레트로|논란|대란|사건|news|newspaper/.test(text)) return 'newspaper';
@@ -145,6 +152,19 @@ export const recommendImageStyleId = (userMessage: string, explicitStyle?: unkno
     if (/아이콘|로고|icon|logo/.test(text)) return 'icon-design';
     return 'explainer-comic';
 };
+
+function detectUserRequestedImageStyleId(userMessage: string): ImageStyleId | null {
+    const text = userMessage.toLowerCase();
+    if (/애니|animation|anime|cel[- ]?shade|셀/.test(text)) return 'animation';
+    if (/실사|아이폰|iphone|사진|photo|photoreal|현실|realistic/.test(text)) return 'photo-real';
+    if (/만화|웹툰|카툰|comic|cartoon|manga/.test(text)) return 'explainer-comic';
+    if (/리서치\s*비주얼|research visual/.test(text)) return 'research-visual';
+    if (/청사진|블루프린트|설계도|blueprint/.test(text)) return 'blueprint';
+    if (/신문풍|신문\s*느낌|레트로|newspaper/.test(text)) return 'newspaper';
+    if (/앱\s*ui|ui\s*디자인|app ui/.test(text)) return 'app-ui';
+    if (/아이콘|로고|icon|logo/.test(text)) return 'icon-design';
+    return null;
+}
 
 export const buildImageGenerationPreferences = (params: {
     userMessage: string;
@@ -156,7 +176,7 @@ export const buildImageGenerationPreferences = (params: {
     const imageQuality = normalizeImageQuality(params.imageQuality);
     const recommendedStyleId = recommendImageStyleId(params.userMessage, params.imageStyleId);
     const preset = getImageStylePreset(recommendedStyleId);
-    const sceneCount = normalizeSceneCount(params.sceneCount, 12);
+    const sceneCount = normalizeSceneCount(params.sceneCount, DEFAULT_SHORTS_SCENE_COUNT);
     const imageEstimatedCostUsd = estimateGptImage2CostUsd(sceneCount, imageQuality);
     const textAndOtherEstimatedCostUsd = roundUsd(params.textAndOtherEstimatedCostUsd ?? 0);
 
@@ -175,6 +195,10 @@ export const buildImageGenerationPreferences = (params: {
             label: style.label,
             description: style.description,
         })),
+        sceneCountOptions: SHORTS_SCENE_COUNT_OPTIONS.map(count => ({
+            count,
+            label: `${count}장`,
+        })),
         qualityOptions: (['low', 'medium', 'high'] as ImageQuality[]).map(quality => ({
             id: quality,
             label: quality,
@@ -189,7 +213,7 @@ export const enrichImageNodeConfig = (
 ): Record<string, unknown> => {
     return {
         ...(config ?? {}),
-        count: normalizeSceneCount(config?.['count'] ?? config?.['scenes'], preferences.sceneCount),
+        count: preferences.sceneCount,
         imageModel: GPT_IMAGE_MODEL,
         imageQuality: preferences.imageQuality,
         imageStyleId: preferences.imageStyleId,
@@ -208,9 +232,10 @@ export const buildGptImage2ScenePrompt = (params: {
     format?: 'shorts-frame' | 'single-image';
 }): string => {
     const preset = getImageStylePreset(params.styleId);
+    const visualPrompt = sanitizeVisualPromptForStyle(preset.id, params.visualPrompt);
     const scene = compactPromptText(
         [
-            params.visualPrompt,
+            visualPrompt,
             params.narration ? `Narration meaning: ${params.narration}` : undefined,
             params.caption ? `Subtitle meaning: ${params.caption}` : undefined,
             params.title ? `Persistent topic title meaning: ${params.title}` : undefined,
@@ -235,15 +260,48 @@ export const buildGptImage2ScenePrompt = (params: {
         'Do not add unrelated text, fake logos, URLs, watermarks, or final-video title/subtitle bands. Short Korean or English in-scene signage, labels, screen text, or document text is allowed when it directly supports the scene.',
         'Factual visualization: represent the source claim visually without inventing exact documents, official seals, or fake screenshots.',
         compactPromptText(params.presetImageRules, 260),
+        'If the scene brief contains art-style words that conflict with Visual style, follow Visual style and keep only the subject/action/setting.',
         `Scene: ${scene || 'Korean information explainer scene based on the user request.'}`,
     ]
         .filter(Boolean)
         .join(' ');
 };
 
+function sanitizeVisualPromptForStyle(styleId: ImageStyleId, prompt: string | undefined): string | undefined {
+    if (!prompt) return prompt;
+
+    const conflictPatterns: Partial<Record<ImageStyleId, RegExp[]>> = {
+        'photo-real': [
+            /\bcomic[- ]?style\b/gi,
+            /\bcomic\b/gi,
+            /\bcartoon\b/gi,
+            /\bmanga\b/gi,
+            /\banime\b/gi,
+            /\banimation\b/gi,
+            /\banimated\b/gi,
+            /\bcel[- ]?shaded\b/gi,
+        ],
+        animation: [
+            /\bphotorealistic\b/gi,
+            /\brealistic photo\b/gi,
+            /\breal photo\b/gi,
+            /\biPhone photo\b/gi,
+            /\bdocumentary photo\b/gi,
+        ],
+    };
+
+    const patterns = conflictPatterns[styleId];
+    if (!patterns) return prompt;
+
+    return patterns
+        .reduce((text, pattern) => text.replace(pattern, ' '), prompt)
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
 export const roundUsd = (value: number): number => Math.round(value * 1000) / 1000;
 
-function normalizeSceneCount(value: unknown, fallback: number): number {
+export function normalizeSceneCount(value: unknown, fallback: number): number {
     const parsed = Number(value);
     if (Number.isFinite(parsed) && parsed > 0) return Math.floor(parsed);
     return Math.max(1, Math.floor(fallback));

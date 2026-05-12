@@ -79,6 +79,10 @@ export interface NodeUpdateMessage {
     prevState?: NodeState;
     progress?: number;
     /**
+     * Human-readable progress text for non-technical users.
+     */
+    message?: string;
+    /**
      * Stereotype indicator for message content completeness
      * - 0: Socket message contains all necessary data (state, progress) - no API fetch needed
      * - Other values or undefined: Additional data may be needed via API
@@ -149,6 +153,8 @@ export interface RunCompletedMessage {
     id: string;
     flowId?: string;
     runId?: string;
+    reviewNodeId?: string;
+    message?: string;
     timestamp?: number;
 }
 

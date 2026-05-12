@@ -37,7 +37,7 @@ function dummyImageOutput() {
             url: `fake://cdn.example.com/images/scene-${String(index + 1).padStart(3, '0')}-generic-summary.jpg`,
             width: 1080,
             height: 1920,
-            prompt: `[dummy] Generic Korean information explainer comic scene ${index + 1}, clean vertical shorts framing, concise in-scene text allowed`,
+            prompt: `[dummy] Generic Korean information explainer scene ${index + 1}, clean vertical shorts framing, concise in-scene text allowed`,
         })),
     };
 }
@@ -189,6 +189,7 @@ export const mediaImageBlock: BlockExecutor = {
             concurrency: IMAGE_SCENE_CONCURRENCY,
             batchTimeoutMs,
             expectedSceneCount: totalScenes,
+            maxProviderRequests: totalScenes * IMAGE_SCENE_MAX_ATTEMPTS,
             provider: 'openai',
             model: GPT_IMAGE_MODEL,
             quality: imageQuality,
@@ -240,6 +241,8 @@ export const mediaImageBlock: BlockExecutor = {
         const activeSceneAttempts = new Map<number, string>();
         const recordedTimeoutAttempts = new Set<string>();
         const uploadedKeys = new Set<string>();
+        const maxProviderRequests = totalScenes * IMAGE_SCENE_MAX_ATTEMPTS;
+        let providerRequestsStarted = 0;
 
         const cleanupUploadedKeys = async (): Promise<void> => {
             for (const key of [...uploadedKeys].reverse()) {
@@ -273,6 +276,26 @@ export const mediaImageBlock: BlockExecutor = {
             });
         };
 
+        const reserveProviderRequest = async (sceneNumber: number, attempt: number): Promise<number> => {
+            if (providerRequestsStarted >= maxProviderRequests) {
+                const error = new Error(
+                    `media-image provider request budget exceeded (${maxProviderRequests} requests)`
+                );
+                await recordImageTrace('batch.provider_request_budget_exceeded', 'ERROR', {
+                    sceneNumber,
+                    attempt,
+                    providerRequestsStarted,
+                    maxProviderRequests,
+                    errorCode: 'IMAGE_PROVIDER_REQUEST_BUDGET_EXCEEDED',
+                    errorMessage: error.message,
+                });
+                throw error;
+            }
+
+            providerRequestsStarted += 1;
+            return providerRequestsStarted;
+        };
+
         const generateSceneImage = async (
             scene: (typeof scenePrompts)[number],
             attemptId: string,
@@ -288,9 +311,12 @@ export const mediaImageBlock: BlockExecutor = {
                 });
 
                 // 1. Generate image via the configured OpenAI image model.
+                const providerRequestNumber = await reserveProviderRequest(scene.sceneNumber, attempt);
                 await recordImageTrace('scene.openai.requested', 'STATUS', {
                     sceneNumber: scene.sceneNumber,
                     attempt,
+                    providerRequestNumber,
+                    maxProviderRequests,
                 });
                 const openAiStart = Date.now();
                 const generated = await imageAdapter.generate({
@@ -304,6 +330,7 @@ export const mediaImageBlock: BlockExecutor = {
                 await recordImageTrace('scene.openai.completed', 'STATUS', {
                     sceneNumber: scene.sceneNumber,
                     attempt,
+                    providerRequestNumber,
                     durationMs: Date.now() - openAiStart,
                 });
                 throwIfAborted(signal);
@@ -463,12 +490,21 @@ export const mediaImageBlock: BlockExecutor = {
                         );
                     }
 
-                    if (attempt < IMAGE_SCENE_MAX_ATTEMPTS) {
+                    const shouldRetry = isRetryableSceneImageError(err);
+                    if (attempt < IMAGE_SCENE_MAX_ATTEMPTS && shouldRetry) {
                         console.warn(
                             `[media-image-block] scene ${scene.sceneNumber} attempt ${attempt}/${IMAGE_SCENE_MAX_ATTEMPTS} failed; retrying: ${
                                 err instanceof Error ? err.message : String(err)
                             }`
                         );
+                    } else if (attempt < IMAGE_SCENE_MAX_ATTEMPTS && !shouldRetry) {
+                        await recordImageTrace('scene.retry.skipped', 'STATUS', {
+                            sceneNumber: scene.sceneNumber,
+                            attempt,
+                            errorCode: classifyImageError(err),
+                            reason: 'non-retryable image provider error',
+                        });
+                        break;
                     }
                 } finally {
                     cleanup();
@@ -662,11 +698,23 @@ function classifyImageError(err: unknown): string {
     if (err instanceof BlockCancelledError) return 'RUN_CANCELLED';
     if (err instanceof Error) {
         if (err.name === 'TimeoutError' || /timed out|timeout/i.test(err.message)) return 'IMAGE_TIMEOUT';
+        if (/provider request budget exceeded/i.test(err.message)) return 'IMAGE_PROVIDER_REQUEST_BUDGET_EXCEEDED';
         const status = err.message.match(/OpenAI image API error (\d+)/)?.[1];
         if (status) return `IMAGE_PROVIDER_${status}`;
         if (/cancelled|aborted/i.test(err.message)) return 'RUN_CANCELLED';
     }
     return 'IMAGE_PROVIDER_ERROR';
+}
+
+function isRetryableSceneImageError(err: unknown): boolean {
+    const errorCode = classifyImageError(err);
+    if (errorCode === 'IMAGE_TIMEOUT') return true;
+
+    const status = errorCode.match(/^IMAGE_PROVIDER_(\d+)$/)?.[1];
+    if (!status) return false;
+
+    const statusCode = Number(status);
+    return statusCode === 408 || statusCode === 409 || statusCode === 429 || statusCode >= 500;
 }
 
 function createLinkedAbortController(parentSignal?: AbortSignal): {
@@ -737,9 +785,10 @@ function rejectAfterTimeoutAndAbort(
         timeout = setTimeout(() => {
             const timeoutError = new Error(message);
             timeoutError.name = 'TimeoutError';
-            void onTimeout?.(timeoutError).finally(() => {
-                controller.abort(timeoutError);
-                reject(timeoutError);
+            controller.abort(timeoutError);
+            reject(timeoutError);
+            void onTimeout?.(timeoutError).catch(() => {
+                /* timeout reporting must never block timeout enforcement */
             });
         }, timeoutMs);
 
@@ -759,7 +808,7 @@ function calculateImageBatchTimeoutMs(totalScenes: number, concurrency: number):
     const boundedScenes = Math.max(1, totalScenes);
     const boundedConcurrency = Math.max(1, concurrency);
     const waves = Math.ceil(boundedScenes / boundedConcurrency);
-    return Math.max(1, waves * IMAGE_SCENE_TIMEOUT_MS + IMAGE_BATCH_TIMEOUT_BUFFER_MS);
+    return Math.max(1, waves * IMAGE_SCENE_TIMEOUT_MS * IMAGE_SCENE_MAX_ATTEMPTS + IMAGE_BATCH_TIMEOUT_BUFFER_MS);
 }
 
 function readPositiveInt(value: unknown, fallback: number): number {

@@ -9,6 +9,7 @@ import {
     getPortData,
     getRun,
     getRunNodes,
+    listFlowRuns,
     useBlocks,
     useCanvasStore,
     useFlows,
@@ -45,8 +46,23 @@ const isInputElement = (target: EventTarget | null): boolean => {
 };
 
 type RunNodeSnapshot = Awaited<ReturnType<typeof getRunNodes>>[number];
+type RunActivity = {
+    nodeLabel?: string;
+    progress?: number;
+    state?: 'queued' | 'running' | 'completed' | 'failed';
+    message?: string;
+    error?: string | null;
+};
 
 const RUN_NODE_POLL_MS = 1500;
+const BOOT_CANVAS_RETRY_MS = 25;
+const BOOT_CANVAS_MAX_ATTEMPTS = 200;
+
+type PendingWorkflowLoad = {
+    loadedId: string | null;
+    nodeId: string | null;
+    initialFlow: Parameters<WorkflowCanvasRef['loadWorkflow']>[0] | null;
+};
 
 const mapRunNodeStatusToCanvasState = (
     status: RunNodeSnapshot['status']
@@ -59,6 +75,43 @@ const mapRunNodeStatusToCanvasState = (
 
 const getRunNodeProgress = (node: RunNodeSnapshot): number =>
     Number.isFinite(node.progress) ? Math.min(100, Math.max(0, node.progress)) : 0;
+
+const getRunNodeActivityMessage = (node: RunNodeSnapshot): string | undefined => {
+    const progress = getRunNodeProgress(node);
+    if (node.status === 'PENDING') return `${node.label} 실행 대기 중`;
+    if (node.status === 'COMPLETED') return `${node.label} 완료`;
+    if (node.status === 'FAILED' || node.status === 'CANCELLED') {
+        return node.errorMessage ?? node.errorCode ?? `${node.label} 실패`;
+    }
+
+    if (node.blockType === 'media-image') {
+        return `이미지 생성 중... ${progress}%`;
+    }
+    if (node.blockType === 'media-tts') {
+        return `TTS 음성 생성 중... ${progress}%`;
+    }
+    if (node.blockType === 'media-video') {
+        return `쇼츠 영상 합성 중... ${progress}%`;
+    }
+    if (node.blockType === 'content') {
+        return `대본 작성 중... ${progress}%`;
+    }
+    if (node.blockType === 'search') {
+        return `원문과 관련 자료 수집 중... ${progress}%`;
+    }
+    return `${node.label} 실행 중... ${progress}%`;
+};
+
+const getWorkflowNodeType = (node: NodeData): string | undefined =>
+    node.type ?? ((node as NodeData & { blockType?: string }).blockType as string | undefined);
+
+const hasReviewedScriptOutput = (node: NodeData | undefined): boolean => {
+    const value = node?.config?.['reviewedOutput'];
+    return typeof value === 'string' && value.trim().length > 0;
+};
+
+const findContentNode = (nodes: NodeData[] | undefined): NodeData | undefined =>
+    nodes?.find(node => getWorkflowNodeType(node) === 'content');
 
 const toOutputPacket = (node: RunNodeSnapshot) => {
     if (node.outputPayload === undefined || node.outputPayload === null) return undefined;
@@ -101,14 +154,10 @@ export const FlowEditorPage = () => {
 
     const [isAgentOpen, setIsAgentOpen] = useState(false);
     const [runStatus, setRunStatus] = useState<'running' | 'completed' | 'failed' | null>(null);
-    const [runActivity, setRunActivity] = useState<{
-        nodeLabel?: string;
-        progress?: number;
-        state?: 'queued' | 'running' | 'completed' | 'failed';
-        error?: string | null;
-    } | null>(null);
+    const [runActivity, setRunActivity] = useState<RunActivity | null>(null);
     const [activeRunId, setActiveRunId] = useState<string | null>(null);
     const [latestProposal, setLatestProposal] = useState<ProposalCreatedMessage | null>(null);
+    const [pendingWorkflowLoad, setPendingWorkflowLoad] = useState<PendingWorkflowLoad | null>(null);
 
     const getCanvasNodeLabel = useCallback(
         (nodeId: string): string => {
@@ -154,6 +203,7 @@ export const FlowEditorPage = () => {
                     nodeLabel: getCanvasNodeLabel(failedNode.nodeId),
                     progress: getRunNodeProgress(failedNode) || 100,
                     state: 'failed',
+                    message: getRunNodeActivityMessage(failedNode),
                     error:
                         failedNode.errorMessage ??
                         failedNode.errorCode ??
@@ -173,6 +223,7 @@ export const FlowEditorPage = () => {
                     nodeLabel: getCanvasNodeLabel(runningNode.nodeId),
                     progress: Math.max(progressFromCount, getRunNodeProgress(runningNode)),
                     state: 'running',
+                    message: getRunNodeActivityMessage(runningNode),
                 });
                 return 'running';
             }
@@ -183,6 +234,7 @@ export const FlowEditorPage = () => {
                     nodeLabel: `${completedCount}/${visibleRunNodes.length} 완료, 대기: ${getCanvasNodeLabel(pendingNode.nodeId)}`,
                     progress: progressFromCount,
                     state: 'queued',
+                    message: getRunNodeActivityMessage(pendingNode),
                 });
                 return 'running';
             }
@@ -196,6 +248,64 @@ export const FlowEditorPage = () => {
             return 'completed';
         },
         [getCanvasNodeLabel]
+    );
+
+    const hydrateLatestRunForFlow = useCallback(
+        async (flowId: string) => {
+            try {
+                const [latestRun] = await listFlowRuns(flowId, 1);
+                if (!latestRun || latestRun.status === 'CANCELLED') return;
+
+                const runNodes = await getRunNodes(latestRun.runId);
+                const derivedStatus = applyRunNodeSnapshots(runNodes);
+
+                if (latestRun.status === 'QUEUED' || latestRun.status === 'RUNNING') {
+                    setActiveRunId(latestRun.runId);
+                    if (!derivedStatus) {
+                        setRunStatus('running');
+                        setRunActivity({
+                            nodeLabel: `실행 ${latestRun.runId}`,
+                            progress: 0,
+                            state: latestRun.status === 'QUEUED' ? 'queued' : 'running',
+                            message:
+                                latestRun.status === 'QUEUED'
+                                    ? '워크플로우 실행이 대기 중입니다.'
+                                    : '워크플로우 실행 상태를 복구했습니다.',
+                        });
+                    }
+                    return;
+                }
+
+                if (latestRun.status === 'COMPLETED') {
+                    setActiveRunId(null);
+                    setRunStatus('completed');
+                    setRunActivity({
+                        nodeLabel: '전체 워크플로우',
+                        progress: 100,
+                        state: 'completed',
+                        message: '최근 실행 결과를 불러왔습니다.',
+                    });
+                    return;
+                }
+
+                if (latestRun.status === 'FAILED') {
+                    setActiveRunId(null);
+                    setRunStatus('failed');
+                    if (!derivedStatus) {
+                        setRunActivity({
+                            nodeLabel: '전체 워크플로우',
+                            progress: 100,
+                            state: 'failed',
+                            message: '최근 실행이 실패했습니다.',
+                            error: '실패한 실행 결과를 불러왔습니다.',
+                        });
+                    }
+                }
+            } catch (error) {
+                console.debug('[FlowEditor] Failed to hydrate latest run:', error);
+            }
+        },
+        [applyRunNodeSnapshots]
     );
 
     // Handle flow update notification from WebSocket (new format)
@@ -220,7 +330,8 @@ export const FlowEditorPage = () => {
 
     const handleNodeUpdate = useCallback(
         async (info: NodeUpdateInfo) => {
-            const { nodeId, flowId, isPort, parentNodeId, state, progress, no, errorCode, errorMessage } = info;
+            const { nodeId, flowId, isPort, parentNodeId, state, progress, no, message, errorCode, errorMessage } =
+                info;
 
             // Skip if flowId is missing or doesn't match current flow (socket channel is shared)
             if (!flowId || flowId !== currentFlowId) return;
@@ -257,6 +368,7 @@ export const FlowEditorPage = () => {
                     nodeLabel: getCanvasNodeLabel(nodeId),
                     progress: progress ?? 100,
                     state: 'failed',
+                    message,
                     error: errorMessage ?? errorCode ?? '노드 실행 실패',
                 });
                 canvasRef.current.updateNodeFromServer(nodeId, {
@@ -287,12 +399,14 @@ export const FlowEditorPage = () => {
                     nodeLabel: getCanvasNodeLabel(nodeId),
                     progress: progress ?? 0,
                     state: 'running',
+                    message,
                 });
             } else if (state === 'COMPLETED') {
                 setRunActivity({
                     nodeLabel: getCanvasNodeLabel(nodeId),
                     progress: 100,
                     state: 'completed',
+                    message,
                 });
             }
 
@@ -447,19 +561,34 @@ export const FlowEditorPage = () => {
             nodeLabel: message.runId ? `실행 ${message.runId}` : '워크플로우 실행',
             progress: 0,
             state: 'running',
+            message: '워크플로우 실행을 시작했습니다.',
         });
         setIsAgentOpen(true);
     }, []);
 
-    const handleRunCompleted = useCallback((_message: RunCompletedMessage) => {
-        setActiveRunId(null);
-        setRunStatus('completed');
-        setRunActivity({
-            nodeLabel: '전체 워크플로우',
-            progress: 100,
-            state: 'completed',
-        });
-    }, []);
+    const handleRunCompleted = useCallback(
+        (message: RunCompletedMessage) => {
+            const runId = message.runId ?? activeRunId;
+            if (runId) {
+                void getRunNodes(runId)
+                    .then(runNodes => {
+                        applyRunNodeSnapshots(runNodes);
+                    })
+                    .catch(error => {
+                        console.debug('[FlowEditor] Failed to refresh completed run nodes:', error);
+                    });
+            }
+            setActiveRunId(null);
+            setRunStatus('completed');
+            setRunActivity({
+                nodeLabel: '전체 워크플로우',
+                progress: 100,
+                state: 'completed',
+                message: message.message ?? '모든 노드 실행이 끝났습니다.',
+            });
+        },
+        [activeRunId, applyRunNodeSnapshots]
+    );
 
     const handleRunFailed = useCallback(
         (message: RunFailedMessage) => {
@@ -523,6 +652,7 @@ export const FlowEditorPage = () => {
                         nodeLabel: summary?.failedNodeId ? getCanvasNodeLabel(summary.failedNodeId) : '전체 워크플로우',
                         progress: 100,
                         state: 'failed',
+                        message: '워크플로우 실행이 실패했습니다.',
                         error: summary?.errorMessage ?? summary?.errorCode ?? '워크플로우 실행 실패',
                     });
                     setActiveRunId(null);
@@ -535,6 +665,7 @@ export const FlowEditorPage = () => {
                         nodeLabel: '전체 워크플로우',
                         progress: 100,
                         state: 'failed',
+                        message: '워크플로우 실행이 취소되었습니다.',
                         error: '사용자가 실행을 취소했습니다.',
                     });
                     setActiveRunId(null);
@@ -547,6 +678,7 @@ export const FlowEditorPage = () => {
                         nodeLabel: '전체 워크플로우',
                         progress: 100,
                         state: 'completed',
+                        message: '모든 노드 실행이 끝났습니다.',
                     });
                     setActiveRunId(null);
                     return;
@@ -623,6 +755,7 @@ export const FlowEditorPage = () => {
     }, []);
 
     const bootedRef = useRef(false);
+    const bootCanvasLoadedRef = useRef(false);
     useEffect(() => {
         if (bootedRef.current) return;
         bootedRef.current = true;
@@ -655,31 +788,12 @@ export const FlowEditorPage = () => {
                     }
                 }
 
+                setPendingWorkflowLoad({
+                    loadedId,
+                    nodeId: nodeIdFromHash,
+                    initialFlow,
+                });
                 setIsAppReady(true);
-
-                // Wait for canvas to mount after render
-                const waitForCanvas = async () => {
-                    if (canvasRef.current) {
-                        if (initialFlow) {
-                            try {
-                                await canvasRef.current.loadWorkflow(initialFlow);
-                                lastSavedStateRef.current = serializeWorkflowState(initialFlow);
-                            } catch (error) {
-                                console.error('[FlowEditor] Failed to load workflow:', error);
-                            }
-                        }
-                        if (loadedId) {
-                            updateUrl(loadedId, nodeIdFromHash);
-                        }
-                        if (nodeIdFromHash) {
-                            canvasRef.current.selectNode(nodeIdFromHash);
-                        }
-                    } else {
-                        // Canvas not ready yet, retry
-                        requestAnimationFrame(waitForCanvas);
-                    }
-                };
-                requestAnimationFrame(waitForCanvas);
             } catch (e) {
                 setLoadingText(t('flowEditor.errorLoadingApp'));
                 setIsBootError(true);
@@ -690,6 +804,56 @@ export const FlowEditorPage = () => {
         boot();
         // eslint-disable-next-line react-hooks/exhaustive-deps -- Boot runs once on mount, dependencies are stable singletons
     }, []);
+
+    useEffect(() => {
+        if (!isAppReady || !pendingWorkflowLoad || bootCanvasLoadedRef.current) return;
+
+        let cancelled = false;
+        let retryTimer: number | null = null;
+        let attempts = 0;
+
+        const loadWhenCanvasReady = async () => {
+            if (cancelled || bootCanvasLoadedRef.current) return;
+
+            const canvas = canvasRef.current;
+            if (!canvas) {
+                attempts += 1;
+                if (attempts > BOOT_CANVAS_MAX_ATTEMPTS) {
+                    console.error('[FlowEditor] Canvas ref was not ready during boot load');
+                    return;
+                }
+                retryTimer = window.setTimeout(loadWhenCanvasReady, BOOT_CANVAS_RETRY_MS);
+                return;
+            }
+
+            try {
+                if (pendingWorkflowLoad.initialFlow) {
+                    await canvas.loadWorkflow(pendingWorkflowLoad.initialFlow);
+                    lastSavedStateRef.current = serializeWorkflowState(pendingWorkflowLoad.initialFlow);
+                }
+
+                if (pendingWorkflowLoad.loadedId) {
+                    updateUrl(pendingWorkflowLoad.loadedId, pendingWorkflowLoad.nodeId);
+                    void hydrateLatestRunForFlow(pendingWorkflowLoad.loadedId);
+                }
+                if (pendingWorkflowLoad.nodeId) {
+                    canvas.selectNode(pendingWorkflowLoad.nodeId);
+                }
+
+                bootCanvasLoadedRef.current = true;
+                setPendingWorkflowLoad(null);
+            } catch (error) {
+                console.error('[FlowEditor] Failed to load workflow:', error);
+            }
+        };
+
+        void loadWhenCanvasReady();
+
+        return () => {
+            cancelled = true;
+            if (retryTimer !== null) window.clearTimeout(retryTimer);
+        };
+    }, [hydrateLatestRunForFlow, isAppReady, pendingWorkflowLoad, updateUrl]);
 
     const triggerAutoSave = useCallback(() => {
         if (!isAutoSaveEnabled) return;
@@ -803,16 +967,32 @@ export const FlowEditorPage = () => {
                 updateUrl(result.id, window.location.hash.replace('#', ''));
             }
 
-            const run = await createFlowRun(result.id);
+            const contentNode = findContentNode(data.nodes as NodeData[] | undefined);
+            const runScriptReviewFirst =
+                contentNode &&
+                !hasReviewedScriptOutput(contentNode) &&
+                window.confirm(
+                    '대본을 먼저 검수하시겠어요?\n\n확인을 누르면 원문 수집과 대본 작성까지만 실행하고 멈춥니다. 대본 노드에서 검수본을 저장한 뒤 다시 워크플로우 실행을 누르면 그 대본으로 이미지, TTS, 영상 합성을 이어갑니다.'
+                );
+
+            const run = await createFlowRun(result.id, {
+                executionMode: runScriptReviewFirst ? 'step' : 'full',
+            });
             setActiveRunId(run.id);
             setRunStatus('running');
             setRunActivity({
                 nodeLabel: `실행 ${run.id}`,
                 progress: 0,
                 state: 'queued',
+                message: runScriptReviewFirst
+                    ? '대본 검수 모드로 실행합니다. 대본 노드까지 완료되면 멈춥니다.'
+                    : '전체 워크플로우 실행을 시작했습니다.',
             });
             setIsAgentOpen(true);
-            showNotification('워크플로우 실행을 시작했습니다.', 'success');
+            showNotification(
+                runScriptReviewFirst ? '대본 검수 모드로 실행을 시작했습니다.' : '워크플로우 실행을 시작했습니다.',
+                'success'
+            );
         } catch (error) {
             console.error('[FlowEditor] Failed to start flow run:', error);
             showNotification(error instanceof Error ? error.message : '워크플로우 실행 실패', 'error');
