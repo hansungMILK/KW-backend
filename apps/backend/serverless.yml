@@ -32,6 +32,7 @@ provider:
                 !Sub 'https://${WebsocketsApi}.execute-api.${AWS::Region}.amazonaws.com/${self:provider.stage}',
             ]
         FFMPEG_PATH: ${self:custom.ffmpegPath.${self:provider.stage}, '/opt/bin/ffmpeg'}
+        FFPROBE_PATH: ${self:custom.ffprobePath.${self:provider.stage}, '/opt/bin/ffprobe'}
         FFMPEG_TIMEOUT_MS: ${env:FFMPEG_TIMEOUT_MS, '840000'}
         FFMPEG_FONT_FILE: ${env:FFMPEG_FONT_FILE, 'assets/fonts/Jalnan2.otf'}
         SHORTS_FFMPEG_OVERLAY: ${env:SHORTS_FFMPEG_OVERLAY, 'all'}
@@ -183,6 +184,10 @@ custom:
         local: ${env:FFMPEG_PATH, '/opt/bin/ffmpeg'}
         dev: /opt/bin/ffmpeg
         prod: /opt/bin/ffmpeg
+    ffprobePath:
+        local: ${env:FFPROBE_PATH, '/opt/bin/ffprobe'}
+        dev: /opt/bin/ffprobe
+        prod: /opt/bin/ffprobe
     esbuild:
         bundle: true
         minify: false

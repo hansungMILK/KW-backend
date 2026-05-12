@@ -8,6 +8,7 @@ import { selectBgmForShorts } from '../shorts/bgm/bgm-selector';
 import { sourceRefsToLabel } from '../shorts/rulepacks/base-shorts-rulepack';
 
 import type { BlockExecutor, BlockExecutorContext, BlockExecutorResult } from './types';
+import type { VideoProbeResult } from '../../adapters/external/ffmpeg-adapter';
 
 // ─── block ───────────────────────────────────────────────────────────────────
 
@@ -16,7 +17,7 @@ export const mediaVideoBlock: BlockExecutor = {
 
     async execute(
         input: unknown,
-        _config?: Record<string, unknown>,
+        config?: Record<string, unknown>,
         context?: BlockExecutorContext
     ): Promise<BlockExecutorResult> {
         const start = Date.now();
@@ -57,7 +58,13 @@ export const mediaVideoBlock: BlockExecutor = {
             ? (inp.subtitleCues as RawSubtitleCue[])
             : [];
         const metadata = inp?.metadata as Record<string, unknown> | undefined;
-        const enableBackgroundMusic = _config?.backgroundMusic !== false;
+        const enableBackgroundMusic = config?.backgroundMusic !== false;
+        const longformGateB = isLongformGateB(input, config);
+
+        if (longformGateB) {
+            assertApprovedLongformGateB(input, config);
+            assertLongformRenderCostWithinLimit(input, config);
+        }
 
         const audioObj = inp?.audio as { url?: string; durationSec?: number } | undefined;
         const audioUrl = typeof audioObj?.url === 'string' ? audioObj.url : undefined;
@@ -111,6 +118,7 @@ export const mediaVideoBlock: BlockExecutor = {
                 readPositiveIntEnv('FFMPEG_TIMEOUT_MS', 840000)
             );
             const compositionSignal = createTimeoutSignal(timeoutMs, context?.abortSignal);
+            const outputSize = resolveVideoOutputSize(longformGateB, input, config);
             const result = await (async () => {
                 try {
                     return await ffmpegAdapter.compose({
@@ -125,8 +133,8 @@ export const mediaVideoBlock: BlockExecutor = {
                                   attribution: backgroundMusic.track.attribution,
                               }
                             : false,
-                        outputWidth: 1080,
-                        outputHeight: 1920,
+                        outputWidth: outputSize.width,
+                        outputHeight: outputSize.height,
                         outputFormat: 'mp4',
                         signal: compositionSignal.signal,
                         onProgress: async (progress, message) => {
@@ -137,6 +145,12 @@ export const mediaVideoBlock: BlockExecutor = {
                     compositionSignal.cleanup();
                 }
             })();
+
+            const qa = longformGateB ? await ffmpegAdapter.probeVideo(result.videoBuffer) : undefined;
+            if (longformGateB) {
+                assertLongformVideoQa(qa, outputSize.width, outputSize.height, result.durationSec);
+                await context?.onProgress?.(92, '롱폼 MP4 QA 통과');
+            }
 
             const backgroundMusicMetadata = backgroundMusic
                 ? {
@@ -170,9 +184,18 @@ export const mediaVideoBlock: BlockExecutor = {
                         s3Key,
                         durationSec: result.durationSec,
                         sizeBytes: result.sizeBytes,
-                        width: 1080,
-                        height: 1920,
+                        width: outputSize.width,
+                        height: outputSize.height,
                         backgroundMusic: backgroundMusicMetadata,
+                        ...(longformGateB
+                            ? {
+                                  longformGate: 'B',
+                                  rendererRoute: resolveRendererRoute(input, config),
+                                  qa,
+                                  previewUrl: publicUrl,
+                                  downloadUrl: publicUrl,
+                              }
+                            : {}),
                     },
                 },
             ];
@@ -192,9 +215,11 @@ export const mediaVideoBlock: BlockExecutor = {
                 output: {
                     video: {
                         url: publicUrl,
+                        previewUrl: publicUrl,
+                        downloadUrl: publicUrl,
                         durationSec: result.durationSec,
-                        width: 1080,
-                        height: 1920,
+                        width: outputSize.width,
+                        height: outputSize.height,
                         format: 'mp4',
                         sizeBytes: result.sizeBytes,
                     },
@@ -202,6 +227,14 @@ export const mediaVideoBlock: BlockExecutor = {
                     images: rawImages,
                     ...(audioObj ? { audio: audioObj } : {}),
                     normalizedScenes: rawScenes,
+                    ...(longformGateB
+                        ? {
+                              longformGate: 'B',
+                              rendererRoute: resolveRendererRoute(input, config),
+                              qa,
+                              approvedGateAArtifact: approvedGateAArtifact(input, config),
+                          }
+                        : {}),
                     ...(metadata ? { metadata } : {}),
                 },
                 durationMs: Date.now() - start,
@@ -424,4 +457,181 @@ function normalizeSceneNumber(value: unknown, fallback: number): number {
 
 function roundToMillis(value: number): number {
     return Math.round(value * 1000) / 1000;
+}
+
+function isLongformGateB(input: unknown, config?: Record<string, unknown>): boolean {
+    const values: unknown[] = [config?.['mode'], config?.['gate']];
+    if (isRecord(input)) {
+        values.push(input['mode'], input['gate']);
+    }
+    return values
+        .filter((value): value is string => typeof value === 'string')
+        .some(value => ['longform-gate-b', 'longform.b', 'gate-b.longform'].includes(value.toLowerCase()));
+}
+
+function assertApprovedLongformGateB(input: unknown, config?: Record<string, unknown>): void {
+    const approved =
+        readBoolean(config?.['gateBApproved']) || readBoolean(isRecord(input) ? input['gateBApproved'] : undefined);
+    const artifact = approvedGateAArtifact(input, config);
+
+    if (!approved || !isApprovedGateAArtifact(artifact)) {
+        throw new Error('longform Gate B requires approved Gate A artifact before media execution');
+    }
+}
+
+function approvedGateAArtifact(input: unknown, config?: Record<string, unknown>): Record<string, unknown> | undefined {
+    const configArtifact = isRecord(config?.['approvedGateAArtifact']) ? config?.['approvedGateAArtifact'] : undefined;
+    const inputArtifact =
+        isRecord(input) && isRecord(input['approvedGateAArtifact']) ? input['approvedGateAArtifact'] : undefined;
+    const directArtifact =
+        isRecord(input) &&
+        (input['mode'] === 'longform-gate-a' || input['gate'] === 'A') &&
+        typeof input['fullScriptDraft'] === 'string' &&
+        Array.isArray(input['scenePlan'])
+            ? input
+            : undefined;
+
+    return configArtifact ?? inputArtifact ?? directArtifact;
+}
+
+function assertLongformRenderCostWithinLimit(input: unknown, config?: Record<string, unknown>): void {
+    const maxCostUsd = env.maxLongformHtmlRenderEstimatedCostUsd;
+    if (maxCostUsd <= 0) return;
+
+    const estimatedCostUsd = estimateLongformRenderCostUsd(input, config);
+    if (estimatedCostUsd === undefined) {
+        throw new Error('longform Gate B requires render cost estimate before media execution');
+    }
+    if (estimatedCostUsd <= maxCostUsd) return;
+
+    throw new Error(
+        `LONGFORM_HTML_RENDER_COST_LIMIT_EXCEEDED: estimatedCostUsd=${estimatedCostUsd}, maxCostUsd=${maxCostUsd}`
+    );
+}
+
+function estimateLongformRenderCostUsd(input: unknown, config?: Record<string, unknown>): number | undefined {
+    const combined =
+        readFirstPositiveNumber(config, input, [
+            'longformHtmlRenderEstimatedCostUsd',
+            'htmlRenderEstimatedCostUsd',
+            'renderGenerationEstimatedCostUsd',
+        ]) ?? 0;
+    const compose =
+        readFirstPositiveNumber(config, input, [
+            'htmlComposeEstimatedCostUsd',
+            'composeEstimatedCostUsd',
+            'hyperframesComposeEstimatedCostUsd',
+        ]) ?? 0;
+    const render =
+        readFirstPositiveNumber(config, input, [
+            'hyperframesRenderEstimatedCostUsd',
+            'renderEstimatedCostUsd',
+            'mp4RenderEstimatedCostUsd',
+        ]) ?? 0;
+
+    if (combined <= 0 && compose <= 0 && render <= 0) return undefined;
+    return Math.round(Math.max(combined, compose + render) * 100) / 100;
+}
+
+function resolveVideoOutputSize(
+    longformGateB: boolean,
+    input: unknown,
+    config?: Record<string, unknown>
+): { width: number; height: number } {
+    if (!longformGateB) return { width: 1080, height: 1920 };
+
+    const aspectRatio = String(
+        config?.['aspectRatio'] ??
+            (isRecord(input) ? input['aspectRatio'] : undefined) ??
+            (isRecord(input) && isRecord(input['metadata']) ? input['metadata']['aspectRatio'] : undefined) ??
+            ''
+    ).toLowerCase();
+
+    if (aspectRatio.includes('vertical') || aspectRatio.includes('9:16')) {
+        return { width: 1080, height: 1920 };
+    }
+
+    return { width: 2560, height: 1440 };
+}
+
+function assertLongformVideoQa(
+    qa: VideoProbeResult | undefined,
+    expectedWidth: number,
+    expectedHeight: number,
+    expectedDurationSec: number
+): void {
+    if (!qa?.hasVideo || !qa.hasAudio) {
+        throw new Error('Longform ffprobe QA failed: MP4 must contain both audio and video streams');
+    }
+    if (qa.width !== expectedWidth || qa.height !== expectedHeight) {
+        throw new Error(
+            `Longform ffprobe QA failed: expected ${expectedWidth}x${expectedHeight}, got ${qa.width ?? 'unknown'}x${
+                qa.height ?? 'unknown'
+            }`
+        );
+    }
+    if (!qa.durationSec || Math.abs(qa.durationSec - expectedDurationSec) > Math.max(1, expectedDurationSec * 0.05)) {
+        throw new Error(
+            `Longform ffprobe QA failed: expected duration ${roundToMillis(expectedDurationSec)}s, got ${
+                qa.durationSec ?? 'unknown'
+            }s`
+        );
+    }
+}
+
+function resolveRendererRoute(input: unknown, config?: Record<string, unknown>): string {
+    const route =
+        config?.['rendererRoute'] ??
+        config?.['renderer'] ??
+        (isRecord(input) ? (input['rendererRoute'] ?? input['renderer']) : undefined) ??
+        'hyperframes';
+    return typeof route === 'string' && route.trim() ? route.trim() : 'hyperframes';
+}
+
+function readFirstPositiveNumber(
+    config: Record<string, unknown> | undefined,
+    input: unknown,
+    keys: string[]
+): number | undefined {
+    for (const source of [config, isRecord(input) ? input : undefined]) {
+        if (!source) continue;
+        for (const key of keys) {
+            const value = readPositiveNumber(source[key]);
+            if (value !== undefined) return value;
+        }
+    }
+    return undefined;
+}
+
+function readPositiveNumber(input: unknown): number | undefined {
+    const value = Number(input);
+    return Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function readBoolean(input: unknown): boolean {
+    if (typeof input === 'boolean') return input;
+    if (typeof input !== 'string') return false;
+    return ['1', 'true', 'yes', 'on', 'approved'].includes(input.trim().toLowerCase());
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function isApprovedGateAArtifact(value: Record<string, unknown> | undefined): value is Record<string, unknown> {
+    if (!value) return false;
+    const mode = typeof value['mode'] === 'string' ? value['mode'].toLowerCase() : '';
+    const gate = typeof value['gate'] === 'string' ? value['gate'].toUpperCase() : '';
+    const fullScriptDraft = typeof value['fullScriptDraft'] === 'string' ? value['fullScriptDraft'].trim() : '';
+    const scenePlan = Array.isArray(value['scenePlan']) ? value['scenePlan'] : [];
+    const reviewStatus = typeof value['reviewStatus'] === 'string' ? value['reviewStatus'].toLowerCase() : '';
+    const explicitlyApproved = readBoolean(value['approved']) || reviewStatus === 'approved';
+
+    if (reviewStatus && reviewStatus !== 'approved') return false;
+    return (
+        (mode === 'longform-gate-a' || gate === 'A') &&
+        fullScriptDraft.length > 0 &&
+        scenePlan.length > 0 &&
+        explicitlyApproved
+    );
 }

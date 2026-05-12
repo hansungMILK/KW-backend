@@ -32,7 +32,20 @@ export interface VideoCompositionResult {
     sizeBytes: number;
 }
 
+export interface VideoProbeResult {
+    hasVideo: boolean;
+    hasAudio: boolean;
+    width?: number;
+    height?: number;
+    durationSec?: number;
+}
+
 const FFMPEG_PATH = process.env.FFMPEG_PATH || '/opt/bin/ffmpeg';
+const FFPROBE_PATH =
+    process.env.FFPROBE_PATH ||
+    (process.env.FFMPEG_PATH && process.env.FFMPEG_PATH.endsWith('ffmpeg')
+        ? process.env.FFMPEG_PATH.replace(/ffmpeg$/, 'ffprobe')
+        : 'ffprobe');
 const FFMPEG_TIMEOUT_MS = Number(process.env.FFMPEG_TIMEOUT_MS || 840000);
 const FFMPEG_OVERLAY_MODE = process.env.SHORTS_FFMPEG_OVERLAY || 'all';
 const LOCAL_ASSET_BASE_URL = process.env.LOCAL_ASSET_BASE_URL || 'http://localhost:8800/_local-assets';
@@ -123,6 +136,51 @@ export const ffmpegAdapter = {
                 durationSec,
                 sizeBytes: size,
             };
+        } finally {
+            await rm(workDir, { recursive: true, force: true });
+        }
+    },
+
+    async probeVideo(videoBuffer: Buffer): Promise<VideoProbeResult> {
+        const workDir = await mkdtemp(join(tmpdir(), 'eureka-video-probe-'));
+        const videoPath = join(workDir, 'output.mp4');
+
+        try {
+            await writeFile(videoPath, videoBuffer);
+            const result = spawnSync(
+                FFPROBE_PATH,
+                [
+                    '-v',
+                    'error',
+                    '-show_entries',
+                    'stream=codec_type,width,height:format=duration',
+                    '-of',
+                    'json',
+                    videoPath,
+                ],
+                { encoding: 'utf8', timeout: 10000 }
+            );
+            if (result.error || result.status !== 0) {
+                return { hasVideo: false, hasAudio: false };
+            }
+
+            const parsed = JSON.parse(result.stdout || '{}') as {
+                streams?: Array<{ codec_type?: string; width?: number; height?: number }>;
+                format?: { duration?: string };
+            };
+            const videoStream = parsed.streams?.find(stream => stream.codec_type === 'video');
+            const audioStream = parsed.streams?.find(stream => stream.codec_type === 'audio');
+            const durationSec = Number.parseFloat(parsed.format?.duration ?? '');
+
+            return {
+                hasVideo: Boolean(videoStream),
+                hasAudio: Boolean(audioStream),
+                ...(typeof videoStream?.width === 'number' ? { width: videoStream.width } : {}),
+                ...(typeof videoStream?.height === 'number' ? { height: videoStream.height } : {}),
+                ...(Number.isFinite(durationSec) && durationSec > 0 ? { durationSec: roundToMillis(durationSec) } : {}),
+            };
+        } catch {
+            return { hasVideo: false, hasAudio: false };
         } finally {
             await rm(workDir, { recursive: true, force: true });
         }
@@ -283,6 +341,10 @@ function resolveOverlayStrategy(): OverlayStrategy {
 function normalizeDurationSec(value: number | undefined): number {
     const durationSec = typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 5;
     return Math.max(0.25, Math.round(durationSec * 1000) / 1000);
+}
+
+function roundToMillis(value: number): number {
+    return Math.round(value * 1000) / 1000;
 }
 
 async function createOverlayPng(
