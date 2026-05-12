@@ -59,6 +59,7 @@ playwright-report/
 
 # Backend local DB
 .local-assets/
+.local-db/
 apps/backend/.local-assets/
 apps/backend/.local-db/
 apps/backend/.esbuild/
