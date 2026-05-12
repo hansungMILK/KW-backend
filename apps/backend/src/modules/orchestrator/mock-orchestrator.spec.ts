@@ -53,7 +53,7 @@ describe('mockOrchestrator content profile proposal metadata', () => {
         );
     });
 
-    it('proposes a longform Gate A plan without paid media execution blocks', async () => {
+    it('proposes a user-facing longform planning flow without paid media execution blocks', async () => {
         const proposal = await mockOrchestrator.generateProposal('flow-1', '롱폼 제작해줘. 주제는 AI 에이전트의 미래');
 
         expect(proposal.metadata?.['contentProfile']).toEqual(
@@ -81,7 +81,9 @@ describe('mockOrchestrator content profile proposal metadata', () => {
             })
         );
         expect(proposal.estimatedCost.total).toBeLessThan(0.5);
-        expect(proposal.assistantMessage).toContain('롱폼 Gate A');
+        expect(proposal.assistantMessage).toContain('롱폼 제작 기획');
+        expect(proposal.assistantMessage).not.toMatch(/Gate [AB]|게이트/i);
+        expect(proposal.proposedNodes.map(node => node.label).join(' ')).not.toMatch(/Gate [AB]|게이트/i);
     });
 
     it('preserves requested longform duration in the Gate A content config', async () => {

@@ -51,7 +51,7 @@ describe('mediaVideoBlock', () => {
                     nodeId: 'node_1',
                 }
             )
-        ).rejects.toThrow(/approved Gate A/i);
+        ).rejects.toThrow(/approved planning artifact/i);
 
         expect(ffmpegAdapter.compose).not.toHaveBeenCalled();
         expect(putObject).not.toHaveBeenCalled();
@@ -120,7 +120,7 @@ describe('mediaVideoBlock', () => {
                     nodeId: 'node_1',
                 }
             )
-        ).rejects.toThrow(/approved Gate A/i);
+        ).rejects.toThrow(/approved planning artifact/i);
 
         expect(ffmpegAdapter.compose).not.toHaveBeenCalled();
         expect(putObject).not.toHaveBeenCalled();
@@ -159,7 +159,6 @@ describe('mediaVideoBlock', () => {
             height: 1440,
             format: 'mp4',
         });
-        expect(result.output.longformGate).toBe('B');
         expect(result.output.qa).toMatchObject({
             hasVideo: true,
             hasAudio: true,
@@ -169,7 +168,6 @@ describe('mediaVideoBlock', () => {
         expect(result.assets?.[0]?.metadata).toMatchObject({
             width: 2560,
             height: 1440,
-            longformGate: 'B',
             rendererRoute: 'hyperframes',
         });
     });

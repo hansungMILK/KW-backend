@@ -906,7 +906,7 @@ const FriendlyOutputPreview: React.FC<{
                 className="p-2.5 bg-sky-500/10 rounded-lg border border-sky-500/30 overflow-auto"
                 style={{ maxHeight }}
             >
-                <div className="text-[11px] font-semibold text-sky-200">롱폼 Gate A 기획안</div>
+                <div className="text-[11px] font-semibold text-sky-200">롱폼 제작 기획안</div>
                 <div className="mt-1 text-[10px] text-muted-foreground">
                     {duration ? `예상 길이 ${duration}` : '예상 길이 산정 중'} · {rendererRoute} · 비용{' '}
                     {cost ?? '산정 중'}
@@ -959,7 +959,7 @@ const FriendlyOutputPreview: React.FC<{
                     </div>
                 )}
                 <div className="mt-2 rounded bg-sky-500/10 px-2 py-1 text-[10px] text-sky-200">
-                    검수 전에는 이미지, TTS, 영상 렌더를 실행하지 않습니다.
+                    대본과 씬을 확인한 뒤 영상 제작을 진행할 수 있습니다.
                 </div>
                 {reviewEnabled && draft && (
                     <div className="mt-2 space-y-1.5">

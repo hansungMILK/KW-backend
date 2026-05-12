@@ -295,7 +295,7 @@ function normalizeLongformGateA(input: unknown): BlockExecutorResult {
         estimatedDurationSec: readPositiveNumber(obj['estimatedDurationSec']) ?? 300,
         estimatedCost: isRecord(obj['estimatedCost'])
             ? obj['estimatedCost']
-            : { currency: 'USD', total: 0.16, notes: ['Gate A planning only'] },
+            : { currency: 'USD', total: 0.16, notes: ['Planning only'] },
         rendererRoute: typeof obj['rendererRoute'] === 'string' ? obj['rendererRoute'] : 'hyperframes',
         qaChecklist: Array.isArray(obj['qaChecklist']) ? obj['qaChecklist'] : ['출처 확인', '대본 검수', '씬 승인'],
         mediaExecutionAllowed: false,

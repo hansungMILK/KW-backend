@@ -350,7 +350,8 @@ describe('contentBlock', () => {
         );
 
         const request = vi.mocked(openaiAdapter.chatJson).mock.calls[0]?.[0];
-        expect(request?.systemPrompt).toContain('Longform Gate A');
+        expect(request?.systemPrompt).toContain('longform planning artifacts');
+        expect(request?.systemPrompt).not.toContain('Longform Gate A');
         expect(request?.systemPrompt).not.toContain('10–15 scene');
         expect(result.output).toMatchObject({
             gate: 'A',

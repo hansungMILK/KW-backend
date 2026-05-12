@@ -189,7 +189,6 @@ export const mediaVideoBlock: BlockExecutor = {
                         backgroundMusic: backgroundMusicMetadata,
                         ...(longformGateB
                             ? {
-                                  longformGate: 'B',
                                   rendererRoute: resolveRendererRoute(input, config),
                                   qa,
                                   previewUrl: publicUrl,
@@ -229,10 +228,8 @@ export const mediaVideoBlock: BlockExecutor = {
                     normalizedScenes: rawScenes,
                     ...(longformGateB
                         ? {
-                              longformGate: 'B',
                               rendererRoute: resolveRendererRoute(input, config),
                               qa,
-                              approvedGateAArtifact: approvedGateAArtifact(input, config),
                           }
                         : {}),
                     ...(metadata ? { metadata } : {}),
@@ -475,7 +472,7 @@ function assertApprovedLongformGateB(input: unknown, config?: Record<string, unk
     const artifact = approvedGateAArtifact(input, config);
 
     if (!approved || !isApprovedGateAArtifact(artifact)) {
-        throw new Error('longform Gate B requires approved Gate A artifact before media execution');
+        throw new Error('longform media execution requires an approved planning artifact before media execution');
     }
 }
 
@@ -500,7 +497,7 @@ function assertLongformRenderCostWithinLimit(input: unknown, config?: Record<str
 
     const estimatedCostUsd = estimateLongformRenderCostUsd(input, config);
     if (estimatedCostUsd === undefined) {
-        throw new Error('longform Gate B requires render cost estimate before media execution');
+        throw new Error('longform media execution requires render cost estimate before media execution');
     }
     if (estimatedCostUsd <= maxCostUsd) return;
 

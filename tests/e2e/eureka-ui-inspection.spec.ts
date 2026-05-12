@@ -336,7 +336,7 @@ test.describe('Eureka Flow UI inspection', () => {
         });
     });
 
-    test('shows and runs longform Gate A without enabling paid media generation', async ({ page }) => {
+    test('shows and runs longform planning without enabling paid media generation', async ({ page }) => {
         prepareOutputDir();
         const probe = attachProbe(page);
         const flowId = await createFlowWithCanvas(page, { nodes: [], edges: [] });
@@ -376,7 +376,7 @@ test.describe('Eureka Flow UI inspection', () => {
                 },
             ],
             estimatedDurationSec: 300,
-            estimatedCost: { currency: 'USD', total: 0.16, notes: ['Gate A planning only'] },
+            estimatedCost: { currency: 'USD', total: 0.16, notes: ['Planning only'] },
             rendererRoute: 'hyperframes',
             mediaExecutionAllowed: false,
         };
@@ -411,7 +411,7 @@ test.describe('Eureka Flow UI inspection', () => {
                 id: 'node-longform-data',
                 type: 'data',
                 blockType: 'data',
-                name: '롱폼 Gate A 정규화',
+                name: '롱폼 기획안 정리',
                 position: { x: 760, y: 160 },
                 state: 'IDLE',
                 config: { mode: 'longform-gate-a', mediaExecutionAllowed: false },
@@ -420,7 +420,7 @@ test.describe('Eureka Flow UI inspection', () => {
                 id: 'node-longform-analysis',
                 type: 'analysis',
                 blockType: 'analysis',
-                name: '롱폼 Gate A 검수',
+                name: '롱폼 제작 검수',
                 position: { x: 1080, y: 160 },
                 state: 'IDLE',
                 config: { mode: 'longform-gate-a', mediaExecutionAllowed: false },
@@ -512,7 +512,7 @@ test.describe('Eureka Flow UI inspection', () => {
                         messageType: 'PROPOSAL',
                         proposalId,
                         content:
-                            '롱폼 Gate A입니다. 자료 수집, outline, full script draft, scene plan, 예상 길이/비용, HyperFrames 경로를 먼저 만들고 검수 전에는 이미지, TTS, 영상 렌더를 실행하지 않습니다.',
+                            '롱폼 제작 기획안을 먼저 준비합니다. 자료 수집, outline, full script draft, scene plan, 예상 길이/비용, HyperFrames 경로를 만든 뒤 사용자가 확인하면 영상 제작으로 이어집니다.',
                         createdAt,
                     },
                 }),
@@ -539,7 +539,7 @@ test.describe('Eureka Flow UI inspection', () => {
                     },
                     flow: {
                         id: flowId,
-                        name: 'E2E longform Gate A',
+                        name: 'E2E longform planning',
                         state: 'READY',
                         nodes: longformNodes,
                         edges: longformEdges,
@@ -631,7 +631,7 @@ test.describe('Eureka Flow UI inspection', () => {
         await page.keyboard.press('Enter');
 
         await expect(page.getByText('4개 블록 생성')).toBeVisible({ timeout: 10000 });
-        await expect(page.getByText('롱폼 Gate A입니다')).toBeVisible();
+        await expect(page.getByText('롱폼 제작 기획안을 먼저 준비합니다')).toBeVisible();
         await expect(page.getByText('롱폼 해설')).toBeVisible();
         await expect(page.getByText('대본 검수 후 실행')).toBeVisible();
         await expect(page.getByText('대본 단계에서 멈춰 사용자가 검수한 뒤 유료 생성으로 이어갑니다.')).toBeVisible();
@@ -648,10 +648,11 @@ test.describe('Eureka Flow UI inspection', () => {
 
         await page.getByRole('button', { name: /워크플로우 실행|Run Workflow/i }).click();
         await expect(page.getByText('대본 검수 모드로 실행을 시작했습니다.')).toBeVisible({ timeout: 10000 });
-        await expect(page.getByText('롱폼 Gate A 기획안')).toBeVisible({ timeout: 10000 });
+        await expect(page.getByText('롱폼 제작 기획안', { exact: true })).toBeVisible({ timeout: 10000 });
         await expect(page.getByText('전체 대본 초안')).toBeVisible();
         await expect(page.getByText('씬 플랜')).toBeVisible();
         await expect(page.getByText(/hyperframes/i).first()).toBeVisible();
+        await expect(page.getByText(/Gate [AB]|게이트/i)).toHaveCount(0);
         await capture(page, '19-longform-gate-a-run-completed');
 
         expect(approveRequestBody).toMatchObject({

@@ -101,7 +101,7 @@ Respond with JSON only — no markdown fences, no extra text:
 }`;
 
 const LONGFORM_GATE_A_SYSTEM_PROMPT = `You are a Korean longform YouTube production planner inside a general workflow automation engine.
-This is Longform Gate A only: create planning artifacts for user review before any paid media execution.
+Create longform planning artifacts for user review before any paid media execution.
 
 Requirements:
 - Do not create a Shorts scene contract.
@@ -109,7 +109,7 @@ Requirements:
 - Produce source digest, outline, full script draft, scene plan, estimated duration, estimated cost, renderer route, and QA checklist.
 - Preserve targetDurationSec/maxDurationSec from the node config when present.
 - Keep rendererRoute as "hyperframes" unless the user explicitly asks for another renderer.
-- estimatedCost is Gate A planning cost only. Gate B paid media/render cost must not be included here.
+- estimatedCost is planning cost only. Paid media/render cost must not be included here.
 
 Respond with JSON only — no markdown fences, no extra text:
 {
@@ -118,7 +118,7 @@ Respond with JSON only — no markdown fences, no extra text:
   "fullScriptDraft": "complete Korean longform narration draft",
   "scenePlan": [{ "sceneNumber": 1, "title": "scene title", "visualPlan": "visual plan", "durationSec": 40 }],
   "estimatedDurationSec": 300,
-  "estimatedCost": { "currency": "USD", "total": 0.2, "notes": ["Gate A planning only"] },
+  "estimatedCost": { "currency": "USD", "total": 0.2, "notes": ["Planning only"] },
   "rendererRoute": "hyperframes",
   "qaChecklist": ["source check", "script review", "scene approval"]
 }`;
@@ -491,7 +491,7 @@ function normalizeLongformGateAOutput(
               : 'hyperframes';
     const estimatedCost = isRecord(obj['estimatedCost'])
         ? obj['estimatedCost']
-        : { currency: 'USD', total: 0.16, notes: ['Gate A planning only'] };
+        : { currency: 'USD', total: 0.16, notes: ['Planning only'] };
 
     return {
         ...obj,

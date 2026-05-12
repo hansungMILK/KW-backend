@@ -23,7 +23,7 @@ ${getBlockCatalogPrompt()}
 - If the request needs current facts, URLs, prices, news, official documents, or source verification, include search.
 - If the request is just text writing, summarization, translation, or explanation, keep the workflow text/data oriented.
 - If the request is a Shorts/video request, build a video pipeline with source/script/structured data/review/image/TTS/video and optional metadata.
-- If the request is a longform request, build Gate A only first: source collection, outline/full script draft/scene plan normalization, and quality review. Do not include media-image, media-tts, media-video, HyperFrames render, MP4 render, or integration before the user approves Gate A artifacts.
+- If the request is a longform request, build the planning/review workflow first: source collection, outline/full script draft/scene plan normalization, and quality review. Do not include media-image, media-tts, media-video, HyperFrames render, MP4 render, or integration before the user approves the planning artifacts.
 - If the request is a single image request, use content -> media-image only unless search is needed for factual visual accuracy.
 
 ## DAG Rules
@@ -173,28 +173,28 @@ User: "롱폼 제작해줘. 주제는 AI 에이전트의 미래"
 Assistant:
 {
   "plan": {
-    "goal": "AI 에이전트의 미래에 대한 롱폼 Gate A 기획안을 만든다",
+    "goal": "AI 에이전트의 미래에 대한 롱폼 제작 기획안을 만든다",
     "outputType": "data",
     "planType": "interactive",
     "requiredCapabilities": ["source.collect", "text.generate", "data.structure", "quality.review"],
     "selectedBlocks": [
       { "blockType": "search", "reason": "자료와 출처를 수집한다" },
       { "blockType": "content", "reason": "outline, full script draft, scene plan을 작성한다" },
-      { "blockType": "data", "reason": "Gate A 산출물을 구조화한다" },
+      { "blockType": "data", "reason": "제작 기획안을 구조화한다" },
       { "blockType": "analysis", "reason": "유료 제작 전 필수 산출물을 검수한다" }
     ],
     "rejectedBlocks": [
-      { "blockType": "media-image", "reason": "Gate A에서는 이미지 생성 비용을 발생시키지 않는다" },
-      { "blockType": "media-tts", "reason": "Gate A에서는 TTS 비용을 발생시키지 않는다" },
-      { "blockType": "media-video", "reason": "Gate A에서는 영상 렌더를 실행하지 않는다" }
+      { "blockType": "media-image", "reason": "사용자 확인 전에는 이미지 생성 비용을 발생시키지 않는다" },
+      { "blockType": "media-tts", "reason": "사용자 확인 전에는 TTS 비용을 발생시키지 않는다" },
+      { "blockType": "media-video", "reason": "사용자 확인 전에는 영상 렌더를 실행하지 않는다" }
     ],
-    "assumptions": ["대본과 씬 승인 후 Gate B에서 유료 제작을 시작한다"]
+    "assumptions": ["대본과 씬 승인 후 유료 제작을 시작한다"]
   },
   "blocks": [
     { "type": "search", "label": "롱폼 자료 수집", "config": { "mode": "longform-gate-a" } },
     { "type": "content", "label": "롱폼 기획안 작성", "config": { "mode": "longform-gate-a", "rendererRoute": "hyperframes", "mediaExecutionAllowed": false } },
-    { "type": "data", "label": "롱폼 Gate A 정규화", "config": { "mode": "longform-gate-a", "mediaExecutionAllowed": false } },
-    { "type": "analysis", "label": "롱폼 Gate A 검수", "config": { "mode": "longform-gate-a", "mediaExecutionAllowed": false } }
+    { "type": "data", "label": "롱폼 기획안 정리", "config": { "mode": "longform-gate-a", "mediaExecutionAllowed": false } },
+    { "type": "analysis", "label": "롱폼 제작 검수", "config": { "mode": "longform-gate-a", "mediaExecutionAllowed": false } }
   ],
   "edges": [
     { "from": 0, "to": 1 },
@@ -202,7 +202,7 @@ Assistant:
     { "from": 2, "to": 3 }
   ],
   "estimatedCostUsd": 0.16,
-  "summary": "롱폼 Gate A에서 자료, 아웃라인, 전체 대본 초안, 씬 플랜, 예상 길이/비용/렌더 경로를 만든 뒤 검수합니다. 승인 전에는 이미지, TTS, 영상 렌더를 실행하지 않습니다."
+  "summary": "롱폼 제작 기획에서 자료, 아웃라인, 전체 대본 초안, 씬 플랜, 예상 길이/비용/렌더 경로를 만든 뒤 사용자가 확인합니다. 승인 전에는 이미지, TTS, 영상 렌더를 실행하지 않습니다."
 }
 `;
 

@@ -25,23 +25,23 @@ export function buildLongformGateAWorkflow(
 
     return {
         plan: {
-            goal: '롱폼 Gate A 산출물을 먼저 만들고 사용자가 검수한 뒤 유료 제작으로 진행한다',
+            goal: '롱폼 제작 기획안을 먼저 만들고 사용자가 검수한 뒤 영상 제작으로 진행한다',
             outputType: 'data',
             planType: 'interactive',
             requiredCapabilities: ['source.collect', 'text.generate', 'data.structure', 'quality.review'],
             selectedBlocks: [
                 { blockType: 'search', reason: '원문과 보조 자료를 수집해 source digest를 만든다' },
                 { blockType: 'content', reason: '롱폼 outline, full script draft, scene plan을 작성한다' },
-                { blockType: 'data', reason: 'Gate A 산출물을 검수/승인 가능한 구조로 정규화한다' },
+                { blockType: 'data', reason: '제작 기획안을 검수/승인 가능한 구조로 정규화한다' },
                 { blockType: 'analysis', reason: '유료 제작 전 필수 산출물과 비용/렌더 경로를 검수한다' },
             ],
             rejectedBlocks: [
-                { blockType: 'media-image', reason: 'Gate A에서는 이미지 생성 비용을 발생시키지 않는다' },
-                { blockType: 'media-tts', reason: 'Gate A에서는 TTS 비용을 발생시키지 않는다' },
-                { blockType: 'media-video', reason: 'Gate A에서는 HyperFrames/MP4 렌더를 실행하지 않는다' },
-                { blockType: 'integration', reason: '최종 배포 메타데이터는 Gate B 완료 후 생성한다' },
+                { blockType: 'media-image', reason: '사용자 확인 전에는 이미지 생성 비용을 발생시키지 않는다' },
+                { blockType: 'media-tts', reason: '사용자 확인 전에는 TTS 비용을 발생시키지 않는다' },
+                { blockType: 'media-video', reason: '사용자 확인 전에는 HyperFrames/MP4 렌더를 실행하지 않는다' },
+                { blockType: 'integration', reason: '최종 배포 메타데이터는 영상 제작 완료 후 생성한다' },
             ],
-            assumptions: ['롱폼은 대본/씬 검수 후 Gate B에서 유료 제작을 시작한다'],
+            assumptions: ['롱폼은 대본/씬 검수 후 유료 제작을 시작한다'],
         },
         blocks: [
             {
@@ -70,7 +70,7 @@ export function buildLongformGateAWorkflow(
             },
             {
                 type: 'data',
-                label: '롱폼 Gate A 정규화',
+                label: '롱폼 기획안 정리',
                 config: {
                     mode: 'longform-gate-a',
                     rendererRoute,
@@ -79,7 +79,7 @@ export function buildLongformGateAWorkflow(
             },
             {
                 type: 'analysis',
-                label: '롱폼 Gate A 검수',
+                label: '롱폼 제작 검수',
                 config: {
                     mode: 'longform-gate-a',
                     rendererRoute,
@@ -94,7 +94,7 @@ export function buildLongformGateAWorkflow(
         ],
         estimatedCostUsd: LONGFORM_GATE_A_ESTIMATED_COST_USD,
         summary:
-            '롱폼 Gate A를 먼저 실행합니다. 자료 수집, outline, full script draft, scene plan, 예상 길이/비용/렌더 경로를 만든 뒤 검수 승인 전에는 이미지, TTS, 영상 렌더를 실행하지 않습니다.',
+            '롱폼 제작 기획안을 먼저 준비합니다. 자료 수집, outline, full script draft, scene plan, 예상 길이/비용/렌더 경로를 만든 뒤 사용자가 확인하면 영상 제작으로 이어집니다.',
     };
 }
 

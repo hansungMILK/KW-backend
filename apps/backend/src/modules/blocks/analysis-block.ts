@@ -487,7 +487,7 @@ function reviewLongformGateA(input: unknown, start: number): BlockExecutorResult
         issues.push({ severity: 'medium', message: '롱폼 rendererRoute가 없습니다.' });
     }
     if (obj['mediaExecutionAllowed'] !== false) {
-        issues.push({ severity: 'critical', message: 'Gate A에서는 유료 media execution이 차단되어야 합니다.' });
+        issues.push({ severity: 'critical', message: '검수 단계에서는 유료 media execution이 차단되어야 합니다.' });
     }
 
     const blockingIssues = issues.filter(issue => issue.severity === 'high' || issue.severity === 'critical');

@@ -89,7 +89,7 @@ describe('openaiOrchestrator longform Gate A', () => {
         });
     });
 
-    it('converts longform model output into Gate A planning blocks before paid media execution', async () => {
+    it('converts longform model output into user-facing planning blocks before paid media execution', async () => {
         const proposal = await openaiOrchestrator.generateProposal(
             'flow-1',
             '롱폼 제작해줘. 주제는 AI 에이전트의 미래'
@@ -118,7 +118,9 @@ describe('openaiOrchestrator longform Gate A', () => {
             })
         );
         expect(proposal.estimatedCost.total).toBeLessThan(0.5);
-        expect(proposal.assistantMessage).toContain('Gate A');
+        expect(proposal.assistantMessage).toContain('롱폼 제작 기획');
+        expect(proposal.assistantMessage).not.toMatch(/Gate [AB]|게이트/i);
+        expect(proposal.proposedNodes.map(node => node.label).join(' ')).not.toMatch(/Gate [AB]|게이트/i);
     });
 
     it('still converts longform requests to Gate A when the model returns an invalid paid-media DAG', async () => {
@@ -142,7 +144,8 @@ describe('openaiOrchestrator longform Gate A', () => {
         );
 
         expect(proposal.proposedNodes.map(node => node.blockType)).toEqual(['search', 'content', 'data', 'analysis']);
-        expect(proposal.assistantMessage).toContain('Gate A');
+        expect(proposal.assistantMessage).toContain('롱폼 제작 기획');
+        expect(proposal.assistantMessage).not.toMatch(/Gate [AB]|게이트/i);
         expect(proposal.approvalRequired).toBe(true);
     });
 });
