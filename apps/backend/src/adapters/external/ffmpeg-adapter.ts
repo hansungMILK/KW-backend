@@ -515,56 +515,70 @@ function localAssetKeyFromUrl(url: string): string | undefined {
     return decodeURIComponent(url.slice(base.length + 1));
 }
 
-function runFfmpeg(args: string[], signal?: AbortSignal): Promise<void> {
+export function runFfmpeg(args: string[], signal?: AbortSignal): Promise<void> {
     return new Promise((resolve, reject) => {
         if (signal?.aborted) {
             reject(abortError(signal));
             return;
         }
 
-        const child = spawn(FFMPEG_PATH, args);
+        const child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'] });
         let stderr = '';
         let settled = false;
+        let exitFallbackTimeout: ReturnType<typeof setTimeout> | undefined;
+        const processTimeout = setTimeout(() => {
+            child.kill('SIGKILL');
+            rejectOnce(new Error(`FFmpeg timed out after ${Math.round(FFMPEG_TIMEOUT_MS / 1000)} seconds`));
+        }, FFMPEG_TIMEOUT_MS);
+        const cleanup = () => {
+            clearTimeout(processTimeout);
+            if (exitFallbackTimeout) clearTimeout(exitFallbackTimeout);
+            signal?.removeEventListener('abort', onAbort);
+        };
         const rejectOnce = (error: Error) => {
             if (settled) return;
             settled = true;
+            cleanup();
             reject(error);
         };
         const resolveOnce = () => {
             if (settled) return;
             settled = true;
+            cleanup();
             resolve();
+        };
+        const finish = (code: number | null, killedBySignal: NodeJS.Signals | null) => {
+            if (code === 0) {
+                resolveOnce();
+                return;
+            }
+            if (killedBySignal) {
+                rejectOnce(new Error(`FFmpeg exited with signal ${killedBySignal}: ${stderr.slice(0, 2000)}`));
+                return;
+            }
+            rejectOnce(new Error(`FFmpeg failed with exit code ${code}: ${stderr.slice(0, 2000)}`));
         };
         const onAbort = () => {
             child.kill('SIGKILL');
             rejectOnce(abortError(signal));
         };
         signal?.addEventListener('abort', onAbort, { once: true });
-        const timeout = setTimeout(() => {
-            child.kill('SIGKILL');
-            rejectOnce(new Error(`FFmpeg timed out after ${Math.round(FFMPEG_TIMEOUT_MS / 1000)} seconds`));
-        }, FFMPEG_TIMEOUT_MS);
 
-        child.stderr.on('data', chunk => {
+        child.stderr?.on('data', chunk => {
             if (stderr.length < 4000) stderr += chunk.toString().slice(0, 4000 - stderr.length);
         });
         child.on('error', err => {
-            clearTimeout(timeout);
-            signal?.removeEventListener('abort', onAbort);
             rejectOnce(
                 new Error(
                     `FFmpeg not available at ${FFMPEG_PATH}. Set FFMPEG_PATH to a working binary or attach a Lambda layer with /opt/bin/ffmpeg. ${err.message}`
                 )
             );
         });
-        child.on('close', code => {
-            clearTimeout(timeout);
-            signal?.removeEventListener('abort', onAbort);
-            if (code === 0) {
-                resolveOnce();
-                return;
-            }
-            rejectOnce(new Error(`FFmpeg failed with exit code ${code}: ${stderr.slice(0, 2000)}`));
+        child.on('exit', (code, killedBySignal) => {
+            exitFallbackTimeout = setTimeout(() => finish(code, killedBySignal), 250);
+        });
+        child.on('close', (code, killedBySignal) => {
+            finish(code, killedBySignal);
         });
     });
 }
