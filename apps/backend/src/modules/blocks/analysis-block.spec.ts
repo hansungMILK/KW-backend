@@ -51,4 +51,32 @@ describe('analysisBlock', () => {
         expect(call?.userMessage).toContain('sourceRefs=source-1');
         expect(call?.userMessage).toContain('출처 연결이 있는 것으로 간주');
     });
+
+    it('keeps style-only quality issues non-blocking so media generation can continue', async () => {
+        const normalizedScenes = Array.from({ length: 12 }, (_, index) => ({
+            sceneNumber: index + 1,
+            caption: `핵심 장면 ${index + 1}`,
+            narration: `검증 가능한 설명형 나레이션 문장입니다 ${index + 1}`,
+            imagePrompt: 'A simple Korean explainer shorts scene.',
+            visual: {
+                topTitle: '1234567890123456789',
+                mainCaption: `핵심 장면 ${index + 1}`,
+            },
+            claimType: 'context',
+            sourceRefs: ['source-1'],
+            durationSec: 5,
+        }));
+
+        const result = await analysisBlock.execute({
+            normalizedScenes,
+            metadata: {
+                title: '세레브라스 IPO',
+                presetId: 'general-shorts',
+            },
+        });
+
+        expect(result.output['approved']).toBe(true);
+        expect(result.output['qualityScore']).toBeLessThan(60);
+        expect(JSON.stringify(result.output['issues'])).toContain('상단 제목이 너무 깁니다');
+    });
 });

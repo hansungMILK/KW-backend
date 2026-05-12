@@ -102,7 +102,7 @@ test.describe('Eureka Flow UI inspection', () => {
 
         await page.getByText('승인').click();
         await expect(page.getByText('트렌드 수집')).toBeVisible({ timeout: 20000 });
-        await expect(page.getByText('영상 합성')).toBeVisible({ timeout: 20000 });
+        await expect(page.getByText('영상 합성', { exact: true })).toBeVisible({ timeout: 20000 });
         const approvedText = await capture(page, '05-agent-approved');
 
         writeProbeArtifacts(probe, {
@@ -140,7 +140,7 @@ test.describe('Eureka Flow UI inspection', () => {
 
         await page.getByText('승인').click();
         await expect(page.getByText('트렌드 수집')).toBeVisible({ timeout: 20000 });
-        await expect(page.getByText('영상 합성')).toBeVisible({ timeout: 20000 });
+        await expect(page.getByText('영상 합성', { exact: true })).toBeVisible({ timeout: 20000 });
         await capture(page, '12-paid-approved');
 
         const flowId = findCreatedFlowId(probe.apiResponses);

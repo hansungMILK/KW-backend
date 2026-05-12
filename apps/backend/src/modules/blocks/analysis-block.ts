@@ -16,7 +16,6 @@ const MIN_SCENE_COUNT = 10;
 const MAX_SCENE_COUNT = 15;
 
 const SAFETY_THRESHOLD = 70;
-const QUALITY_THRESHOLD = 60;
 const ADMISSION_SAFE_VIOLENCE_TERMS = ['학교폭력', '학폭', '폭력 조치사항'];
 
 // ── Prompts ───────────────────────────────────────────────────────────────────
@@ -415,8 +414,7 @@ export const analysisBlock: BlockExecutor = {
         const allIssues = await runAIReview(scenes, ruleIssues, rulepack.analysisPrompt);
 
         const blockingIssues = allIssues.filter(issue => issue.severity === 'high' || issue.severity === 'critical');
-        const approved =
-            safetyScore >= SAFETY_THRESHOLD && qualityScore >= QUALITY_THRESHOLD && blockingIssues.length === 0;
+        const approved = safetyScore >= SAFETY_THRESHOLD && blockingIssues.length === 0;
 
         const output = {
             safetyScore,

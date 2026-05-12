@@ -151,4 +151,50 @@ describe('mediaVideoBlock', () => {
             expect.objectContaining({ durationSec: 15.5, caption: '두 번째 자막' }),
         ]);
     });
+
+    it('normalizes placeholder source ids before passing segments to the video compositor', async () => {
+        await mediaVideoBlock.execute(
+            {
+                images: [
+                    {
+                        url: 'http://localhost:8800/_local-assets/image-1.png',
+                        sceneNumber: 1,
+                        sourceLabel: 'source-1',
+                    },
+                ],
+                normalizedScenes: [
+                    {
+                        sceneNumber: 1,
+                        durationSec: 5,
+                        narration: '세레브라스가 SEC에 S-1을 냈습니다.',
+                        sourceRefs: ['source-1'],
+                    },
+                ],
+                audio: {
+                    url: 'http://localhost:8800/_local-assets/audio.mp3',
+                    durationSec: 5,
+                },
+                metadata: {
+                    title: '엔비디아에 도전장',
+                    sources: [
+                        {
+                            id: 'source-1',
+                            source: '인공지능신문',
+                            publishedAt: '2026-04-22T17:52:25+09:00',
+                        },
+                    ],
+                },
+            },
+            { backgroundMusic: false },
+            {
+                runId: 'run_1',
+                nodeId: 'node_1',
+            }
+        );
+
+        const request = vi.mocked(ffmpegAdapter.compose).mock.calls[0]?.[0];
+        expect(request?.images[0]).toMatchObject({
+            sourceLabel: '기준: 인공지능신문 2026-04-22',
+        });
+    });
 });

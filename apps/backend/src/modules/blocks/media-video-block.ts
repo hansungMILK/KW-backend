@@ -5,6 +5,7 @@ import { ffmpegAdapter } from '../../adapters/external/ffmpeg-adapter';
 import { env } from '../../config/env';
 import { traceService } from '../../services/trace-service';
 import { selectBgmForShorts } from '../shorts/bgm/bgm-selector';
+import { sourceRefsToLabel } from '../shorts/rulepacks/base-shorts-rulepack';
 
 import type { BlockExecutor, BlockExecutorContext, BlockExecutorResult } from './types';
 
@@ -39,6 +40,10 @@ export const mediaVideoBlock: BlockExecutor = {
             narration?: string;
             visualText?: string;
             sourceLabel?: string;
+            sourceRefs?: unknown[];
+            visual?: {
+                sourceLabel?: string;
+            };
         };
         type RawSubtitleCue = {
             sceneNumber?: number;
@@ -325,7 +330,7 @@ function buildSyncedImageSegments(
                 durationSec: roundToMillis(cue.endSec - cue.startSec),
                 title,
                 caption: cue.text,
-                sourceLabel: image.sourceLabel || sourceLabelForImage(image, scenes),
+                sourceLabel: sourceLabelForImage(image, scenes, metadata?.['sources']),
             };
         });
     }
@@ -335,7 +340,7 @@ function buildSyncedImageSegments(
         durationSec: durationForImage(image, scenes),
         title,
         caption: subtitleForImage(image, scenes),
-        sourceLabel: image.sourceLabel || sourceLabelForImage(image, scenes),
+        sourceLabel: sourceLabelForImage(image, scenes, metadata?.['sources']),
     }));
 }
 
@@ -373,11 +378,32 @@ function durationForImage(
 }
 
 function sourceLabelForImage(
-    image: { sceneNumber?: number },
-    scenes: Array<{ sceneNumber?: number; sourceLabel?: string }>
+    image: { sceneNumber?: number; sourceLabel?: string },
+    scenes: Array<{
+        sceneNumber?: number;
+        sourceLabel?: string;
+        sourceRefs?: unknown[];
+        visual?: { sourceLabel?: string };
+    }>,
+    sources?: unknown
 ): string | undefined {
     const matchingScene = scenes.find(scene => scene.sceneNumber === image.sceneNumber);
-    return matchingScene?.sourceLabel;
+    return (
+        cleanSourceLabel(image.sourceLabel) ||
+        cleanSourceLabel(matchingScene?.sourceLabel) ||
+        cleanSourceLabel(matchingScene?.visual?.sourceLabel) ||
+        sourceRefsToLabel(matchingScene?.sourceRefs, sources) ||
+        undefined
+    );
+}
+
+function cleanSourceLabel(value: string | undefined): string | undefined {
+    if (!value) return undefined;
+    const compact = value.replace(/\s+/g, ' ').trim();
+    if (!compact || compact === '출처 확인 필요') return undefined;
+    if (/^source-\d+$/i.test(compact)) return undefined;
+    if (/https?:\/\//i.test(compact)) return undefined;
+    return compact.slice(0, 36);
 }
 
 function subtitleForImage(

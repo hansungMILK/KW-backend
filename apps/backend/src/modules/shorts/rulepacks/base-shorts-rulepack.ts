@@ -52,7 +52,7 @@ export function sourceRefsToLabel(sourceRefs: unknown, sources?: unknown): strin
         const source = findSource(first, sources);
         if (source) {
             const sourceName = typeof source['source'] === 'string' ? source['source'] : source['title'];
-            const date = typeof source['publishedAt'] === 'string' ? source['publishedAt'] : undefined;
+            const date = typeof source['publishedAt'] === 'string' ? source['publishedAt'].slice(0, 10) : undefined;
             return `기준: ${[sourceName, date].filter(Boolean).join(' ') || first}`.slice(0, 36);
         }
         return `기준: ${first.slice(0, 28)}`;
@@ -60,7 +60,7 @@ export function sourceRefsToLabel(sourceRefs: unknown, sources?: unknown): strin
     if (first && typeof first === 'object') {
         const obj = first as Record<string, unknown>;
         const source = typeof obj['source'] === 'string' ? obj['source'] : undefined;
-        const date = typeof obj['publishedAt'] === 'string' ? obj['publishedAt'] : undefined;
+        const date = typeof obj['publishedAt'] === 'string' ? obj['publishedAt'].slice(0, 10) : undefined;
         const label = [source, date].filter(Boolean).join(' ');
         return label ? `기준: ${label}`.slice(0, 36) : '';
     }

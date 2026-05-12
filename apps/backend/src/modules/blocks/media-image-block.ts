@@ -744,6 +744,7 @@ function cleanSourceLabel(value: string | undefined): string | undefined {
     if (!value) return undefined;
     const compact = value.replace(/\s+/g, ' ').trim();
     if (!compact || compact === '출처 확인 필요') return undefined;
+    if (/^source-\d+$/i.test(compact)) return undefined;
     return compact;
 }
 

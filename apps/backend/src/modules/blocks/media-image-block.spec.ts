@@ -106,6 +106,56 @@ describe('mediaImageBlock', () => {
         );
     });
 
+    it('replaces placeholder source ids with human-readable source labels', async () => {
+        const result = await mediaImageBlock.execute(
+            {
+                normalizedScenes: [
+                    {
+                        sceneNumber: 1,
+                        caption: '세레브라스 IPO 착수',
+                        narration: '세레브라스가 SEC에 S-1을 냈습니다.',
+                        imagePrompt: 'Form S-1 filing on a desk',
+                        visual: {
+                            sourceLabel: 'source-1',
+                        },
+                        sourceRefs: ['source-1'],
+                        durationSec: 5,
+                    },
+                ],
+                metadata: {
+                    sources: [
+                        {
+                            id: 'source-1',
+                            source: '인공지능신문',
+                            publishedAt: '2026-04-22T17:52:25+09:00',
+                        },
+                    ],
+                },
+            },
+            { imageStyleId: 'photo-real' },
+            {
+                runId: 'run-source-label',
+                nodeId: 'node-image',
+                onProgress: vi.fn(async () => undefined),
+                onAsset: vi.fn(async () => undefined),
+                isCancelled: vi.fn(async () => false),
+            }
+        );
+
+        expect(result.output['images']).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    sourceLabel: '기준: 인공지능신문 2026-04-22',
+                }),
+            ])
+        );
+        expect(generateImage).toHaveBeenCalledWith(
+            expect.objectContaining({
+                prompt: expect.stringContaining('Factual source context: 기준: 인공지능신문 2026-04-22'),
+            })
+        );
+    });
+
     it('builds GPT-image-2 prompts that allow useful in-scene text without delegating final overlays', () => {
         const prompt = buildGptImage2ScenePrompt({
             styleId: 'animation',
