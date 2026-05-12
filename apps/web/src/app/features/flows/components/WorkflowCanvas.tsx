@@ -1194,73 +1194,74 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                         outputDataForPropagation = serverData.outputData;
                     }
 
-                    setNodes(prev =>
-                        prev.map(n => {
-                            if (n.id !== nodeId) return n;
+                    const nextNodes = nodesRef.current.map(n => {
+                        if (n.id !== nodeId) return n;
 
-                            // Transform config$ (array) to config (object) if needed
-                            let transformedConfig = n.config;
-                            if (Array.isArray(serverDataAny['config$'])) {
-                                transformedConfig = {};
-                                for (const item of serverDataAny['config$'] as Array<{
-                                    key: string;
-                                    val: string;
-                                }>) {
-                                    transformedConfig[item.key] = item.val;
-                                }
-                            } else if (serverData.config) {
-                                transformedConfig = serverData.config;
+                        // Transform config$ (array) to config (object) if needed
+                        let transformedConfig = n.config;
+                        if (Array.isArray(serverDataAny['config$'])) {
+                            transformedConfig = {};
+                            for (const item of serverDataAny['config$'] as Array<{
+                                key: string;
+                                val: string;
+                            }>) {
+                                transformedConfig[item.key] = item.val;
                             }
+                        } else if (serverData.config) {
+                            transformedConfig = serverData.config;
+                        }
 
-                            // Transform inputData$$ (array) to inputData (object) if needed
-                            let transformedInputData = n.inputData;
-                            if (Array.isArray(serverDataAny['inputData$$'])) {
-                                transformedInputData = {};
-                                for (const item of serverDataAny['inputData$$'] as Array<{
-                                    portId: string;
-                                    packet: { value: unknown; type: string; timestamp?: number };
-                                }>) {
-                                    transformedInputData[item.portId] = item.packet as DataPacket;
-                                }
-                            } else if (serverData.inputData) {
-                                transformedInputData = { ...n.inputData, ...serverData.inputData };
+                        // Transform inputData$$ (array) to inputData (object) if needed
+                        let transformedInputData = n.inputData;
+                        if (Array.isArray(serverDataAny['inputData$$'])) {
+                            transformedInputData = {};
+                            for (const item of serverDataAny['inputData$$'] as Array<{
+                                portId: string;
+                                packet: { value: unknown; type: string; timestamp?: number };
+                            }>) {
+                                transformedInputData[item.portId] = item.packet as DataPacket;
                             }
+                        } else if (serverData.inputData) {
+                            transformedInputData = { ...n.inputData, ...serverData.inputData };
+                        }
 
-                            // Transform outputData$$ (array) to outputData (object) if needed
-                            let transformedOutputData = n.outputData;
-                            if (outputDataForPropagation) {
-                                transformedOutputData = { ...n.outputData, ...outputDataForPropagation };
-                            }
+                        // Transform outputData$$ (array) to outputData (object) if needed
+                        let transformedOutputData = n.outputData;
+                        if (outputDataForPropagation) {
+                            transformedOutputData = { ...n.outputData, ...outputDataForPropagation };
+                        }
 
-                            // State priority: only update if server state is more "final"
-                            // EXCEPTION: If RUNNING with progress, force update (active execution)
-                            // Use getEffectiveState for backward compatibility (state preferred, status fallback)
-                            const serverState = getEffectiveState(serverData.state, serverData.status);
-                            const currentState = getEffectiveState(n.state, n.status);
-                            const isActiveExecution =
-                                serverState === 'RUNNING' && serverData.executionStats?.progress !== undefined;
-                            const finalState =
-                                isActiveExecution || shouldUpdateState(currentState, serverState)
-                                    ? serverState
-                                    : currentState;
+                        // State priority: only update if server state is more "final"
+                        // EXCEPTION: If RUNNING with progress, force update (active execution)
+                        // Use getEffectiveState for backward compatibility (state preferred, status fallback)
+                        const serverState = getEffectiveState(serverData.state, serverData.status);
+                        const currentState = getEffectiveState(n.state, n.status);
+                        const isActiveExecution =
+                            serverState === 'RUNNING' && serverData.executionStats?.progress !== undefined;
+                        const finalState =
+                            isActiveExecution || shouldUpdateState(currentState, serverState)
+                                ? serverState
+                                : currentState;
 
-                            return {
-                                ...n,
-                                config: transformedConfig,
-                                inputData: transformedInputData,
-                                outputData: transformedOutputData,
-                                state: finalState ?? n.state,
-                                status: finalState ?? n.status, // Deprecated: kept for backward compatibility
-                                errorMessage: serverData.errorMessage,
-                                // Merge executionStats to preserve existing values (startTime, duration)
-                                // when only progress is being updated
-                                executionStats: serverData.executionStats
-                                    ? { ...n.executionStats, ...serverData.executionStats }
-                                    : n.executionStats,
-                                position: serverData.position ?? n.position,
-                            };
-                        })
-                    );
+                        return {
+                            ...n,
+                            config: transformedConfig,
+                            inputData: transformedInputData,
+                            outputData: transformedOutputData,
+                            state: finalState ?? n.state,
+                            status: finalState ?? n.status, // Deprecated: kept for backward compatibility
+                            errorMessage: serverData.errorMessage,
+                            // Merge executionStats to preserve existing values (startTime, duration)
+                            // when only progress is being updated
+                            executionStats: serverData.executionStats
+                                ? { ...n.executionStats, ...serverData.executionStats }
+                                : n.executionStats,
+                            position: serverData.position ?? n.position,
+                        };
+                    });
+
+                    nodesRef.current = nextNodes;
+                    setNodes(nextNodes);
 
                     // Note: Output propagation to downstream nodes is handled by the server
                     // via propagateDownstreamV2. Socket notifications will update downstream

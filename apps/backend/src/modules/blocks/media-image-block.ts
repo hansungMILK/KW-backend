@@ -590,6 +590,7 @@ export const mediaImageBlock: BlockExecutor = {
                     .map(index => scenePrompts[index]?.sceneNumber ?? index + 1)
                     .join(', ')}`
             );
+            await cleanupUploadedKeys();
             await recordImageTrace('batch.failed', 'ERROR', {
                 durationMs: Date.now() - start,
                 errorCode: 'IMAGE_BATCH_INCOMPLETE',
@@ -619,6 +620,7 @@ export const mediaImageBlock: BlockExecutor = {
             const error = new Error(
                 `media-image failed after ${generatedResults.length}/${totalScenes} scenes: ${failureMessages.join('; ')}`
             );
+            await cleanupUploadedKeys();
             await recordImageTrace('batch.failed', 'ERROR', {
                 durationMs: Date.now() - start,
                 errorCode: 'IMAGE_PROVIDER_ERROR',
@@ -635,6 +637,7 @@ export const mediaImageBlock: BlockExecutor = {
 
         if (assets.length === 0) {
             const error = new Error('media-image generated no usable image assets');
+            await cleanupUploadedKeys();
             await recordImageTrace('batch.failed', 'ERROR', {
                 durationMs: Date.now() - start,
                 errorCode: 'IMAGE_BATCH_INCOMPLETE',

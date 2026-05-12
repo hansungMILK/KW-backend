@@ -442,6 +442,34 @@ describe('executionEngine asset publication', () => {
         );
     });
 
+    it('deletes produced storage objects when cancellation happens before asset persistence', async () => {
+        executeBlock.mockImplementationOnce(async () => {
+            run = { ...run, status: 'CANCELLED' };
+            return {
+                output: { video: { url: 'http://localhost/video.mp4' } },
+                durationMs: 123,
+                assets: [
+                    {
+                        assetType: 'VIDEO',
+                        mimeType: 'video/mp4',
+                        data: Buffer.from('mp4'),
+                        metadata: { s3Key: 'media/video/staging/output.mp4' },
+                    },
+                ],
+            };
+        });
+
+        await executionEngine.handleNodeExecution(run.runId, node.nodeId, 'exec-1');
+
+        expect(putAsset).not.toHaveBeenCalled();
+        expect(deleteUploadedObject).toHaveBeenCalledWith('media/video/staging/output.mp4');
+        expect(sequence).toContain('node.status:CANCELLED');
+        expect(updateRunNodeStatus.mock.calls.some(call => call[2] === 'COMPLETED')).toBe(false);
+        expect(broadcastToFlow.mock.calls.some(([, msg]) => (msg as { type?: string }).type === 'asset.created')).toBe(
+            false
+        );
+    });
+
     it('fails a node with NODE_TIMEOUT when block execution never settles', async () => {
         vi.useFakeTimers();
         executeBlock.mockImplementationOnce(() => new Promise(() => undefined));

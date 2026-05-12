@@ -789,6 +789,30 @@ const getUrlFromRecord = (value: unknown): string | undefined => {
     return firstStringValue(value.url, value.publicUrl, value.data);
 };
 
+const looksLikeVideoUrl = (value: string | undefined): boolean =>
+    Boolean(value && /\.(mp4|mov|webm)(?:$|[?#])/i.test(value));
+
+const getRecordMimeType = (value: unknown): string | undefined =>
+    isRecordValue(value) ? firstStringValue(value.mimeType, value.contentType)?.toLowerCase() : undefined;
+
+const getRecordAssetType = (value: unknown): string | undefined =>
+    isRecordValue(value) ? firstStringValue(value.type, value.assetType, value.kind)?.toLowerCase() : undefined;
+
+const isVideoRecord = (value: unknown): value is Record<string, unknown> => {
+    if (!isRecordValue(value)) return false;
+    const mimeType = getRecordMimeType(value);
+    const assetType = getRecordAssetType(value);
+    const url = getUrlFromRecord(value);
+    return assetType === 'video' || mimeType?.startsWith('video/') === true || looksLikeVideoUrl(url);
+};
+
+const getVideoPreviewRecord = (value: Record<string, unknown>): Record<string, unknown> | undefined => {
+    if (isVideoRecord(value.video)) return value.video;
+    const artifactVideo = asRecordArray(value.artifacts).find(isVideoRecord);
+    if (artifactVideo) return artifactVideo;
+    return isVideoRecord(value) ? value : undefined;
+};
+
 const buildScriptDraft = (scenes: Record<string, unknown>[]): string =>
     scenes
         .map(scene => firstStringValue(scene.narration, scene.caption, scene.visualText))
@@ -819,7 +843,7 @@ const hasFriendlyOutputPreview = (value: unknown): boolean => {
         asRecordArray(value.images).length > 0 ||
         isRecordValue(value.audio) ||
         isRecordValue(value.video) ||
-        asRecordArray(value.artifacts).some(artifact => artifact.type === 'video')
+        Boolean(getVideoPreviewRecord(value))
     );
 };
 
@@ -840,6 +864,41 @@ const FriendlyOutputPreview: React.FC<{
     }, [initialDraft]);
 
     if (!recordValue) return null;
+
+    const video = getVideoPreviewRecord(recordValue);
+    if (video) {
+        const url = getUrlFromRecord(video) ?? getUrlFromRecord(recordValue);
+        const videoMetadata = isRecordValue(video.metadata) ? video.metadata : undefined;
+        const rootMetadata = isRecordValue(recordValue.metadata) ? recordValue.metadata : undefined;
+        const durationSec =
+            asNumberValue(video.durationSec) ??
+            asNumberValue(videoMetadata?.durationSec) ??
+            asNumberValue(recordValue.durationSec) ??
+            asNumberValue(rootMetadata?.durationSec);
+        return (
+            <div className="p-2.5 bg-muted/10 rounded-lg border border-border/30 overflow-auto" style={{ maxHeight }}>
+                <div className="text-[11px] font-semibold text-foreground">최종 영상</div>
+                {durationSec !== undefined && (
+                    <div className="mt-1 text-[10px] text-muted-foreground">길이 약 {Math.round(durationSec)}초</div>
+                )}
+                {url ? (
+                    <>
+                        <video className="mt-2 max-h-36 w-full rounded bg-black" controls src={url} />
+                        <a
+                            className="mt-2 block text-[10px] text-primary underline"
+                            href={url}
+                            target="_blank"
+                            rel="noreferrer"
+                        >
+                            MP4 열기/다운로드
+                        </a>
+                    </>
+                ) : (
+                    <div className="mt-2 text-[10px]">영상 생성 완료</div>
+                )}
+            </div>
+        );
+    }
 
     const script = isRecordValue(recordValue.script) ? recordValue.script : undefined;
     if (script || scenes.length > 0 || recordValue.title || recordValue.hook) {
@@ -947,36 +1006,6 @@ const FriendlyOutputPreview: React.FC<{
                     <audio className="mt-2 w-full" controls src={url} />
                 ) : (
                     <div className="mt-2 text-[10px]">음성 생성 완료</div>
-                )}
-            </div>
-        );
-    }
-
-    const video = isRecordValue(recordValue.video) ? recordValue.video : undefined;
-    const artifactVideo = asRecordArray(recordValue.artifacts).find(artifact => artifact.type === 'video');
-    if (video || artifactVideo) {
-        const url = getUrlFromRecord(video ?? artifactVideo);
-        const durationSec = asNumberValue(video?.durationSec);
-        return (
-            <div className="p-2.5 bg-muted/10 rounded-lg border border-border/30 overflow-auto" style={{ maxHeight }}>
-                <div className="text-[11px] font-semibold text-foreground">최종 영상</div>
-                {durationSec !== undefined && (
-                    <div className="mt-1 text-[10px] text-muted-foreground">길이 약 {Math.round(durationSec)}초</div>
-                )}
-                {url ? (
-                    <>
-                        <video className="mt-2 max-h-36 w-full rounded bg-black" controls src={url} />
-                        <a
-                            className="mt-2 block text-[10px] text-primary underline"
-                            href={url}
-                            target="_blank"
-                            rel="noreferrer"
-                        >
-                            MP4 열기/다운로드
-                        </a>
-                    </>
-                ) : (
-                    <div className="mt-2 text-[10px]">영상 생성 완료</div>
                 )}
             </div>
         );

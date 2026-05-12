@@ -27,6 +27,9 @@ type PersistedNodeAsset = {
     s3Key?: string;
 };
 
+const getAssetS3Key = (asset: NonNullable<BlockExecutorResult['assets']>[number]): string | undefined =>
+    typeof asset.metadata?.['s3Key'] === 'string' ? asset.metadata['s3Key'] : undefined;
+
 function createExecutionCancelledError(message = 'Run cancelled during node execution'): Error {
     const error = new Error(message);
     error.name = 'ExecutionCancelledError';
@@ -493,6 +496,7 @@ export const executionEngine = {
         const persistedAssetKeys = new Set<string>();
         const persistedAssets: PersistedNodeAsset[] = [];
         const pendingReportedAssets: NonNullable<BlockExecutorResult['assets']> = [];
+        let assetsToPublish: NonNullable<BlockExecutorResult['assets']> = [];
         let lastProgress = 0;
         const abortController = new AbortController();
         let cancelPoller: ReturnType<typeof setInterval> | undefined;
@@ -648,6 +652,37 @@ export const executionEngine = {
             }
         };
 
+        const cleanupUnpublishedAssetStorage = async (
+            assets: NonNullable<BlockExecutorResult['assets']>,
+            persisted: PersistedNodeAsset[]
+        ): Promise<void> => {
+            const persistedKeys = new Set(persisted.map(asset => asset.s3Key).filter(Boolean));
+            const cleanedKeys = new Set<string>();
+
+            for (const asset of [...assets].reverse()) {
+                const s3Key = getAssetS3Key(asset);
+                if (!s3Key || persistedKeys.has(s3Key) || cleanedKeys.has(s3Key)) continue;
+
+                try {
+                    await deleteObject(s3Key);
+                    cleanedKeys.add(s3Key);
+                } catch (err) {
+                    try {
+                        await traceService.record(
+                            runId,
+                            nodeId,
+                            'ERROR',
+                            `Unpublished asset cleanup failed for ${s3Key}: ${
+                                err instanceof Error ? err.message : String(err)
+                            }`
+                        );
+                    } catch {
+                        /* non-fatal */
+                    }
+                }
+            }
+        };
+
         const broadcastAssetCreated = async (asset: PersistedNodeAsset): Promise<void> => {
             if (!runForNode) return;
             try {
@@ -722,6 +757,7 @@ export const executionEngine = {
                 nodeTimeout.cancel();
             }
             const { output, durationMs, assets } = result;
+            assetsToPublish = [...pendingReportedAssets, ...(assets ?? [])];
 
             await ensureNodeActive();
             // Broadcast node.progress at 75% after execution, before save
@@ -780,7 +816,6 @@ export const executionEngine = {
             // Save assets produced by this node before reporting completion.
             // If persistence fails, the node must fail instead of emitting a
             // completed event with missing downloadable outputs.
-            const assetsToPublish = [...pendingReportedAssets, ...(assets ?? [])];
             if (assetsToPublish.length > 0 && runForNode) {
                 try {
                     for (const asset of assetsToPublish) {
@@ -793,6 +828,7 @@ export const executionEngine = {
                     }
                 } catch (err) {
                     await rollbackAssets(persistedAssets);
+                    await cleanupUnpublishedAssetStorage(assetsToPublish, persistedAssets);
                     throw err;
                 }
             }
@@ -810,6 +846,7 @@ export const executionEngine = {
                 }
             } catch (err) {
                 await rollbackAssets(persistedAssets);
+                await cleanupUnpublishedAssetStorage(assetsToPublish, persistedAssets);
                 throw err;
             }
 
@@ -847,6 +884,7 @@ export const executionEngine = {
                 (await isCancelled())
             ) {
                 await rollbackAssets(persistedAssets);
+                await cleanupUnpublishedAssetStorage([...pendingReportedAssets, ...assetsToPublish], persistedAssets);
                 await markNodeCancelled();
                 try {
                     await traceService.record(runId, nodeId, 'STATUS', `Node ${nodeId} cancelled`);
@@ -859,6 +897,7 @@ export const executionEngine = {
             const errorMessage = err instanceof Error ? err.message : String(err);
             console.error(`[execution-engine] node ${nodeId} failed:`, errorMessage);
             await rollbackAssets(persistedAssets);
+            await cleanupUnpublishedAssetStorage([...pendingReportedAssets, ...assetsToPublish], persistedAssets);
 
             const errorCode = isExecutionTimeoutError(err) ? 'NODE_TIMEOUT' : 'EXECUTION_ERROR';
             const failedResult = await runRepo.updateRunNodeStatus(runId, nodeId, 'FAILED', {
