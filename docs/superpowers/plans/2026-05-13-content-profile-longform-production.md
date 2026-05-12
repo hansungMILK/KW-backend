@@ -505,7 +505,7 @@ Review for hidden state mismatch: displayed selection must equal approval payloa
 - Modify: `apps/web/src/app/features/flows/components/NodeBlock.tsx`
 - Modify backend execution only if frontend review mode currently cannot stop at content node reliably.
 
-- [ ] **Step 1: Write failing tests or E2E assertions**
+- [x] **Step 1: Write failing tests or E2E assertions**
 
 Add Playwright assertions:
 
@@ -515,7 +515,7 @@ Add Playwright assertions:
 - User can save reviewed script.
 - Next run uses reviewed script.
 
-- [ ] **Step 2: Confirm RED**
+- [x] **Step 2: Confirm RED**
 
 Run:
 
@@ -525,7 +525,7 @@ yarn e2e:ui
 
 Expected: fail on one of the script-review assertions if current wiring is incomplete.
 
-- [ ] **Step 3: Implement missing execution path**
+- [x] **Step 3: Implement missing execution path**
 
 Fix the smallest missing path:
 
@@ -533,7 +533,7 @@ Fix the smallest missing path:
 - If execution ignores review mode, stop after content node.
 - If reviewed output is not reused, pass it into content/data node execution.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 ```bash
 npx nx run @flows/backend:test --skip-nx-cache -- --run
@@ -542,7 +542,7 @@ yarn e2e:ui
 git diff --check
 ```
 
-- [ ] **Step 5: Code review checkpoint**
+- [x] **Step 5: Code review checkpoint**
 
 Review that this is not just UI state. Confirm the reviewed script is the producer and downstream blocks are the consumers.
 

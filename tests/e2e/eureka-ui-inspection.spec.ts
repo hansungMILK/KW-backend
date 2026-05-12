@@ -115,6 +115,227 @@ test.describe('Eureka Flow UI inspection', () => {
         });
     });
 
+    test('starts a script-first approved workflow in step mode without paid AI calls', async ({ page }) => {
+        prepareOutputDir();
+        const probe = attachProbe(page);
+        const flowId = await createFlowWithCanvas(page, {
+            nodes: [
+                {
+                    id: 'node-search',
+                    type: 'search',
+                    blockType: 'search',
+                    name: '기사 내용 수집',
+                    position: { x: 120, y: 160 },
+                    state: 'IDLE',
+                    config: { query: 'E2E no paid source collection' },
+                },
+                {
+                    id: 'node-content',
+                    type: 'content',
+                    blockType: 'content',
+                    name: '스크립트 생성',
+                    position: { x: 440, y: 160 },
+                    state: 'IDLE',
+                    config: { reviewMode: 'script-first', topic: 'E2E no paid script review' },
+                },
+            ],
+            edges: [
+                {
+                    id: 'edge-search-content',
+                    sourceNodeId: 'node-search',
+                    sourcePortId: 'out',
+                    targetNodeId: 'node-content',
+                    targetPortId: 'in',
+                },
+            ],
+        });
+
+        let runRequestBody: Record<string, unknown> | null = null;
+        await page.route(`**/_apis/flows/${flowId}/runs`, async route => {
+            if (route.request().method() !== 'POST') {
+                await route.continue();
+                return;
+            }
+
+            runRequestBody = route.request().postDataJSON() as Record<string, unknown>;
+            await route.fulfill({
+                status: 202,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    runId: 'run-e2e-step-mode',
+                    flowId,
+                    status: 'QUEUED',
+                    runType: 'FULL_FLOW',
+                    createdAt: new Date().toISOString(),
+                }),
+            });
+        });
+        await page.route('**/_apis/runs/run-e2e-step-mode', route =>
+            route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    runId: 'run-e2e-step-mode',
+                    flowId,
+                    runType: 'FULL_FLOW',
+                    status: 'COMPLETED',
+                    triggerSource: 'MANUAL',
+                    executionMode: 'step',
+                    flowSnapshot: { nodes: [], edges: [] },
+                    finalOutputSummary: {
+                        stoppedForReview: true,
+                        reviewNodeId: 'node-content',
+                    },
+                    createdAt: new Date().toISOString(),
+                }),
+            })
+        );
+        await page.route('**/_apis/runs/run-e2e-step-mode/nodes', route =>
+            route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    items: [
+                        {
+                            runId: 'run-e2e-step-mode',
+                            nodeId: 'node-content',
+                            blockType: 'content',
+                            label: '스크립트 생성',
+                            status: 'COMPLETED',
+                            progress: 100,
+                            retryCount: 0,
+                            parentNodeIds: ['node-search'],
+                            outputPayload: {
+                                scenes: [{ narration: '검수할 대본입니다.' }],
+                            },
+                            updatedAt: new Date().toISOString(),
+                        },
+                    ],
+                }),
+            })
+        );
+
+        await openAuthenticatedEditor(page, 'script-first-run-mode', `/flows/${flowId}`);
+        await expect(page.getByText('스크립트 생성')).toBeVisible({ timeout: 10000 });
+        await capture(page, '06-script-first-loaded');
+
+        await page.getByRole('button', { name: /워크플로우 실행|Run Workflow/i }).click();
+        await expect(page.getByText('대본 검수 모드로 실행을 시작했습니다.')).toBeVisible({ timeout: 10000 });
+        await capture(page, '07-script-first-step-run-started');
+
+        expect(runRequestBody).toMatchObject({ executionMode: 'step' });
+
+        writeProbeArtifacts(probe, {
+            mode: 'script-first-run-mode-no-paid',
+            flowId,
+            runRequestBody,
+            apiStatuses: summarizeApiStatuses(probe.apiResponses),
+        });
+    });
+
+    test('continues a script-first workflow in full mode after reviewed output is saved', async ({ page }) => {
+        prepareOutputDir();
+        const probe = attachProbe(page);
+        const flowId = await createFlowWithCanvas(page, {
+            nodes: [
+                {
+                    id: 'node-content-reviewed',
+                    type: 'content',
+                    blockType: 'content',
+                    name: '스크립트 생성',
+                    position: { x: 160, y: 160 },
+                    state: 'IDLE',
+                    config: {
+                        reviewMode: 'script-first',
+                        topic: 'E2E reviewed script',
+                        reviewedOutput: JSON.stringify({ scenes: [{ narration: '검수 완료 대본입니다.' }] }),
+                    },
+                },
+                {
+                    id: 'node-image',
+                    type: 'media-image',
+                    blockType: 'media-image',
+                    name: '이미지 생성',
+                    position: { x: 480, y: 160 },
+                    state: 'IDLE',
+                    config: { count: 1 },
+                },
+            ],
+            edges: [
+                {
+                    id: 'edge-content-image',
+                    sourceNodeId: 'node-content-reviewed',
+                    sourcePortId: 'out',
+                    targetNodeId: 'node-image',
+                    targetPortId: 'in',
+                },
+            ],
+        });
+
+        let runRequestBody: Record<string, unknown> | null = null;
+        await page.route(`**/_apis/flows/${flowId}/runs`, async route => {
+            if (route.request().method() !== 'POST') {
+                await route.continue();
+                return;
+            }
+
+            runRequestBody = route.request().postDataJSON() as Record<string, unknown>;
+            await route.fulfill({
+                status: 202,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    runId: 'run-e2e-full-mode',
+                    flowId,
+                    status: 'QUEUED',
+                    runType: 'FULL_FLOW',
+                    createdAt: new Date().toISOString(),
+                }),
+            });
+        });
+        await page.route('**/_apis/runs/run-e2e-full-mode', route =>
+            route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    runId: 'run-e2e-full-mode',
+                    flowId,
+                    runType: 'FULL_FLOW',
+                    status: 'COMPLETED',
+                    triggerSource: 'MANUAL',
+                    executionMode: 'full',
+                    flowSnapshot: { nodes: [], edges: [] },
+                    createdAt: new Date().toISOString(),
+                }),
+            })
+        );
+        await page.route('**/_apis/runs/run-e2e-full-mode/nodes', route =>
+            route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ items: [] }),
+            })
+        );
+
+        await openAuthenticatedEditor(page, 'script-reviewed-full-mode', `/flows/${flowId}`);
+        await expect(page.getByText('스크립트 생성')).toBeVisible({ timeout: 10000 });
+        await capture(page, '08-script-reviewed-loaded');
+
+        await page.getByRole('button', { name: /워크플로우 실행|Run Workflow/i }).click();
+        await expect(page.getByText('워크플로우 실행을 시작했습니다.', { exact: true })).toBeVisible({
+            timeout: 10000,
+        });
+        await capture(page, '09-script-reviewed-full-run-started');
+
+        expect(runRequestBody).toMatchObject({ executionMode: 'full' });
+
+        writeProbeArtifacts(probe, {
+            mode: 'script-reviewed-full-mode-no-paid',
+            flowId,
+            runRequestBody,
+            apiStatuses: summarizeApiStatuses(probe.apiResponses),
+        });
+    });
+
     test('executes an approved workflow to final video when paid run is explicitly enabled', async ({ page }) => {
         test.skip(
             process.env.E2E_ALLOW_PAID_RUN !== '1',
@@ -215,8 +436,11 @@ async function captureApiResponse(response: Response, apiResponses: ApiResponseL
     });
 }
 
-async function openAuthenticatedEditor(page: Page, capturePrefix: string) {
-    await page.goto('/');
+async function openAuthenticatedEditor(page: Page, capturePrefix: string, pathName = '/') {
+    await page.addInitScript(key => {
+        localStorage.setItem('x-api-key', String(key));
+    }, appApiKey);
+    await page.goto(pathName);
     await page.waitForLoadState('domcontentloaded');
     await expect(page.locator('body')).toContainText(/Flow|API Key|워크플로우/i);
 
@@ -229,6 +453,30 @@ async function openAuthenticatedEditor(page: Page, capturePrefix: string) {
 
     await expect(page.getByText(/Flow|워크플로우/).first()).toBeVisible({ timeout: 10000 });
     await capture(page, `${capturePrefix}-authenticated`);
+}
+
+async function createFlowWithCanvas(
+    page: Page,
+    canvas: { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> }
+) {
+    const create = await postJson(page, 'http://localhost:8800/_apis/flows', {
+        title: `E2E ${Date.now()}`,
+    });
+    expect(create.status, `flow create should succeed: ${JSON.stringify(create.json)}`).toBe(201);
+
+    const flowId = String((create.json as Record<string, unknown>).flowId ?? '');
+    expect(flowId, 'flow id should be returned').toBeTruthy();
+
+    const update = await page.request.put(`http://localhost:8800/_apis/flows/${flowId}`, {
+        headers: { 'x-api-key': appApiKey },
+        data: {
+            title: `E2E ${Date.now()}`,
+            nodes: canvas.nodes,
+            edges: canvas.edges,
+        },
+    });
+    expect(update.status(), `flow canvas save should succeed: ${await update.text()}`).toBe(200);
+    return flowId;
 }
 
 async function openBlockLibrary(page: Page) {

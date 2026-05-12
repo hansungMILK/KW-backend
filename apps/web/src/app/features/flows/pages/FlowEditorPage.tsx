@@ -18,6 +18,7 @@ import { ApiKeyDialog } from '@flows/shared';
 import { useInitFlowSocket } from '@flows/socket';
 import { useWebCoreStore } from '@flows/web-core';
 
+import { getWorkflowRunMode } from './run-mode';
 import { FlowAgentPanel } from '../components/FlowAgentPanel';
 import { Header } from '../components/Header';
 import { HelpDialog } from '../components/HelpDialog';
@@ -101,17 +102,6 @@ const getRunNodeActivityMessage = (node: RunNodeSnapshot): string | undefined =>
     }
     return `${node.label} 실행 중... ${progress}%`;
 };
-
-const getWorkflowNodeType = (node: NodeData): string | undefined =>
-    node.type ?? ((node as NodeData & { blockType?: string }).blockType as string | undefined);
-
-const hasReviewedScriptOutput = (node: NodeData | undefined): boolean => {
-    const value = node?.config?.['reviewedOutput'];
-    return typeof value === 'string' && value.trim().length > 0;
-};
-
-const findContentNode = (nodes: NodeData[] | undefined): NodeData | undefined =>
-    nodes?.find(node => getWorkflowNodeType(node) === 'content');
 
 const toOutputPacket = (node: RunNodeSnapshot) => {
     if (node.outputPayload === undefined || node.outputPayload === null) return undefined;
@@ -967,16 +957,12 @@ export const FlowEditorPage = () => {
                 updateUrl(result.id, window.location.hash.replace('#', ''));
             }
 
-            const contentNode = findContentNode(data.nodes as NodeData[] | undefined);
-            const runScriptReviewFirst =
-                contentNode &&
-                !hasReviewedScriptOutput(contentNode) &&
-                window.confirm(
-                    '대본을 먼저 검수하시겠어요?\n\n확인을 누르면 원문 수집과 대본 작성까지만 실행하고 멈춥니다. 대본 노드에서 검수본을 저장한 뒤 다시 워크플로우 실행을 누르면 그 대본으로 이미지, TTS, 영상 합성을 이어갑니다.'
-                );
+            const { executionMode, scriptReviewFirst: runScriptReviewFirst } = getWorkflowRunMode(
+                data.nodes as NodeData[] | undefined
+            );
 
             const run = await createFlowRun(result.id, {
-                executionMode: runScriptReviewFirst ? 'step' : 'full',
+                executionMode,
             });
             setActiveRunId(run.id);
             setRunStatus('running');
