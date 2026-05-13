@@ -23,6 +23,7 @@ export interface VideoCompositionRequest {
     outputWidth: number;
     outputHeight: number;
     outputFormat: 'mp4';
+    motionMode?: 'ken-burns';
     signal?: AbortSignal;
     onProgress?: (progress: number, message: string) => void | Promise<void>;
 }
@@ -236,7 +237,13 @@ function buildArgs(
     const fontFile = overlayStrategy === 'drawtext' ? resolveOverlayFontFile() : undefined;
     const filterParts: string[] = [];
     imageFiles.forEach((image, i) => {
-        const baseFilter = buildShortsVisualBaseFilter(i, request.outputWidth, request.outputHeight);
+        const baseFilter = buildShortsVisualBaseFilter(
+            i,
+            request.outputWidth,
+            request.outputHeight,
+            image.durationSec,
+            request.motionMode
+        );
         const overlayInputIndex = overlayInputIndices.get(i);
         if (overlayInputIndex !== undefined) {
             filterParts.push(`${baseFilter}[base${i}]`);
@@ -273,7 +280,20 @@ function buildArgs(
     return args;
 }
 
-function buildShortsVisualBaseFilter(inputIndex: number, outputWidth: number, outputHeight: number): string {
+function buildShortsVisualBaseFilter(
+    inputIndex: number,
+    outputWidth: number,
+    outputHeight: number,
+    durationSec: number,
+    motionMode?: VideoCompositionRequest['motionMode']
+): string {
+    if (motionMode === 'ken-burns') {
+        const frameCount = Math.max(1, Math.round(durationSec * 30));
+        const scaledWidth = Math.ceil(outputWidth * 1.12);
+        const scaledHeight = Math.ceil(outputHeight * 1.12);
+        return `[${inputIndex}:v]scale=${scaledWidth}:${scaledHeight}:force_original_aspect_ratio=increase,crop=${scaledWidth}:${scaledHeight},zoompan=z='min(zoom+0.0008,1.08)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frameCount}:s=${outputWidth}x${outputHeight}:fps=30,setsar=1`;
+    }
+
     const visualHeight = Math.round(outputHeight * 0.55);
     const visualY = Math.round(outputHeight * 0.205);
     return `[${inputIndex}:v]scale=${outputWidth}:${visualHeight}:force_original_aspect_ratio=increase,crop=${outputWidth}:${visualHeight},setsar=1,pad=${outputWidth}:${outputHeight}:0:${visualY}:black`;

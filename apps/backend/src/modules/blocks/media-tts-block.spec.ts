@@ -63,6 +63,10 @@ describe('mediaTtsBlock', () => {
             })
         );
         expect(result.output).toMatchObject({
+            audio: {
+                provider: 'elevenlabs',
+                voiceId: 'pNInz6obpgDQGcFmaJgB',
+            },
             subtitleCues: [
                 {
                     sceneNumber: 1,

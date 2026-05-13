@@ -33,7 +33,22 @@ vi.mock('../../services/trace-service', () => ({
 }));
 
 vi.mock('../shorts/bgm/bgm-selector', () => ({
-    selectBgmForShorts: vi.fn(() => undefined),
+    selectBgmForShorts: vi.fn(() => ({
+        track: {
+            id: 'default-bgm',
+            title: 'Glass Horizon',
+            artist: 'loudsquaredance310',
+            filename: 'default-bgm.mp3',
+            filePath: '/tmp/default-bgm.mp3',
+            mood: 'default',
+            tags: ['default'],
+            source: 'user-supplied default BGM template',
+            license: 'User-supplied asset',
+            attribution: 'Glass Horizon - loudsquaredance310',
+        },
+        volume: 0.05,
+        reason: 'default BGM',
+    })),
 }));
 
 describe('mediaVideoBlock', () => {
@@ -126,13 +141,87 @@ describe('mediaVideoBlock', () => {
         expect(putObject).not.toHaveBeenCalled();
     });
 
+    it('blocks longform Gate B when narration audio is not from ElevenLabs TTS', async () => {
+        await expect(
+            mediaVideoBlock.execute(
+                longformVideoInput({
+                    gateBApproved: true,
+                    audio: {
+                        url: 'http://localhost:8800/_local-assets/longform-audio.mp3',
+                        durationSec: 5,
+                    },
+                }),
+                {
+                    mode: 'longform-gate-b',
+                    rendererRoute: 'hyperframes',
+                    htmlComposeEstimatedCostUsd: 1,
+                    hyperframesRenderEstimatedCostUsd: 1,
+                },
+                {
+                    runId: 'run_1',
+                    nodeId: 'node_1',
+                }
+            )
+        ).rejects.toThrow(/ElevenLabs TTS/i);
+
+        expect(ffmpegAdapter.compose).not.toHaveBeenCalled();
+        expect(putObject).not.toHaveBeenCalled();
+    });
+
+    it('blocks longform Gate B when timed subtitle cues are missing', async () => {
+        await expect(
+            mediaVideoBlock.execute(
+                longformVideoInput({
+                    gateBApproved: true,
+                    subtitleCues: [],
+                }),
+                {
+                    mode: 'longform-gate-b',
+                    rendererRoute: 'hyperframes',
+                    htmlComposeEstimatedCostUsd: 1,
+                    hyperframesRenderEstimatedCostUsd: 1,
+                },
+                {
+                    runId: 'run_1',
+                    nodeId: 'node_1',
+                }
+            )
+        ).rejects.toThrow(/subtitle/i);
+
+        expect(ffmpegAdapter.compose).not.toHaveBeenCalled();
+        expect(putObject).not.toHaveBeenCalled();
+    });
+
+    it('blocks longform Gate B when no motion graphics cues are present', async () => {
+        await expect(
+            mediaVideoBlock.execute(
+                longformVideoInput({
+                    gateBApproved: true,
+                    motionCues: [],
+                }),
+                {
+                    mode: 'longform-gate-b',
+                    rendererRoute: 'hyperframes',
+                    htmlComposeEstimatedCostUsd: 1,
+                    hyperframesRenderEstimatedCostUsd: 1,
+                },
+                {
+                    runId: 'run_1',
+                    nodeId: 'node_1',
+                }
+            )
+        ).rejects.toThrow(/motion graphics/i);
+
+        expect(ffmpegAdapter.compose).not.toHaveBeenCalled();
+        expect(putObject).not.toHaveBeenCalled();
+    });
+
     it('renders approved longform Gate B as 2K MP4 with preview, download, and QA metadata', async () => {
         const result = await mediaVideoBlock.execute(
             longformVideoInput({ gateBApproved: true }),
             {
                 mode: 'longform-gate-b',
                 rendererRoute: 'hyperframes',
-                backgroundMusic: false,
                 htmlComposeEstimatedCostUsd: 1,
                 hyperframesRenderEstimatedCostUsd: 1,
             },
@@ -148,6 +237,7 @@ describe('mediaVideoBlock', () => {
                 outputWidth: 2560,
                 outputHeight: 1440,
                 outputFormat: 'mp4',
+                motionMode: 'ken-burns',
             })
         );
         expect(ffmpegAdapter.probeVideo).toHaveBeenCalledWith(Buffer.from('video'));
@@ -165,10 +255,32 @@ describe('mediaVideoBlock', () => {
             width: 2560,
             height: 1440,
         });
+        expect(result.output.longformProductionQa).toMatchObject({
+            ttsProvider: 'elevenlabs',
+            voiceId: 'pNInz6obpgDQGcFmaJgB',
+            subtitleCueCount: 1,
+            motionCueCount: 1,
+        });
+        expect(result.output.backgroundMusic).toMatchObject({
+            id: 'default-bgm',
+            title: 'Glass Horizon',
+            artist: 'loudsquaredance310',
+        });
         expect(result.assets?.[0]?.metadata).toMatchObject({
             width: 2560,
             height: 1440,
             rendererRoute: 'hyperframes',
+            backgroundMusic: {
+                id: 'default-bgm',
+                title: 'Glass Horizon',
+                artist: 'loudsquaredance310',
+            },
+            longformProductionQa: {
+                ttsProvider: 'elevenlabs',
+                voiceId: 'pNInz6obpgDQGcFmaJgB',
+                subtitleCueCount: 1,
+                motionCueCount: 1,
+            },
         });
     });
 
@@ -450,7 +562,10 @@ function longformVideoInput(overrides: Record<string, unknown> = {}) {
         audio: {
             url: 'http://localhost:8800/_local-assets/longform-audio.mp3',
             durationSec: 5,
+            provider: 'elevenlabs',
+            voiceId: 'pNInz6obpgDQGcFmaJgB',
         },
+        motionCues: [{ sceneNumber: 1, type: 'slow-zoom-in' }],
         approvedGateAArtifact: {
             gate: 'A',
             mode: 'longform-gate-a',

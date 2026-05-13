@@ -52,21 +52,28 @@ export const mediaVideoBlock: BlockExecutor = {
             startSec?: number;
             endSec?: number;
         };
+        type RawMotionCue = {
+            sceneNumber?: number;
+            type?: string;
+        };
         const rawImages: RawImage[] = (inp?.images as RawImage[] | undefined) ?? [];
         const rawScenes: RawScene[] = (inp?.normalizedScenes as RawScene[] | undefined) ?? [];
         const subtitleCues: RawSubtitleCue[] = Array.isArray(inp?.subtitleCues)
             ? (inp.subtitleCues as RawSubtitleCue[])
             : [];
+        const motionCues: RawMotionCue[] = Array.isArray(inp?.motionCues) ? (inp.motionCues as RawMotionCue[]) : [];
         const metadata = inp?.metadata as Record<string, unknown> | undefined;
-        const enableBackgroundMusic = config?.backgroundMusic !== false;
         const longformGateB = isLongformGateB(input, config);
+        const enableBackgroundMusic = longformGateB || config?.backgroundMusic !== false;
 
         if (longformGateB) {
             assertApprovedLongformGateB(input, config);
             assertLongformRenderCostWithinLimit(input, config);
         }
 
-        const audioObj = inp?.audio as { url?: string; durationSec?: number } | undefined;
+        const audioObj = inp?.audio as
+            | { url?: string; durationSec?: number; provider?: string; model?: string; voiceId?: string }
+            | undefined;
         const audioUrl = typeof audioObj?.url === 'string' ? audioObj.url : undefined;
         const audioDurationSec =
             typeof audioObj?.durationSec === 'number' &&
@@ -74,6 +81,9 @@ export const mediaVideoBlock: BlockExecutor = {
             audioObj.durationSec > 0
                 ? audioObj.durationSec
                 : undefined;
+        const longformProductionQa = longformGateB
+            ? assertLongformProductionInputs(audioObj, subtitleCues, motionCues)
+            : undefined;
         const images = buildSyncedImageSegments(rawImages, rawScenes, subtitleCues, metadata, audioDurationSec);
 
         if (images.length === 0) {
@@ -137,6 +147,7 @@ export const mediaVideoBlock: BlockExecutor = {
                         outputWidth: outputSize.width,
                         outputHeight: outputSize.height,
                         outputFormat: 'mp4',
+                        motionMode: longformGateB ? 'ken-burns' : undefined,
                         signal: compositionSignal.signal,
                         onProgress: async (progress, message) => {
                             await context?.onProgress?.(progress, message);
@@ -193,6 +204,7 @@ export const mediaVideoBlock: BlockExecutor = {
                             ? {
                                   rendererRoute: resolveRendererRoute(input, config),
                                   qa,
+                                  longformProductionQa,
                                   previewUrl: publicUrl,
                                   downloadUrl: publicUrl,
                               }
@@ -232,6 +244,7 @@ export const mediaVideoBlock: BlockExecutor = {
                         ? {
                               rendererRoute: resolveRendererRoute(input, config),
                               qa,
+                              longformProductionQa,
                           }
                         : {}),
                     ...(metadata ? { metadata } : {}),
@@ -506,6 +519,45 @@ function assertLongformRenderCostWithinLimit(input: unknown, config?: Record<str
     throw new Error(
         `LONGFORM_HTML_RENDER_COST_LIMIT_EXCEEDED: estimatedCostUsd=${estimatedCostUsd}, maxCostUsd=${maxCostUsd}`
     );
+}
+
+function assertLongformProductionInputs(
+    audio: { provider?: string; model?: string; voiceId?: string } | undefined,
+    subtitleCues: Array<{ text?: string; startSec?: number; endSec?: number }>,
+    motionCues: Array<{ type?: string }>
+): { ttsProvider: string; voiceId: string; subtitleCueCount: number; motionCueCount: number } {
+    const provider = typeof audio?.provider === 'string' ? audio.provider.trim().toLowerCase() : '';
+    const voiceId = typeof audio?.voiceId === 'string' ? audio.voiceId.trim() : '';
+    if (provider !== 'elevenlabs' || !voiceId) {
+        throw new Error('longform media execution requires ElevenLabs TTS audio before MP4 render');
+    }
+
+    const timedSubtitleCues = subtitleCues.filter(cue => {
+        const text = normalizeSubtitleText(cue.text);
+        return (
+            text.length > 0 &&
+            typeof cue.startSec === 'number' &&
+            Number.isFinite(cue.startSec) &&
+            typeof cue.endSec === 'number' &&
+            Number.isFinite(cue.endSec) &&
+            cue.endSec > cue.startSec
+        );
+    });
+    if (timedSubtitleCues.length === 0) {
+        throw new Error('longform media execution requires timed subtitle cues before MP4 render');
+    }
+
+    const usableMotionCues = motionCues.filter(cue => typeof cue.type === 'string' && cue.type.trim().length > 0);
+    if (usableMotionCues.length === 0) {
+        throw new Error('longform media execution requires motion graphics cues before MP4 render');
+    }
+
+    return {
+        ttsProvider: 'elevenlabs',
+        voiceId,
+        subtitleCueCount: timedSubtitleCues.length,
+        motionCueCount: usableMotionCues.length,
+    };
 }
 
 function estimateLongformRenderCostUsd(input: unknown, config?: Record<string, unknown>): number | undefined {

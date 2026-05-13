@@ -95,7 +95,13 @@ describe('mediaVideoBlock longform real MP4 smoke', () => {
                 audio: {
                     url: getPublicUrl('smoke/longform-b/audio.mp3'),
                     durationSec: 2,
+                    provider: 'elevenlabs',
+                    voiceId: 'pNInz6obpgDQGcFmaJgB',
                 },
+                motionCues: [
+                    { sceneNumber: 1, type: 'slow-zoom-in' },
+                    { sceneNumber: 2, type: 'slow-zoom-in' },
+                ],
                 approvedGateAArtifact: {
                     gate: 'A',
                     mode: 'longform-gate-a',
@@ -148,6 +154,12 @@ describe('mediaVideoBlock longform real MP4 smoke', () => {
                 id: 'default-bgm',
                 title: 'Glass Horizon',
                 artist: 'loudsquaredance310',
+            });
+            expect(output['longformProductionQa']).toMatchObject({
+                ttsProvider: 'elevenlabs',
+                voiceId: 'pNInz6obpgDQGcFmaJgB',
+                subtitleCueCount: 2,
+                motionCueCount: 2,
             });
             expect(typeof s3Key).toBe('string');
             expect(await readFile(getLocalAssetPath(s3Key as string))).toHaveLength(Number(video['sizeBytes']));
