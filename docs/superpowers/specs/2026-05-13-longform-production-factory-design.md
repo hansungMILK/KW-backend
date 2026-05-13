@@ -213,8 +213,8 @@ Gate B는 `tts`부터 `package`까지다. Gate B는 사용자가 Gate A 산출�
 
 규칙:
 
-- renderer 기본값은 `remotion-local`이다.
-- 외부 HyperFrames 연동이 준비된 경우에만 `hyperframes` route를 쓴다.
+- renderer 기본값은 `hyperframes`다.
+- `remotion-local`은 로컬 테스트/대체 adapter일 뿐, 제품 기본 route가 아니다.
 - 장면 수는 `visualChapters.length`로 결정되며 사용자 입력값이 아니다.
 
 ### 5.6 `longform-review`
