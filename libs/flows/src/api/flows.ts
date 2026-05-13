@@ -1,5 +1,7 @@
 import { api, withRetry } from '@flows/web-core';
 
+import { normalizeNodeList } from './normalizers';
+
 import type {
     BlockDefinition,
     DataPacket,
@@ -121,7 +123,7 @@ const toLoadFlowResult = (flow: SpecFlowDetail): LoadFlowResult => ({
     name: flow.title,
     state: flow.status,
     description: flow.description,
-    nodes: flow.nodes ?? [],
+    nodes: normalizeNodeList(flow.nodes),
     edges: flow.edges ?? [],
     ports: flow.ports ?? [],
     channelId: flow.flowId,
@@ -134,7 +136,7 @@ const toSaveFlowView = (flow: SpecFlowDetail): SaveFlowView => ({
     name: flow.title,
     state: flow.status,
     description: flow.description,
-    nodes: flow.nodes ?? [],
+    nodes: normalizeNodeList(flow.nodes),
     edges: flow.edges ?? [],
     ports: flow.ports ?? [],
     channelId: flow.flowId,

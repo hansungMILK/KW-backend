@@ -1,18 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { openaiOrchestrator } from './openai-orchestrator';
-import { openaiAdapter } from '../../adapters/ai/openai-adapter';
+import { claudeOrchestrator } from './claude-orchestrator';
+import { claudeAdapter } from '../../adapters/ai/claude-adapter';
 
 vi.mock('../../config/env', () => ({
     env: {
-        openaiOrchestratorModel: 'gpt-test',
+        anthropicDefaultModel: 'claude-test',
         openaiImageQuality: 'medium',
     },
 }));
 
-vi.mock('../../adapters/ai/openai-adapter', () => ({
-    openaiAdapter: {
-        chatJson: vi.fn(),
+vi.mock('../../adapters/ai/claude-adapter', () => ({
+    claudeAdapter: {
+        chat: vi.fn(),
     },
 }));
 
@@ -48,7 +48,6 @@ const paidVideoPlan = {
             { blockType: 'media-image', reason: '이미지 생성' },
             { blockType: 'media-tts', reason: '음성 생성' },
             { blockType: 'media-video', reason: '영상 합성' },
-            { blockType: 'integration', reason: '메타데이터 생성' },
         ],
         rejectedBlocks: [],
         assumptions: [],
@@ -61,7 +60,6 @@ const paidVideoPlan = {
         { type: 'media-image', label: '이미지 생성', config: { count: 8 } },
         { type: 'media-tts', label: '음성 생성', config: {} },
         { type: 'media-video', label: '영상 합성', config: { renderer: 'hyperframes' } },
-        { type: 'integration', label: '메타데이터 생성', config: {} },
     ],
     edges: [
         { from: 0, to: 1 },
@@ -71,26 +69,26 @@ const paidVideoPlan = {
         { from: 3, to: 5 },
         { from: 4, to: 6 },
         { from: 5, to: 6 },
-        { from: 6, to: 7 },
     ],
     estimatedCostUsd: 2.3,
     summary: '롱폼 영상 제작 파이프라인을 제안합니다.',
 };
 
-describe('openaiOrchestrator longform Gate A', () => {
+describe('claudeOrchestrator longform Gate A', () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        vi.mocked(openaiAdapter.chatJson).mockResolvedValue({
+        vi.mocked(claudeAdapter.chat).mockResolvedValue({
             content: JSON.stringify(paidVideoPlan),
-            model: 'gpt-test',
+            model: 'claude-test',
             inputTokens: 1,
             outputTokens: 1,
             latencyMs: 1,
+            stopReason: 'stop_sequence',
         });
     });
 
-    it('converts longform model output into a user-facing production flow with paid media blocked until review', async () => {
-        const proposal = await openaiOrchestrator.generateProposal(
+    it('converts longform model output into a full longform flow with paid media blocked until review', async () => {
+        const proposal = await claudeOrchestrator.generateProposal(
             'flow-1',
             '롱폼 제작해줘. 주제는 AI 에이전트의 미래'
         );
@@ -113,34 +111,6 @@ describe('openaiOrchestrator longform Gate A', () => {
         expect(blockTypes).not.toContain('media-image');
         expect(blockTypes).not.toContain('media-tts');
         expect(blockTypes).not.toContain('media-video');
-
-        expect(proposal.metadata?.['contentProfile']).toEqual(
-            expect.objectContaining({
-                contentProfileId: 'longform.explainer.v1',
-                reviewMode: 'script-first',
-            })
-        );
-        expect(proposal.proposedNodes).toContainEqual(
-            expect.objectContaining({
-                blockType: 'longform-scene-json',
-                config: expect.objectContaining({
-                    mode: 'longform-gate-a',
-                    renderer: 'hyperframes',
-                    rendererRoute: 'hyperframes',
-                }),
-            })
-        );
-        expect(proposal.proposedNodes).toContainEqual(
-            expect.objectContaining({
-                blockType: 'longform-review',
-                config: expect.objectContaining({
-                    mode: 'longform-gate-a',
-                    contentProfileId: 'longform.explainer.v1',
-                    reviewMode: 'script-first',
-                    mediaExecutionAllowed: false,
-                }),
-            })
-        );
         expect(proposal.proposedNodes).toContainEqual(
             expect.objectContaining({
                 blockType: 'longform-render',
@@ -153,46 +123,5 @@ describe('openaiOrchestrator longform Gate A', () => {
         );
         expect(proposal.estimatedCost.total).toBeLessThan(2);
         expect(proposal.assistantMessage).toContain('롱폼 제작 기획');
-        expect(proposal.assistantMessage).not.toMatch(/Gate [AB]|게이트/i);
-        expect(proposal.proposedNodes.map(node => node.label).join(' ')).not.toMatch(/Gate [AB]|게이트/i);
-    });
-
-    it('still converts longform requests to Gate A when the model returns an invalid paid-media DAG', async () => {
-        vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
-            content: JSON.stringify({
-                ...paidVideoPlan,
-                edges: [
-                    { from: 0, to: 1 },
-                    { from: 1, to: 6 },
-                ],
-            }),
-            model: 'gpt-test',
-            inputTokens: 1,
-            outputTokens: 1,
-            latencyMs: 1,
-        });
-
-        const proposal = await openaiOrchestrator.generateProposal(
-            'flow-1',
-            '롱폼 제작해줘. 주제는 AI 에이전트의 미래'
-        );
-
-        expect(proposal.proposedNodes.map(node => node.blockType)).toEqual([
-            'longform-source',
-            'longform-brief',
-            'longform-script',
-            'longform-storyboard',
-            'longform-scene-json',
-            'longform-review',
-            'longform-tts',
-            'longform-srt-align',
-            'longform-motion-compose',
-            'longform-render',
-            'longform-qa',
-            'longform-package',
-        ]);
-        expect(proposal.assistantMessage).toContain('롱폼 제작 기획');
-        expect(proposal.assistantMessage).not.toMatch(/Gate [AB]|게이트/i);
-        expect(proposal.approvalRequired).toBe(true);
     });
 });

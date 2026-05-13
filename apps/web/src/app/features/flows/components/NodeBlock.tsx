@@ -770,6 +770,13 @@ const isRecordValue = (value: unknown): value is Record<string, unknown> =>
 const asRecordArray = (value: unknown): Record<string, unknown>[] =>
     Array.isArray(value) ? value.filter(isRecordValue) : [];
 
+const asStringArray = (value: unknown): string[] =>
+    Array.isArray(value)
+        ? value
+              .map(item => (typeof item === 'string' ? item.trim() : ''))
+              .filter((item): item is string => Boolean(item))
+        : [];
+
 const asStringValue = (value: unknown): string | undefined =>
     typeof value === 'string' && value.trim() ? value : undefined;
 
@@ -801,11 +808,28 @@ const getRecordAssetType = (value: unknown): string | undefined =>
 const isLongformGateARecord = (value: unknown): boolean => {
     if (!isRecordValue(value)) return false;
     const mode = firstStringValue(value.mode);
+    const hasLongformSourceShape =
+        asStringArray(value.sourceDigest).length > 0 || asRecordArray(value.primarySources).length > 0;
+    const hasLongformBriefShape = Boolean(firstStringValue(value.viewerPromise, value.evidencePlan, value.structure));
+    const hasLongformScriptShape =
+        Boolean(firstStringValue(value.fullScriptDraft)) || asRecordArray(value.sections).length > 0;
+    const hasLongformStoryboardShape = asRecordArray(value.visualChapters).length > 0;
+    const hasLongformSceneContractShape =
+        firstStringValue(value.renderer, value.rendererRoute) === 'hyperframes' &&
+        asRecordArray(value.scenes).length > 0;
     const hasLongformArtifactShape =
         Boolean(firstStringValue(value.fullScriptDraft)) &&
         asRecordArray(value.scenePlan).length > 0 &&
         Boolean(firstStringValue(value.rendererRoute));
-    return mode === 'longform-gate-a' || hasLongformArtifactShape;
+    return (
+        mode === 'longform-gate-a' ||
+        hasLongformArtifactShape ||
+        hasLongformSourceShape ||
+        hasLongformBriefShape ||
+        hasLongformScriptShape ||
+        hasLongformStoryboardShape ||
+        hasLongformSceneContractShape
+    );
 };
 
 const isVideoRecord = (value: unknown): value is Record<string, unknown> => {
@@ -829,6 +853,19 @@ const buildScriptDraft = (scenes: Record<string, unknown>[]): string =>
         .filter((line): line is string => Boolean(line))
         .join('\n');
 
+const buildLongformDraft = (value: Record<string, unknown>): string => {
+    const directDraft = firstStringValue(value.fullScriptDraft);
+    if (directDraft) return directDraft;
+
+    const sectionDraft = asRecordArray(value.sections)
+        .map(section => firstStringValue(section.narration, section.body, section.summary, section.title))
+        .filter((line): line is string => Boolean(line))
+        .join('\n\n');
+    if (sectionDraft) return sectionDraft;
+
+    return buildScriptDraft(asRecordArray(value.scenes));
+};
+
 const applyScriptDraft = (value: Record<string, unknown>, draft: string): Record<string, unknown> => {
     const lines = draft.split('\n').map(line => line.trim());
     const scenes = asRecordArray(value.scenes).map((scene, index) => {
@@ -840,6 +877,24 @@ const applyScriptDraft = (value: Record<string, unknown>, draft: string): Record
     return {
         ...value,
         scenes,
+        reviewedAt: new Date().toISOString(),
+    };
+};
+
+const applyLongformDraft = (value: Record<string, unknown>, draft: string): Record<string, unknown> => {
+    const paragraphs = draft
+        .split(/\n{2,}/)
+        .map(line => line.trim())
+        .filter(Boolean);
+    const sections = asRecordArray(value.sections).map((section, index) => ({
+        ...section,
+        narration: paragraphs[index] ?? firstStringValue(section.narration, section.body, section.summary) ?? '',
+    }));
+
+    return {
+        ...value,
+        fullScriptDraft: draft,
+        sections: sections.length > 0 ? sections : value.sections,
         reviewedAt: new Date().toISOString(),
     };
 };
@@ -885,7 +940,11 @@ const FriendlyOutputPreview: React.FC<{
 }> = ({ value, maxHeight, reviewEnabled = false, reviewedOutputSaved = false, onReviewedOutputSave }) => {
     const recordValue = isRecordValue(value) ? value : null;
     const scenes = asRecordArray(recordValue?.scenes);
-    const initialDraft = buildScriptDraft(scenes) || firstStringValue(recordValue?.fullScriptDraft) || '';
+    const initialDraft = recordValue
+        ? isLongformGateARecord(recordValue)
+            ? buildLongformDraft(recordValue)
+            : buildScriptDraft(scenes) || firstStringValue(recordValue.fullScriptDraft) || ''
+        : '';
     const [draft, setDraft] = useState(initialDraft);
 
     useEffect(() => {
@@ -895,11 +954,21 @@ const FriendlyOutputPreview: React.FC<{
     if (!recordValue) return null;
 
     if (isLongformGateARecord(recordValue)) {
-        const outline = asRecordArray(recordValue.outline);
+        const sourceDigest = asStringArray(recordValue.sourceDigest);
+        const titleCandidates = asStringArray(recordValue.titleCandidates);
+        const sections = asRecordArray(recordValue.sections);
+        const visualChapters = asRecordArray(recordValue.visualChapters);
         const scenePlan = asRecordArray(recordValue.scenePlan);
+        const contractScenes = asRecordArray(recordValue.scenes);
+        const outline = asRecordArray(recordValue.outline);
         const duration = formatDurationSec(recordValue.estimatedDurationSec);
         const cost = formatCostTotal(recordValue.estimatedCost);
-        const rendererRoute = firstStringValue(recordValue.rendererRoute) ?? 'renderer';
+        const rendererRoute = firstStringValue(recordValue.rendererRoute, recordValue.renderer) ?? 'hyperframes';
+        const reviewStatus = firstStringValue(recordValue.reviewStatus);
+        const mediaAllowed = recordValue.mediaExecutionAllowed === true;
+        const viewerPromise = firstStringValue(recordValue.viewerPromise);
+        const angle = firstStringValue(recordValue.angle);
+        const resolution = firstStringValue(recordValue.resolution);
 
         return (
             <div
@@ -908,9 +977,45 @@ const FriendlyOutputPreview: React.FC<{
             >
                 <div className="text-[11px] font-semibold text-sky-200">롱폼 제작 기획안</div>
                 <div className="mt-1 text-[10px] text-muted-foreground">
-                    {duration ? `예상 길이 ${duration}` : '예상 길이 산정 중'} · {rendererRoute} · 비용{' '}
-                    {cost ?? '산정 중'}
+                    {duration ? `예상 길이 ${duration}` : '예상 길이 산정 중'} · {rendererRoute}
+                    {resolution ? ` · ${resolution}` : ''} · 비용 {cost ?? '산정 중'}
                 </div>
+                {reviewStatus && (
+                    <div className="mt-1 rounded bg-sky-500/10 px-2 py-1 text-[10px] text-sky-100">
+                        검수 상태: {reviewStatus} · 유료 제작 {mediaAllowed ? '허용됨' : '대기'}
+                    </div>
+                )}
+                {(viewerPromise || angle || titleCandidates.length > 0) && (
+                    <div className="mt-2 space-y-1 text-[10px] text-foreground/80">
+                        {titleCandidates[0] && (
+                            <div>
+                                <span className="font-semibold text-foreground">제목 후보:</span> {titleCandidates[0]}
+                            </div>
+                        )}
+                        {viewerPromise && (
+                            <div>
+                                <span className="font-semibold text-foreground">시청자 약속:</span> {viewerPromise}
+                            </div>
+                        )}
+                        {angle && (
+                            <div>
+                                <span className="font-semibold text-foreground">관점:</span> {angle}
+                            </div>
+                        )}
+                    </div>
+                )}
+                {sourceDigest.length > 0 && (
+                    <div className="mt-2">
+                        <div className="text-[10px] font-semibold text-foreground">자료 요약</div>
+                        <div className="mt-1 space-y-1">
+                            {sourceDigest.slice(0, 3).map((line, index) => (
+                                <div key={`${index}-${line}`} className="text-[10px] text-foreground/80 line-clamp-2">
+                                    {index + 1}. {line}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
                 {outline.length > 0 && (
                     <div className="mt-2">
                         <div className="text-[10px] font-semibold text-foreground">아웃라인</div>
@@ -930,11 +1035,49 @@ const FriendlyOutputPreview: React.FC<{
                         </div>
                     </div>
                 )}
+                {sections.length > 0 && (
+                    <div className="mt-2">
+                        <div className="text-[10px] font-semibold text-foreground">대본 섹션</div>
+                        <div className="mt-1 space-y-1">
+                            {sections.slice(0, 4).map((section, index) => {
+                                const title = firstStringValue(section.title) ?? `섹션 ${index + 1}`;
+                                const narration = firstStringValue(section.narration, section.summary);
+                                return (
+                                    <div key={`${index}-${title}`} className="text-[10px] text-foreground/80">
+                                        <span className="font-medium text-foreground">
+                                            {index + 1}. {title}
+                                        </span>
+                                        {narration ? <span className="block line-clamp-2">{narration}</span> : null}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
                 {draft && (
                     <div className="mt-2">
                         <div className="text-[10px] font-semibold text-foreground">전체 대본 초안</div>
                         <div className="mt-1 whitespace-pre-wrap text-[10px] text-foreground/80 line-clamp-5">
                             {draft}
+                        </div>
+                    </div>
+                )}
+                {visualChapters.length > 0 && (
+                    <div className="mt-2">
+                        <div className="text-[10px] font-semibold text-foreground">모션 챕터</div>
+                        <div className="mt-1 space-y-1">
+                            {visualChapters.slice(0, 3).map((chapter, index) => {
+                                const headline = firstStringValue(chapter.headline) ?? `챕터 ${index + 1}`;
+                                const motionPlan = firstStringValue(chapter.motionPlan, chapter.viewerPurpose);
+                                return (
+                                    <div key={`${index}-${headline}`} className="text-[10px] text-foreground/80">
+                                        <span className="font-medium text-foreground">
+                                            {index + 1}. {headline}
+                                        </span>
+                                        {motionPlan ? <span className="block line-clamp-2">{motionPlan}</span> : null}
+                                    </div>
+                                );
+                            })}
                         </div>
                     </div>
                 )}
@@ -958,6 +1101,25 @@ const FriendlyOutputPreview: React.FC<{
                         </div>
                     </div>
                 )}
+                {contractScenes.length > 0 && (
+                    <div className="mt-2">
+                        <div className="text-[10px] font-semibold text-foreground">HyperFrames 장면 계약</div>
+                        <div className="mt-1 space-y-1">
+                            {contractScenes.slice(0, 3).map((scene, index) => {
+                                const title = firstStringValue(scene.headline, scene.title) ?? `장면 ${index + 1}`;
+                                const layout = firstStringValue(scene.layout);
+                                return (
+                                    <div key={`${index}-${title}`} className="text-[10px] text-foreground/80">
+                                        <span className="font-medium text-foreground">
+                                            {index + 1}. {title}
+                                        </span>
+                                        {layout ? <span className="block line-clamp-1">레이아웃: {layout}</span> : null}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
                 <div className="mt-2 rounded bg-sky-500/10 px-2 py-1 text-[10px] text-sky-200">
                     대본과 씬을 확인한 뒤 영상 제작을 진행할 수 있습니다.
                 </div>
@@ -975,11 +1137,7 @@ const FriendlyOutputPreview: React.FC<{
                             className="w-full rounded bg-primary px-2 py-1.5 text-[10px] font-medium text-primary-foreground hover:bg-primary/90"
                             onClick={event => {
                                 event.stopPropagation();
-                                onReviewedOutputSave?.({
-                                    ...recordValue,
-                                    fullScriptDraft: draft,
-                                    reviewedAt: new Date().toISOString(),
-                                });
+                                onReviewedOutputSave?.(applyLongformDraft(recordValue, draft));
                             }}
                         >
                             {reviewedOutputSaved ? '롱폼 검수본 다시 저장' : '롱폼 대본 검수본 저장'}
@@ -1194,7 +1352,11 @@ const OutputPreview: React.FC<VisualizationProps & { onConfigChange?: (key: stri
                 <FriendlyOutputPreview
                     value={packet.value}
                     maxHeight={maxH}
-                    reviewEnabled={definition.type === 'content'}
+                    reviewEnabled={
+                        definition.type === 'content' ||
+                        definition.type === 'longform-script' ||
+                        definition.type === 'longform-review'
+                    }
                     reviewedOutputSaved={
                         typeof node.config?.reviewedOutput === 'string' && node.config.reviewedOutput.length > 0
                     }

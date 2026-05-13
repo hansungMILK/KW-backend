@@ -25,6 +25,18 @@ export const ALLOWED_BLOCK_TYPES = [
     'analysis',
     'media-video',
     'integration',
+    'longform-source',
+    'longform-brief',
+    'longform-script',
+    'longform-storyboard',
+    'longform-scene-json',
+    'longform-review',
+    'longform-tts',
+    'longform-srt-align',
+    'longform-motion-compose',
+    'longform-render',
+    'longform-qa',
+    'longform-package',
 ] as const;
 
 export type AllowedBlockType = (typeof ALLOWED_BLOCK_TYPES)[number];

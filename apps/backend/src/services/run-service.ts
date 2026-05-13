@@ -214,6 +214,7 @@ const LEGACY_BLOCK_PROVIDER_MAP: Record<string, ApiKeyProvider> = {
     search: 'anthropic',
     content: 'anthropic',
     integration: 'anthropic',
+    'longform-tts': 'elevenlabs',
 };
 
 const OPENAI_BLOCK_PROVIDER_MAP: Record<string, ApiKeyProvider> = {
@@ -224,6 +225,7 @@ const OPENAI_BLOCK_PROVIDER_MAP: Record<string, ApiKeyProvider> = {
     'media-tts': 'elevenlabs',
     'media-video': 'openai',
     integration: 'openai',
+    'longform-tts': 'elevenlabs',
 };
 
 type RunServiceFailure = {
@@ -297,7 +299,17 @@ const LONGFORM_HTML_RENDER_BLOCK_TYPES = new Set([
     'html-render',
     'hyperframes-compose',
     'hyperframes-render',
+    'longform-render',
     'mp4-render',
+]);
+
+const LONGFORM_GATE_B_BLOCK_TYPES = new Set([
+    'longform-tts',
+    'longform-srt-align',
+    'longform-motion-compose',
+    'longform-render',
+    'longform-qa',
+    'longform-package',
 ]);
 
 const estimateRunCostUsd = (nodes: Array<Record<string, unknown>>): number => {
@@ -331,6 +343,40 @@ const estimateRunCostUsd = (nodes: Array<Record<string, unknown>>): number => {
                 total += 0.02;
                 break;
             case 'integration':
+                total += 0.01;
+                break;
+            case 'longform-source':
+                total += 0.02;
+                break;
+            case 'longform-brief':
+                total += 0.03;
+                break;
+            case 'longform-script':
+                total += 0.04;
+                break;
+            case 'longform-storyboard':
+                total += 0.03;
+                break;
+            case 'longform-scene-json':
+                total += 0.02;
+                break;
+            case 'longform-review':
+                total += 0.01;
+                break;
+            case 'longform-tts':
+                total += 0.08;
+                break;
+            case 'longform-srt-align':
+                total += 0.01;
+                break;
+            case 'longform-motion-compose':
+                total += 0.05;
+                break;
+            case 'longform-render':
+                total += 0.5;
+                break;
+            case 'longform-qa':
+            case 'longform-package':
                 total += 0.01;
                 break;
             default:
@@ -422,6 +468,63 @@ const checkRunCostLimit = (nodes: Array<Record<string, unknown>>): RunServiceFai
     };
 };
 
+const hasApprovedLongformGateAArtifact = (node: Record<string, unknown>): boolean => {
+    const config = getNodeConfig(node);
+    const data = getNodeData(node);
+    const approvalRecords = [config, data];
+
+    return approvalRecords.some(record => {
+        const approvedArtifactId = record['approvedArtifactId'];
+        const reviewedOutput = record['reviewedOutput'];
+        return (
+            record['mediaExecutionAllowed'] === true ||
+            record['reviewStatus'] === 'approved' ||
+            (typeof approvedArtifactId === 'string' && approvedArtifactId.trim().length > 0) ||
+            (typeof reviewedOutput === 'string' && reviewedOutput.trim().length > 0) ||
+            (isRecord(reviewedOutput) && Object.keys(reviewedOutput).length > 0)
+        );
+    });
+};
+
+const checkLongformGateBApproval = (nodes: Array<Record<string, unknown>>): RunServiceFailure | null => {
+    const hasApprovedReviewNode = nodes.some(
+        node => isLongformReviewNode(node) && hasApprovedLongformGateAArtifact(node)
+    );
+    const blockedNode = nodes.find(node => {
+        const blockType = getBlockType(node);
+        return (
+            LONGFORM_GATE_B_BLOCK_TYPES.has(blockType) &&
+            !hasApprovedReviewNode &&
+            !hasApprovedLongformGateAArtifact(node)
+        );
+    });
+
+    if (!blockedNode) return null;
+
+    return {
+        ok: false,
+        error: 'LONGFORM_GATE_B_APPROVAL_REQUIRED',
+        status: 409,
+    };
+};
+
+const isLongformReviewNode = (node: Record<string, unknown>): boolean => getBlockType(node) === 'longform-review';
+
+const isUnapprovedLongformGateBNode = (node: Record<string, unknown>): boolean => {
+    return LONGFORM_GATE_B_BLOCK_TYPES.has(getBlockType(node)) && !hasApprovedLongformGateAArtifact(node);
+};
+
+const getPreflightNodesForRun = (
+    nodes: Array<Record<string, unknown>>,
+    executionMode: 'full' | 'step'
+): Array<Record<string, unknown>> => {
+    const shouldStopForReview =
+        executionMode === 'step' && nodes.some(isLongformReviewNode) && nodes.some(isUnapprovedLongformGateBNode);
+
+    if (!shouldStopForReview) return nodes;
+    return nodes.filter(node => !LONGFORM_GATE_B_BLOCK_TYPES.has(getBlockType(node)));
+};
+
 const requiresPaidOpenAI = (nodes: Array<Record<string, unknown>>): boolean => {
     return nodes.some(node => {
         const blockType = getBlockType(node);
@@ -486,23 +589,28 @@ export const runService = {
         const snapshotNodes = (flow.nodes ?? []) as Array<Record<string, unknown>>;
         const executableNodes = snapshotNodes.filter(isExecutableNode);
         const snapshotEdges = (flow.edges ?? []) as Array<Record<string, unknown>>;
+        const executionMode = (options?.executionMode as 'full' | 'step') ?? 'full';
+        const preflightNodes = getPreflightNodesForRun(executableNodes, executionMode);
 
         if (executableNodes.length === 0) {
             return { ok: false, error: `Flow ${flowId} has no executable nodes`, status: 422 };
         }
 
-        const longformCostLimitResult = checkLongformHtmlRenderCostLimit(executableNodes);
+        const longformCostLimitResult = checkLongformHtmlRenderCostLimit(preflightNodes);
         if (longformCostLimitResult) return longformCostLimitResult;
 
-        const costLimitResult = checkRunCostLimit(executableNodes);
+        const costLimitResult = checkRunCostLimit(preflightNodes);
         if (costLimitResult) return costLimitResult;
 
-        if (requiresPaidOpenAI(executableNodes) && !isPaidOpenAIAllowed()) {
+        const longformApprovalResult = checkLongformGateBApproval(preflightNodes);
+        if (longformApprovalResult) return longformApprovalResult;
+
+        if (requiresPaidOpenAI(preflightNodes) && !isPaidOpenAIAllowed()) {
             return { ok: false, error: PAID_OPENAI_DISABLED, status: 422 };
         }
 
         // F-34: API key pre-flight check
-        const missingProviders = await checkMissingApiKeys(executableNodes);
+        const missingProviders = await checkMissingApiKeys(preflightNodes);
         if (missingProviders.length > 0) {
             return {
                 ok: false,
@@ -522,7 +630,7 @@ export const runService = {
             runType: 'FULL_FLOW',
             status: 'QUEUED',
             triggerSource,
-            executionMode: (options?.executionMode as 'full' | 'step') ?? 'full',
+            executionMode,
             notifyWebhook: options?.notifyWebhook ?? null,
             flowSnapshot: { nodes: executableNodes, edges: snapshotEdges },
             createdAt: now,
@@ -594,6 +702,9 @@ export const runService = {
 
         const costLimitResult = checkRunCostLimit([targetNode]);
         if (costLimitResult) return costLimitResult;
+
+        const longformApprovalResult = checkLongformGateBApproval([costGuardTargetNode]);
+        if (longformApprovalResult) return longformApprovalResult;
 
         if (requiresPaidOpenAI([targetNode]) && !isPaidOpenAIAllowed()) {
             return { ok: false, error: PAID_OPENAI_DISABLED, status: 422 };
@@ -763,6 +874,9 @@ export const runService = {
 
         const longformCostLimitResult = checkLongformHtmlRenderCostLimit(retryScopeNodes);
         if (longformCostLimitResult) return longformCostLimitResult;
+
+        const longformApprovalResult = checkLongformGateBApproval(retryScopeNodes);
+        if (longformApprovalResult) return longformApprovalResult;
 
         // FAILED → PENDING (retryCount incremented inside updateRunNodeStatus)
         const result = await runRepo.updateRunNodeStatus(runId, nodeId, 'PENDING');

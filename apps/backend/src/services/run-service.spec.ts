@@ -52,6 +52,208 @@ describe('runService cost guards', () => {
         vi.clearAllMocks();
     });
 
+    it('does not require provider keys for deterministic longform Gate A review nodes', async () => {
+        getFlow.mockResolvedValueOnce({
+            id: 'flow-longform-gate-a',
+            name: 'Longform Gate A flow',
+            state: 'READY',
+            nodes: [
+                {
+                    id: 'node-source',
+                    blockType: 'longform-source',
+                    label: 'Longform source',
+                    config: {},
+                },
+                {
+                    id: 'node-review',
+                    blockType: 'longform-review',
+                    label: 'Longform review',
+                    config: {},
+                },
+            ],
+            edges: [{ source: 'node-source', target: 'node-review' }],
+            createdAt: '2026-05-13T00:00:00.000Z',
+            updatedAt: '2026-05-13T00:00:00.000Z',
+        });
+        getKeyForProviderAsync.mockResolvedValue(null);
+        putRun.mockResolvedValue(undefined);
+        putRunNode.mockResolvedValue(undefined);
+        sendQueueMessage.mockResolvedValue(undefined);
+
+        const result = await runService.createRun('flow-longform-gate-a');
+
+        expect(result).toEqual(expect.objectContaining({ ok: true }));
+        expect(getKeyForProviderAsync).not.toHaveBeenCalled();
+        expect(putRun).toHaveBeenCalled();
+        expect(putRunNode).toHaveBeenCalledTimes(2);
+        expect(sendQueueMessage).toHaveBeenCalled();
+    });
+
+    it('allows a step longform run to queue with future Gate B nodes before approval', async () => {
+        getFlow.mockResolvedValueOnce({
+            id: 'flow-longform-full-factory',
+            name: 'Longform full factory flow',
+            state: 'READY',
+            nodes: [
+                {
+                    id: 'node-source',
+                    blockType: 'longform-source',
+                    label: 'Longform source',
+                    config: {},
+                },
+                {
+                    id: 'node-review',
+                    blockType: 'longform-review',
+                    label: 'Longform review',
+                    config: { reviewMode: 'script-first', reviewStatus: 'draft' },
+                },
+                {
+                    id: 'node-tts',
+                    blockType: 'longform-tts',
+                    label: 'Longform narration',
+                    config: { mode: 'longform-gate-b', mediaExecutionAllowed: false },
+                },
+                {
+                    id: 'node-render',
+                    blockType: 'longform-render',
+                    label: 'Longform render',
+                    config: {
+                        mode: 'longform-gate-b',
+                        mediaExecutionAllowed: false,
+                        longformHtmlRenderEstimatedCostUsd: 4.5,
+                    },
+                },
+            ],
+            edges: [
+                { source: 'node-source', target: 'node-review' },
+                { source: 'node-review', target: 'node-tts' },
+                { source: 'node-tts', target: 'node-render' },
+            ],
+            createdAt: '2026-05-13T00:00:00.000Z',
+            updatedAt: '2026-05-13T00:00:00.000Z',
+        });
+        getKeyForProviderAsync.mockResolvedValue(null);
+        putRun.mockResolvedValue(undefined);
+        putRunNode.mockResolvedValue(undefined);
+        sendQueueMessage.mockResolvedValue(undefined);
+
+        const result = await runService.createRun('flow-longform-full-factory', 'MANUAL', { executionMode: 'step' });
+
+        expect(result).toEqual(expect.objectContaining({ ok: true }));
+        expect(getKeyForProviderAsync).not.toHaveBeenCalled();
+        expect(putRun).toHaveBeenCalled();
+        expect(putRunNode).toHaveBeenCalledTimes(4);
+        expect(sendQueueMessage).toHaveBeenCalled();
+    });
+
+    it('allows full Gate B execution when the same workflow has an approved longform review artifact', async () => {
+        getFlow.mockResolvedValueOnce({
+            id: 'flow-longform-approved',
+            name: 'Approved longform flow',
+            state: 'READY',
+            nodes: [
+                {
+                    id: 'node-source',
+                    blockType: 'longform-source',
+                    label: 'Longform source',
+                    config: {},
+                },
+                {
+                    id: 'node-review',
+                    blockType: 'longform-review',
+                    label: 'Longform review',
+                    config: {
+                        reviewMode: 'script-first',
+                        reviewedOutput: JSON.stringify({
+                            fullScriptDraft: '승인된 대본',
+                            visualChapters: [{ chapterId: 'chapter-1' }],
+                            scenes: [{ sceneId: 'scene-1' }],
+                        }),
+                    },
+                },
+                {
+                    id: 'node-tts',
+                    blockType: 'longform-tts',
+                    label: 'Longform narration',
+                    config: { mode: 'longform-gate-b', mediaExecutionAllowed: false },
+                },
+                {
+                    id: 'node-render',
+                    blockType: 'longform-render',
+                    label: 'Longform render',
+                    config: {
+                        mode: 'longform-gate-b',
+                        mediaExecutionAllowed: false,
+                        longformHtmlRenderEstimatedCostUsd: 4.5,
+                    },
+                },
+            ],
+            edges: [
+                { source: 'node-source', target: 'node-review' },
+                { source: 'node-review', target: 'node-tts' },
+                { source: 'node-tts', target: 'node-render' },
+            ],
+            createdAt: '2026-05-13T00:00:00.000Z',
+            updatedAt: '2026-05-13T00:00:00.000Z',
+        });
+        getKeyForProviderAsync.mockResolvedValue({ provider: 'elevenlabs', apiKey: 'test-key' } as never);
+        putRun.mockResolvedValue(undefined);
+        putRunNode.mockResolvedValue(undefined);
+        sendQueueMessage.mockResolvedValue(undefined);
+
+        const result = await runService.createRun('flow-longform-approved', 'MANUAL', { executionMode: 'full' });
+
+        expect(result).toEqual(expect.objectContaining({ ok: true }));
+        expect(getKeyForProviderAsync).toHaveBeenCalledTimes(1);
+        expect(getKeyForProviderAsync).toHaveBeenCalledWith('elevenlabs');
+        expect(putRun).toHaveBeenCalled();
+        expect(putRunNode).toHaveBeenCalledTimes(4);
+        expect(sendQueueMessage).toHaveBeenCalled();
+    });
+
+    it('requires provider keys for longform Gate B execution nodes before queueing', async () => {
+        getFlow.mockResolvedValueOnce({
+            id: 'flow-longform-providers',
+            name: 'Longform provider guard flow',
+            state: 'READY',
+            nodes: [
+                {
+                    id: 'node-script',
+                    blockType: 'longform-script',
+                    label: 'Longform script',
+                    config: {},
+                },
+                {
+                    id: 'node-tts',
+                    blockType: 'longform-tts',
+                    label: 'Longform narration',
+                    config: {
+                        mediaExecutionAllowed: true,
+                        approvedArtifactId: 'gate-a-artifact-1',
+                    },
+                },
+            ],
+            edges: [{ source: 'node-script', target: 'node-tts' }],
+            createdAt: '2026-05-13T00:00:00.000Z',
+            updatedAt: '2026-05-13T00:00:00.000Z',
+        });
+        getKeyForProviderAsync.mockResolvedValue(null);
+
+        const result = await runService.createRun('flow-longform-providers');
+
+        expect(result).toEqual(
+            expect.objectContaining({
+                ok: false,
+                error: 'MISSING_API_KEYS',
+                status: 422,
+                missingProviders: ['elevenlabs'],
+            })
+        );
+        expect(putRun).not.toHaveBeenCalled();
+        expect(putRunNode).not.toHaveBeenCalled();
+        expect(sendQueueMessage).not.toHaveBeenCalled();
+    });
+
     it('blocks longform HTML and HyperFrames render attempts above the $5 cap before any execution side effect', async () => {
         getFlow.mockResolvedValueOnce({
             id: 'flow-longform-cap',
@@ -163,6 +365,81 @@ describe('runService cost guards', () => {
                 status: 422,
                 estimatedCostUsd: 5.01,
                 maxCostUsd: 5,
+            })
+        );
+        expect(putRun).not.toHaveBeenCalled();
+        expect(putRunNode).not.toHaveBeenCalled();
+        expect(sendQueueMessage).not.toHaveBeenCalled();
+        expect(getKeyForProviderAsync).not.toHaveBeenCalled();
+    });
+
+    it('blocks longform-render nodes above the $5 cap before any execution side effect', async () => {
+        getFlow.mockResolvedValueOnce({
+            id: 'flow-longform-render-cap',
+            name: 'Longform render cap flow',
+            state: 'READY',
+            nodes: [
+                {
+                    id: 'node-render',
+                    blockType: 'longform-render',
+                    label: 'Longform HyperFrames render',
+                    config: {
+                        rendererRoute: 'hyperframes',
+                        htmlComposeEstimatedCostUsd: 2.75,
+                        hyperframesRenderEstimatedCostUsd: 2.35,
+                    },
+                },
+            ],
+            edges: [],
+            createdAt: '2026-05-13T00:00:00.000Z',
+            updatedAt: '2026-05-13T00:00:00.000Z',
+        });
+
+        const result = await runService.createRun('flow-longform-render-cap');
+
+        expect(result).toEqual(
+            expect.objectContaining({
+                ok: false,
+                error: 'LONGFORM_HTML_RENDER_COST_LIMIT_EXCEEDED',
+                status: 422,
+                estimatedCostUsd: 5.1,
+                maxCostUsd: 5,
+            })
+        );
+        expect(putRun).not.toHaveBeenCalled();
+        expect(putRunNode).not.toHaveBeenCalled();
+        expect(sendQueueMessage).not.toHaveBeenCalled();
+        expect(getKeyForProviderAsync).not.toHaveBeenCalled();
+    });
+
+    it('blocks longform Gate B nodes without an approved Gate A artifact before queueing', async () => {
+        getFlow.mockResolvedValueOnce({
+            id: 'flow-longform-unapproved',
+            name: 'Longform unapproved flow',
+            state: 'READY',
+            nodes: [
+                {
+                    id: 'node-render',
+                    blockType: 'longform-render',
+                    label: 'Longform HyperFrames render',
+                    config: {
+                        rendererRoute: 'hyperframes',
+                        longformHtmlRenderEstimatedCostUsd: 1.25,
+                    },
+                },
+            ],
+            edges: [],
+            createdAt: '2026-05-13T00:00:00.000Z',
+            updatedAt: '2026-05-13T00:00:00.000Z',
+        });
+
+        const result = await runService.createRun('flow-longform-unapproved');
+
+        expect(result).toEqual(
+            expect.objectContaining({
+                ok: false,
+                error: 'LONGFORM_GATE_B_APPROVAL_REQUIRED',
+                status: 409,
             })
         );
         expect(putRun).not.toHaveBeenCalled();

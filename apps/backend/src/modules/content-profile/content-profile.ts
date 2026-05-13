@@ -186,6 +186,18 @@ const CONTENT_PROFILE_CONTEXT_BLOCKS = new Set([
     'media-tts',
     'media-video',
     'integration',
+    'longform-source',
+    'longform-brief',
+    'longform-script',
+    'longform-storyboard',
+    'longform-scene-json',
+    'longform-review',
+    'longform-tts',
+    'longform-srt-align',
+    'longform-motion-compose',
+    'longform-render',
+    'longform-qa',
+    'longform-package',
 ]);
 
 export const enrichContentProfileNodeConfig = (
@@ -202,7 +214,7 @@ export const enrichContentProfileNodeConfig = (
         ...base,
         contentProfileId: preferences.contentProfileId,
         reviewMode: preferences.reviewMode,
-        ...(blockType === 'content'
+        ...(blockType === 'content' || blockType === 'longform-script'
             ? {
                   scriptToneId: preferences.scriptToneId,
                   scriptToneIntensity: preferences.scriptToneIntensity,

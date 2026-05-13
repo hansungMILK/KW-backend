@@ -26,7 +26,7 @@
 2. URL이 있으면 원문이 1순위 source다. 웹 검색은 보강, 반론, 최신성 확인에만 사용한다.
 3. 영상 품질은 `대본 -> visual storyboard -> scene JSON -> timing -> motion -> render QA` 순서로 잠근다.
 4. 자막 한 줄마다 화면을 갈아끼우지 않는다. 3-8개 subtitle cue를 하나의 visual chapter로 묶고, cue는 그 안에서 포커스와 강조만 바꾼다.
-5. SRT와 forced alignment가 timing truth다. 전역 비율로 자막 시간을 늘려 맞추는 방식은 금지한다.
+5. SRT는 TTS 출력 timing cue를 timing truth로 삼는다. 전역 비율로 자막 시간을 늘려 맞추는 방식은 금지한다.
 6. 비용은 provider 호출 전에 차단한다. 롱폼 HTML/HyperFrames compose+render 예상 비용은 1회 attempt 기준 `$5.00`을 넘으면 실행하지 않는다.
 7. 완료 기준은 실제 MP4, audio/video stream, 2K 해상도, duration, subtitle timing, preview/download 확인이다.
 
@@ -51,6 +51,101 @@
 Gate A는 `source`부터 `review`까지다. Gate A는 대본, 스토리보드, renderer 입력 계약을 만들지만 유료 media execution을 시작하지 않는다.
 
 Gate B는 `tts`부터 `package`까지다. Gate B는 사용자가 Gate A 산출물을 승인한 뒤에만 실행한다.
+
+## 4.1 B 설계도: 사용자에게는 하나의 제작 공장, 내부적으로는 두 단계
+
+사용자 입장에서는 A/B가 별도 제품처럼 보이면 안 된다. 화면에는 “롱폼 제작 공장” 하나만 보이고, 실행 상태가 아래처럼 자연스럽게 바뀐다.
+
+```text
+1차 실행: 자료 수집 -> 대본/스토리보드/장면 계약 -> 사용자 검수 대기
+사용자 승인: 검수본 저장/승인
+2차 실행: Adam/ElevenLabs TTS -> SRT 정렬 -> 모션 구성 -> 2K MP4 렌더 -> QA -> 다운로드 패키지
+```
+
+내부 실행 모드는 다음 계약으로만 나뉜다.
+
+| 단계   | 실행 모드              | 비용 성격            | 사용자에게 보여줄 표현                    | 완료 조건                                                            |
+| ------ | ---------------------- | -------------------- | ----------------------------------------- | -------------------------------------------------------------------- |
+| Gate A | `executionMode:"step"` | 기획/텍스트 중심     | `롱폼 기획안 생성 중`                     | `longform-review` 노드에 검수 가능한 대본/스토리보드/scene JSON 표시 |
+| 승인   | 사용자 action          | 비용 없음            | `대본 검수본 저장됨. 영상 제작 실행 가능` | review node config에 `reviewedOutput` 저장                           |
+| Gate B | `executionMode:"full"` | TTS/render 유료 가능 | `영상 제작 중`                            | `longform-package`에 preview/download/QA report 표시                 |
+
+## 4.2 노드 설계도
+
+| 순서 | 노드                      | Gate | 역할                                       | 주요 입력                                       | 주요 출력                                           | 프론트 표시                        | 실패 시                                               |
+| ---- | ------------------------- | ---- | ------------------------------------------ | ----------------------------------------------- | --------------------------------------------------- | ---------------------------------- | ----------------------------------------------------- |
+| 1    | `longform-source`         | A    | URL 원문과 보조자료를 source digest로 정리 | userRequest, urls, articles                     | primarySources, sourceDigest, factualSpine          | 원문 요약, 핵심 claim, 출처 링크   | 원문 추출 실패 시 검색 fallback 또는 source 부족 실패 |
+| 2    | `longform-brief`          | A    | 영상 관점과 구조 확정                      | sourceDigest, factualSpine                      | titleCandidates, viewerPromise, angle, evidencePlan | “무슨 관점으로 설명할지” 카드      | 관점/근거 누락 시 실패                                |
+| 3    | `longform-script`         | A    | 검수 가능한 내레이션 대본 작성             | brief, evidencePlan                             | fullScriptDraft, sections, sourceMap                | 긴 대본 viewer/editor              | 원문 factual spine 이탈 시 QA 실패 대상               |
+| 4    | `longform-storyboard`     | A    | 대본 section을 visual chapter로 변환       | sections, sourceMap                             | visualChapters                                      | 챕터별 화면 의도/구성              | cue 단위 scene 남발 시 실패                           |
+| 5    | `longform-scene-json`     | A    | renderer 계약 생성                         | visualChapters                                  | renderer, resolution, scenes, perCueActivity        | scene JSON 요약                    | 2K/renderer/motion 계약 누락 시 실패                  |
+| 6    | `longform-review`         | A    | 사용자 검수/승인 경계                      | scene-json artifact, reviewedOutput             | reviewStatus, approvedGateAArtifact                 | 대본 검수 textarea, 승인 저장 버튼 | 승인 전 Gate B 차단                                   |
+| 7    | `longform-tts`            | B    | 승인 대본으로 ElevenLabs TTS 생성          | approvedGateAArtifact, sections/fullScriptDraft | audio, transcriptText, normalizedScenes             | 오디오 플레이어, voice/provider    | ElevenLabs key/voice/audio 실패                       |
+| 8    | `longform-srt-align`      | B    | TTS 기준 subtitle timing 생성              | audio, transcriptText                           | subtitleCues, alignmentMethod, driftWarnings        | 자막 cue table                     | TTS timing/drift 실패                                 |
+| 9    | `longform-motion-compose` | B    | 장면 계약과 자막을 모션 cue로 변환         | scenes, subtitleCues                            | motionCues, compositionHtml/projectPath             | 모션 cue 수, composition summary   | motion cue 0개면 실패                                 |
+| 10   | `longform-render`         | B    | HyperFrames-compatible 2K MP4 렌더         | audio, subtitleCues, motionCues, scene-json     | video previewUrl/downloadUrl                        | video preview, 다운로드 버튼       | 비용 초과, audio/video stream/ffmpeg 실패             |
+| 11   | `longform-qa`             | B    | 최종 QA 판정                               | video, subtitleCues, motionCues                 | qaReport                                            | pass/fail checklist                | stream/duration/resolution/subtitle 실패              |
+| 12   | `longform-package`        | B    | 사용자 산출물 패키징                       | video, qaReport, source/script/scene artifacts  | mp4Url, downloadUrl, qaReport                       | 최종 다운로드 카드                 | preview/download 누락 시 실패                         |
+
+```mermaid
+flowchart LR
+    subgraph A["Gate A: 기획/검수"]
+        S["longform-source<br/>원문 digest"]
+        B["longform-brief<br/>관점/구조"]
+        C["longform-script<br/>대본 초안"]
+        D["longform-storyboard<br/>visual chapters"]
+        E["longform-scene-json<br/>renderer 계약"]
+        R["longform-review<br/>사용자 검수"]
+    end
+
+    subgraph G["승인 경계"]
+        AP["approvedGateAArtifact"]
+    end
+
+    subgraph P["Gate B: 제작/검증"]
+        T["longform-tts<br/>ElevenLabs Adam"]
+        A1["longform-srt-align<br/>TTS timing cues"]
+        M["longform-motion-compose<br/>motion cues"]
+        V["longform-render<br/>2K MP4"]
+        Q["longform-qa<br/>ffprobe QA"]
+        K["longform-package<br/>preview/download"]
+    end
+
+    S --> B --> C --> D --> E --> R
+    R -->|"검수본 저장/승인"| AP
+    AP --> T --> A1 --> M --> V --> Q --> K
+```
+
+## 4.3 데이터 전달선
+
+롱폼 B에서 가장 중요한 것은 `approvedGateAArtifact`가 끊기지 않는 것이다. 승인 artifact는 review 노드에서만 만들어지고, 후속 노드는 그 artifact를 복사해서 다음 출력에 다시 포함한다.
+
+```text
+longform-review.output.approvedGateAArtifact
+  -> longform-tts.input.approvedGateAArtifact
+  -> longform-srt-align.input.approvedGateAArtifact
+  -> longform-motion-compose.input.approvedGateAArtifact
+  -> longform-render.input.approvedGateAArtifact
+  -> longform-qa.input.approvedGateAArtifact
+  -> longform-package.input.approvedGateAArtifact
+```
+
+이 전달선이 끊기면 B는 실패해야 한다. downstream 노드 config에 `gateBApproved:true`를 하드코딩해서 우회하면 안 된다.
+
+## 4.4 B 실행 상태 설계
+
+Gate B 실행 중 사용자가 봐야 하는 상태는 노드별로 분리한다.
+
+| 상태                              | 표시 문구                       | 진행률 기준               |
+| --------------------------------- | ------------------------------- | ------------------------- |
+| `longform-tts` running            | `ElevenLabs Adam 음성 생성 중`  | TTS 요청 시작/완료        |
+| `longform-srt-align` running      | `자막 타이밍 정렬 중`           | cue 생성 수               |
+| `longform-motion-compose` running | `모션그래픽 장면 구성 중`       | motion cue 생성 수        |
+| `longform-render` running         | `2K MP4 렌더링 중`              | ffmpeg render 시작/완료   |
+| `longform-qa` running             | `영상 품질 검사 중`             | QA checklist pass 수      |
+| `longform-package` completed      | `미리보기와 다운로드 준비 완료` | preview/download URL 존재 |
+
+캔버스는 현재 실행 중인 노드를 강조해야 한다. 우측 agent panel은 전체 워크플로우 상태만이 아니라 “현재 노드명 + 사람이 이해할 수 있는 작업 설명”을 표시해야 한다.
 
 ## 5. 롱폼 블록 계약
 
@@ -236,6 +331,9 @@ Gate B는 `tts`부터 `package`까지다. Gate B는 사용자가 Gate A 산출�
 
 - `approved` 전에는 Gate B 노드를 실행하지 않는다.
 - `changes-requested`는 기존 artifact를 덮어쓰지 않고 새 attempt를 만든다.
+- 프론트에서 저장된 `reviewedOutput`은 승인된 Gate A artifact로 승격된다.
+- 승인 artifact는 `approvedGateAArtifact`, `reviewStatus:"approved"`, `mediaExecutionAllowed:true`, `gateBApproved:true`를 포함해야 한다.
+- 승인 신호는 review 노드 하나에만 머무르면 안 된다. 실행 중에는 `longform-review -> longform-tts -> ... -> longform-render` 입력 payload를 통해 끝까지 전달되어야 한다.
 
 ### 5.7 `longform-tts`
 
@@ -259,6 +357,8 @@ Gate B는 `tts`부터 `package`까지다. Gate B는 사용자가 Gate A 산출�
 
 - 기본 voice는 설정값을 따른다.
 - 롱폼은 ElevenLabs provider를 요구한다.
+- `fullScriptDraft` 또는 `sections[].narration`을 `normalizedScenes`로 변환해 기존 TTS 엔진에 넘긴다.
+- TTS 출력은 승인 artifact, scene contract, source metadata를 버리면 안 된다. 후속 SRT/motion/render 노드가 같은 payload를 이어받아야 한다.
 
 ### 5.8 `longform-srt-align`
 
@@ -275,14 +375,14 @@ Gate B는 `tts`부터 `package`까지다. Gate B는 사용자가 Gate A 산출�
         startSec: number;
         endSec: number;
     }>;
-    alignmentMethod: 'elevenlabs-forced-alignment';
+    alignmentMethod: 'elevenlabs-tts-duration-aligned';
     driftWarnings: string[];
 }
 ```
 
 규칙:
 
-- forced alignment 결과가 없으면 실패한다.
+- ElevenLabs TTS 출력의 subtitle cue timing이 없으면 실패한다.
 - drift가 0.9초를 넘으면 QA warning이 아니라 render 차단 대상이다.
 
 ### 5.9 `longform-motion-compose`
@@ -339,6 +439,8 @@ Gate B는 `tts`부터 `package`까지다. Gate B는 사용자가 Gate A 산출�
 - background music은 `assets/bgm/default-bgm.mp3`를 기본으로 쓴다.
 - audio stream이 없으면 실패한다.
 - video stream이 없으면 실패한다.
+- 롱폼은 이미지 생성 중심이 아니므로 `images[]`가 없어도 실패하지 않는다. 대신 `scene-json`, `subtitleCues`, `motionCues`를 바탕으로 내부 motion-board visual input을 생성한다.
+- `longform-render`는 현재 로컬 HyperFrames/FFmpeg 경로이므로 OpenAI provider key를 요구하지 않는다. 비용 상한은 `MAX_LONGFORM_HTML_RENDER_ESTIMATED_COST_USD`로 따로 막는다.
 
 ### 5.11 `longform-qa`
 
@@ -407,15 +509,74 @@ Gate B는 `tts`부터 `package`까지다. Gate B는 사용자가 Gate A 산출�
 - qa: pass/fail checklist
 - package: 최종 다운로드 링크
 
+### 7.1 검수 UI 설계
+
+`longform-review` 노드는 단순 JSON viewer가 아니라 사용자가 실제로 승인 판단을 할 수 있는 편집 가능한 검수 화면이어야 한다.
+
+필수 표시:
+
+- 제목 후보
+- 전체 대본 초안
+- section별 목적과 내레이션
+- visual chapter 요약
+- scene JSON 요약
+- 원문 출처/sourceMap
+- `검수본 저장` 버튼
+
+저장 동작:
+
+```text
+사용자 수정본
+  -> node.config.reviewedOutput JSON으로 저장
+  -> 다음 실행에서 longform-review가 approvedGateAArtifact 생성
+  -> Gate B preflight 통과
+```
+
+금지:
+
+- review 저장 없이 Gate B 실행
+- Gate B 노드마다 승인 flag를 수동으로 박아 넣는 방식
+- 사용자가 대본을 볼 수 없는데 “승인됨” 처리하는 방식
+
+### 7.2 B 결과 UI 설계
+
+Gate B는 최종 산출물을 사용자가 바로 확인할 수 있어야 한다.
+
+| 결과 타입     | 표시 방식                                         |
+| ------------- | ------------------------------------------------- |
+| audio         | inline audio player                               |
+| subtitle cues | 시간/문장 table                                   |
+| motion cues   | cue count, chapter별 motion summary               |
+| rendered mp4  | inline video preview player                       |
+| download      | 명확한 MP4 다운로드 버튼                          |
+| QA            | pass/fail checklist, 실패 이유                    |
+| package       | mp4/script/srt/scene-json/source-digest 링크 묶음 |
+
 ## 8. 비용과 실패 처리
 
 - Gate A는 planning 비용만 발생한다.
 - Gate B는 `longform-review.reviewStatus === 'approved'`일 때만 시작한다.
+- 같은 워크플로우 안에 승인된 `longform-review` 또는 저장된 `reviewedOutput`이 있으면 Gate B preflight가 통과한다.
 - Gate B 시작 전 compose+render 예상 비용이 `$5.00` 초과면 차단한다.
 - 비용 estimate가 없으면 Gate B를 차단한다.
+- `longform-render`는 현재 local HyperFrames/FFmpeg 경로이므로 OpenAI provider preflight를 요구하지 않는다.
+- `longform-tts`는 ElevenLabs provider preflight를 요구한다.
 - provider 오류는 trace에 남긴다.
 - QA 실패는 run/node를 failed로 만든다.
 - failed/cancelled run의 asset을 최종 결과로 공개하지 않는다.
+
+### 8.1 B 실패 상태 설계
+
+| 실패 지점           | errorCode                                  | 사용자 메시지                                                | 재시도 정책                         |
+| ------------------- | ------------------------------------------ | ------------------------------------------------------------ | ----------------------------------- |
+| 승인 없음           | `LONGFORM_GATE_B_NOT_APPROVED`             | `대본 검수 후 영상 제작을 실행할 수 있습니다.`               | review 저장 후 재실행               |
+| render 비용 초과    | `LONGFORM_HTML_RENDER_COST_LIMIT_EXCEEDED` | `롱폼 HTML/HyperFrames 생성 예상 비용이 $5.00를 넘었습니다.` | 길이/렌더 복잡도 낮춘 새 attempt    |
+| ElevenLabs key 없음 | `MISSING_API_KEYS`                         | `ElevenLabs API 키가 필요합니다.`                            | 설정 후 재실행                      |
+| TTS 실패            | `LONGFORM_TTS_FAILED`                      | `음성 생성에 실패했습니다.`                                  | 같은 승인 artifact로 TTS부터 재시도 |
+| SRT drift           | `LONGFORM_SRT_DRIFT`                       | `자막 싱크가 허용 범위를 넘었습니다.`                        | alignment 재생성                    |
+| motion cue 없음     | `LONGFORM_MOTION_EMPTY`                    | `모션그래픽 cue가 없어 렌더를 막았습니다.`                   | scene-json/motion-compose 재생성    |
+| render 실패         | `LONGFORM_RENDER_FAILED`                   | `2K MP4 렌더에 실패했습니다.`                                | render 재시도                       |
+| QA 실패             | `LONGFORM_QA_FAILED`                       | `영상 품질 검사를 통과하지 못했습니다.`                      | QA report 기준 수정 후 재시도       |
 
 ## 9. 테스트 전략
 
@@ -439,6 +600,20 @@ Gate B는 `tts`부터 `package`까지다. Gate B는 사용자가 Gate A 산출�
 6. 승인 전 Gate B 실행은 비활성이다.
 7. 승인 후 Gate B 실행 시 TTS, SRT, motion, render, QA, package가 순서대로 보인다.
 8. 최종 MP4 preview와 download URL이 화면에 보인다.
+
+### 9.1 B 검증 매트릭스
+
+| 검증             | 통과 기준                                          | 증거                                     |
+| ---------------- | -------------------------------------------------- | ---------------------------------------- |
+| 노드 설계        | 12개 `longform-*` 노드와 11개 edge                 | compiler/orchestrator test               |
+| Shorts 회귀 없음 | 쇼츠 image controls는 쇼츠에서만 보임              | FlowAgentPanel test                      |
+| Gate A stop      | 최초 실행은 review에서 멈춤                        | execution-engine test + browser evidence |
+| 승인 전달        | `reviewedOutput` 저장 후 full run 가능             | run-service test                         |
+| TTS provider     | B TTS는 ElevenLabs provider                        | longform-blocks test                     |
+| no-image render  | image asset 없이도 motion-board visual input 생성  | media-video test + real smoke            |
+| B cost cap       | `$5.00` 초과 시 provider/render 전 차단            | run-service/media-video test             |
+| MP4 validity     | 2560x1440, audio stream, video stream, duration QA | real ffprobe smoke                       |
+| UI 결과          | video preview/download 버튼 표시                   | browser E2E                              |
 
 ## 10. 완료 기준
 

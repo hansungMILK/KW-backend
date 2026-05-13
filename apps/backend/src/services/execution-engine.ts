@@ -50,6 +50,10 @@ function isExecutionTimeoutError(err: unknown): boolean {
     return err instanceof Error && err.name === 'ExecutionTimeoutError';
 }
 
+function isStepReviewStopNode(blockType: string): boolean {
+    return blockType === 'content' || blockType === 'longform-review';
+}
+
 function createTimeoutWatchdog(
     blockType: string,
     timeoutMs: number,
@@ -99,11 +103,11 @@ function resolveNodeExecutionTimeoutMs(
         );
     }
 
-    if (blockType === 'media-tts') {
+    if (blockType === 'media-tts' || blockType === 'longform-tts') {
         return Math.max(env.nodeExecutionTimeoutMs, env.elevenLabsTtsTimeoutMs + 30000);
     }
 
-    if (blockType === 'media-video') {
+    if (blockType === 'media-video' || blockType === 'longform-render') {
         return Math.max(env.nodeExecutionTimeoutMs, 900000);
     }
 
@@ -305,7 +309,8 @@ export const executionEngine = {
             const reviewNode = waveResults.find(
                 nodeAfter =>
                     run.executionMode === 'step' &&
-                    nodeAfter?.blockType === 'content' &&
+                    nodeAfter !== null &&
+                    isStepReviewStopNode(nodeAfter.blockType) &&
                     nodeAfter.status === 'COMPLETED'
             );
             if (reviewNode) {

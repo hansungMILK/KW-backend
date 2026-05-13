@@ -53,7 +53,7 @@ describe('mockOrchestrator content profile proposal metadata', () => {
         );
     });
 
-    it('proposes a user-facing longform planning flow without paid media execution blocks', async () => {
+    it('proposes a user-facing longform production flow with Gate B blocked until review approval', async () => {
         const proposal = await mockOrchestrator.generateProposal('flow-1', '롱폼 제작해줘. 주제는 AI 에이전트의 미래');
 
         expect(proposal.metadata?.['contentProfile']).toEqual(
@@ -64,23 +64,56 @@ describe('mockOrchestrator content profile proposal metadata', () => {
         );
 
         const blockTypes = proposal.proposedNodes.map(node => node.blockType);
-        expect(blockTypes).toEqual(['search', 'content', 'data', 'analysis']);
+        expect(blockTypes).toEqual([
+            'longform-source',
+            'longform-brief',
+            'longform-script',
+            'longform-storyboard',
+            'longform-scene-json',
+            'longform-review',
+            'longform-tts',
+            'longform-srt-align',
+            'longform-motion-compose',
+            'longform-render',
+            'longform-qa',
+            'longform-package',
+        ]);
         expect(blockTypes).not.toContain('media-image');
         expect(blockTypes).not.toContain('media-tts');
         expect(blockTypes).not.toContain('media-video');
 
         expect(proposal.proposedNodes).toContainEqual(
             expect.objectContaining({
-                blockType: 'content',
+                blockType: 'longform-scene-json',
                 config: expect.objectContaining({
                     mode: 'longform-gate-a',
-                    contentProfileId: 'longform.explainer.v1',
-                    reviewMode: 'script-first',
+                    renderer: 'hyperframes',
                     rendererRoute: 'hyperframes',
                 }),
             })
         );
-        expect(proposal.estimatedCost.total).toBeLessThan(0.5);
+        expect(proposal.proposedNodes).toContainEqual(
+            expect.objectContaining({
+                blockType: 'longform-review',
+                config: expect.objectContaining({
+                    mode: 'longform-gate-a',
+                    contentProfileId: 'longform.explainer.v1',
+                    reviewMode: 'script-first',
+                    mediaExecutionAllowed: false,
+                }),
+            })
+        );
+        expect(proposal.proposedNodes).toContainEqual(
+            expect.objectContaining({
+                blockType: 'longform-render',
+                config: expect.objectContaining({
+                    mode: 'longform-gate-b',
+                    rendererRoute: 'hyperframes',
+                    mediaExecutionAllowed: false,
+                }),
+            })
+        );
+        expect(proposal.estimatedCost.total).toBeLessThan(2);
         expect(proposal.assistantMessage).toContain('롱폼 제작 기획');
         expect(proposal.assistantMessage).not.toMatch(/Gate [AB]|게이트/i);
         expect(proposal.proposedNodes.map(node => node.label).join(' ')).not.toMatch(/Gate [AB]|게이트/i);
@@ -94,7 +127,7 @@ describe('mockOrchestrator content profile proposal metadata', () => {
 
         expect(proposal.proposedNodes).toContainEqual(
             expect.objectContaining({
-                blockType: 'content',
+                blockType: 'longform-brief',
                 config: expect.objectContaining({
                     mode: 'longform-gate-a',
                     targetDurationSec: 600,

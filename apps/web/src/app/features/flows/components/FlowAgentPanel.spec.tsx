@@ -95,4 +95,63 @@ describe('FlowAgentPanel proposal content profile controls', () => {
             );
         });
     });
+
+    it('does not show image scene/style controls or send image options for longform proposals', async () => {
+        const longformProposal: MessageProposal = {
+            ...proposal,
+            id: 'proposal-longform',
+            blocks: [{ type: 'longform-source', label: '롱폼 자료 수집' }],
+            metadata: {
+                contentProfile: {
+                    ...proposal.metadata?.contentProfile,
+                    contentProfileId: 'longform.explainer.v1',
+                    reviewMode: 'script-first',
+                },
+                imageGeneration: {
+                    model: 'gpt-image-2',
+                    sceneCount: 12,
+                    styleOptions: [{ id: 'animation', label: '애니메이션' }],
+                    sceneCountOptions: [{ count: 12, label: '12장' }],
+                    qualityOptions: [{ id: 'high', label: '고품질', estimatedImageCostUsd: 1.2 }],
+                },
+            },
+        };
+
+        render(
+            <FlowAgentPanel
+                open
+                onClose={() => undefined}
+                flowId="flow-1"
+                externalProposal={{
+                    type: 'proposal.created',
+                    id: 'proposal-created-longform',
+                    proposalId: longformProposal.id,
+                    flowId: 'flow-1',
+                    blocks: longformProposal.blocks,
+                    estimatedCost: longformProposal.estimatedCost,
+                    metadata: longformProposal.metadata,
+                    description: '롱폼 제안',
+                    timestamp: Date.now(),
+                }}
+            />
+        );
+
+        expect(await screen.findByText('대본/콘텐츠 설정')).toBeTruthy();
+        expect(screen.queryByText('이미지 설정')).toBeNull();
+        expect(screen.queryByText('12장')).toBeNull();
+        expect(screen.queryByText('애니메이션')).toBeNull();
+
+        fireEvent.click(screen.getByRole('button', { name: '승인' }));
+
+        await waitFor(() => {
+            expect(approveProposal).toHaveBeenCalledWith(
+                'proposal-longform',
+                expect.not.objectContaining({
+                    imageStyleId: expect.anything(),
+                    imageQuality: expect.anything(),
+                    sceneCount: expect.anything(),
+                })
+            );
+        });
+    });
 });

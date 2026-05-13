@@ -285,8 +285,10 @@ function sumBreakdownAmount(breakdown: ProposalCostBreakdownItem[], keys: Set<st
 }
 
 function isApprovalRenderNode(blockType: string, config: Record<string, unknown>): boolean {
-    if (LONGFORM_RENDER_COST_KEYS.compose.has(blockType) || LONGFORM_RENDER_COST_KEYS.render.has(blockType))
-        {return true;}
+    if (blockType === 'longform-render') return true;
+    if (LONGFORM_RENDER_COST_KEYS.compose.has(blockType) || LONGFORM_RENDER_COST_KEYS.render.has(blockType)) {
+        return true;
+    }
     if (blockType !== 'media-video') return false;
 
     const renderer = String(config['renderer'] ?? config['rendererRoute'] ?? config['renderRoute'] ?? '');

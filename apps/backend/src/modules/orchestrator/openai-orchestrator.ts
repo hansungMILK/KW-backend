@@ -33,6 +33,18 @@ const COST_ESTIMATES: Record<AllowedBlockType, number> = {
     'media-tts': 0.01,
     'media-video': 0.2,
     integration: 0.01,
+    'longform-source': 0.02,
+    'longform-brief': 0.03,
+    'longform-script': 0.04,
+    'longform-storyboard': 0.03,
+    'longform-scene-json': 0.02,
+    'longform-review': 0.02,
+    'longform-tts': 0.08,
+    'longform-srt-align': 0.01,
+    'longform-motion-compose': 0.05,
+    'longform-render': 0.5,
+    'longform-qa': 0.01,
+    'longform-package': 0.01,
 };
 
 export const openaiOrchestrator: Orchestrator = {

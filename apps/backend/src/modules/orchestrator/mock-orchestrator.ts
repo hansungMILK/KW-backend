@@ -43,6 +43,18 @@ const COST_PER_BLOCK: Record<string, number> = {
     'media-tts': 0.1,
     'media-video': 0.2,
     integration: 0.02,
+    'longform-source': 0.02,
+    'longform-brief': 0.03,
+    'longform-script': 0.04,
+    'longform-storyboard': 0.03,
+    'longform-scene-json': 0.02,
+    'longform-review': 0.02,
+    'longform-tts': 0.08,
+    'longform-srt-align': 0.01,
+    'longform-motion-compose': 0.05,
+    'longform-render': 0.5,
+    'longform-qa': 0.01,
+    'longform-package': 0.01,
 };
 
 export const mockOrchestrator: Orchestrator = {
@@ -129,7 +141,11 @@ export const mockOrchestrator: Orchestrator = {
                 {
                     ...block.config,
                     ...(block.type === 'search' ? { query: userMessage } : {}),
+                    ...(block.type === 'longform-source' ? { query: userMessage, userRequest: userMessage } : {}),
                     ...(block.type === 'content' ? { topic: userMessage } : {}),
+                    ...(block.type === 'longform-brief' || block.type === 'longform-script'
+                        ? { topic: userMessage }
+                        : {}),
                     ...(block.type === 'media-image' ? { imageStyleId } : {}),
                 },
                 contentProfile,

@@ -13,7 +13,18 @@ export type WorkflowCapability =
     | 'image.generate'
     | 'audio.tts'
     | 'video.compose'
-    | 'metadata.generate';
+    | 'metadata.generate'
+    | 'longform.source'
+    | 'longform.brief'
+    | 'longform.script'
+    | 'longform.storyboard'
+    | 'longform.scene-json'
+    | 'longform.review'
+    | 'longform.srt-align'
+    | 'longform.motion-compose'
+    | 'longform.render'
+    | 'longform.qa'
+    | 'longform.package';
 
 interface BlockCatalogEntry {
     blockType: AllowedBlockType;
@@ -142,6 +153,114 @@ export const ORCHESTRATOR_BLOCK_CATALOG: Record<AllowedBlockType, BlockCatalogEn
         output: 'json delivery metadata',
         whenToUse: '최종 산출물의 제목, 설명, 태그, 배포 메타데이터가 필요한 경우',
         whenNotToUse: '중간 결과 확인이나 단순 생성 요청',
+    },
+    'longform-source': {
+        blockType: 'longform-source',
+        label: '롱폼 자료 수집',
+        capabilities: ['longform.source', 'source.collect'],
+        input: 'user request, URLs, or topic',
+        output: 'json primary sources, supporting sources, source digest, factual spine',
+        whenToUse: '롱폼 제작에서 원문과 보조 자료를 먼저 정리해야 하는 경우',
+        whenNotToUse: '쇼츠, 단일 이미지, 단순 텍스트 변환 요청',
+    },
+    'longform-brief': {
+        blockType: 'longform-brief',
+        label: '롱폼 관점 설계',
+        capabilities: ['longform.brief'],
+        input: 'longform source digest',
+        output: 'json viewer promise, angle, structure, evidence plan',
+        whenToUse: '롱폼의 관점과 논리 구조를 잡아야 하는 경우',
+        whenNotToUse: '사용자가 쇼츠나 이미지 생성을 요청한 경우',
+    },
+    'longform-script': {
+        blockType: 'longform-script',
+        label: '롱폼 대본 작성',
+        capabilities: ['longform.script', 'text.generate'],
+        input: 'longform brief and source digest',
+        output: 'json full script draft, sections, source map',
+        whenToUse: '롱폼 내레이션 초안이 필요한 경우',
+        whenNotToUse: '쇼츠 장면 대본 또는 단일 텍스트 결과가 필요한 경우',
+    },
+    'longform-storyboard': {
+        blockType: 'longform-storyboard',
+        label: '롱폼 스토리보드',
+        capabilities: ['longform.storyboard'],
+        input: 'longform script sections',
+        output: 'json visual chapters and motion intent',
+        whenToUse: '대본을 모션그래픽 visual chapter로 바꿔야 하는 경우',
+        whenNotToUse: '이미지 프롬프트 중심 쇼츠 장면 생성',
+    },
+    'longform-scene-json': {
+        blockType: 'longform-scene-json',
+        label: '롱폼 장면 계약',
+        capabilities: ['longform.scene-json'],
+        input: 'longform storyboard',
+        output: 'json HyperFrames/Remotion scene contract',
+        whenToUse: 'renderer가 읽을 장면/모션 계약이 필요한 경우',
+        whenNotToUse: '이미 렌더 가능한 비디오 asset이 있는 경우',
+    },
+    'longform-review': {
+        blockType: 'longform-review',
+        label: '롱폼 사용자 검수',
+        capabilities: ['longform.review'],
+        input: 'longform Gate A artifacts',
+        output: 'json review artifact and decision state',
+        whenToUse: '유료 제작 전 대본/스토리보드/scene JSON을 사용자에게 확인시킬 때',
+        whenNotToUse: '승인 없이 바로 실행하는 저비용 텍스트 작업',
+    },
+    'longform-tts': {
+        blockType: 'longform-tts',
+        label: '롱폼 음성 생성',
+        capabilities: ['audio.tts'],
+        input: 'approved longform script',
+        output: 'json ElevenLabs audio metadata',
+        whenToUse: '승인된 롱폼 대본으로 내레이션을 만들 때',
+        whenNotToUse: 'Gate A 승인 전',
+    },
+    'longform-srt-align': {
+        blockType: 'longform-srt-align',
+        label: '롱폼 자막 정렬',
+        capabilities: ['longform.srt-align'],
+        input: 'longform audio and script',
+        output: 'json TTS-duration-aligned subtitle cues',
+        whenToUse: '음성 기준 자막 타이밍이 필요한 경우',
+        whenNotToUse: 'TTS 출력 timing cue가 없는 임시 시간 분배',
+    },
+    'longform-motion-compose': {
+        blockType: 'longform-motion-compose',
+        label: '롱폼 모션 설계',
+        capabilities: ['longform.motion-compose'],
+        input: 'scene JSON and subtitle cues',
+        output: 'json composition artifact and motion cues',
+        whenToUse: 'HyperFrames 모션그래픽 composition을 구성할 때',
+        whenNotToUse: '정적 이미지 슬라이드쇼',
+    },
+    'longform-render': {
+        blockType: 'longform-render',
+        label: '롱폼 2K 렌더',
+        capabilities: ['longform.render', 'video.compose'],
+        input: 'composition, audio, subtitles, motion cues',
+        output: 'json MP4 preview/download metadata',
+        whenToUse: '승인된 롱폼을 실제 2K MP4로 렌더할 때',
+        whenNotToUse: 'Gate A 승인 전 또는 비용 한도 초과 시',
+    },
+    'longform-qa': {
+        blockType: 'longform-qa',
+        label: '롱폼 QA',
+        capabilities: ['longform.qa'],
+        input: 'longform render output',
+        output: 'json ffprobe and timing QA report',
+        whenToUse: 'MP4를 완료 처리하기 전에 검증해야 하는 경우',
+        whenNotToUse: '검증이 필요 없는 중간 산출물',
+    },
+    'longform-package': {
+        blockType: 'longform-package',
+        label: '롱폼 패키지',
+        capabilities: ['longform.package', 'metadata.generate'],
+        input: 'QA-passed longform artifacts',
+        output: 'json downloadable package',
+        whenToUse: 'MP4, SRT, 대본, source digest를 최종 묶음으로 제공할 때',
+        whenNotToUse: 'QA를 통과하지 않은 영상',
     },
 };
 

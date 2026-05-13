@@ -1,7 +1,7 @@
 import type { ClaudeProposalOutput } from './response-parser';
 import type { ContentProfilePreferences } from '../content-profile/content-profile';
 
-const LONGFORM_GATE_A_ESTIMATED_COST_USD = 0.16;
+const LONGFORM_FULL_FACTORY_ESTIMATED_COST_USD = 0.82;
 
 export function isLongformContentProfile(contentProfileId: unknown): boolean {
     return typeof contentProfileId === 'string' && contentProfileId.startsWith('longform.');
@@ -25,43 +25,66 @@ export function buildLongformGateAWorkflow(
 
     return {
         plan: {
-            goal: '롱폼 제작 기획안을 먼저 만들고 사용자가 검수한 뒤 영상 제작으로 진행한다',
-            outputType: 'data',
+            goal: '롱폼 제작 기획안을 먼저 만들고 사용자가 검수한 뒤 같은 워크플로우에서 영상 제작으로 진행한다',
+            outputType: 'video',
             planType: 'interactive',
-            requiredCapabilities: ['source.collect', 'text.generate', 'data.structure', 'quality.review'],
+            requiredCapabilities: [
+                'longform.source',
+                'longform.brief',
+                'longform.script',
+                'longform.storyboard',
+                'longform.scene-json',
+                'longform.review',
+                'longform.tts',
+                'longform.srt-align',
+                'longform.motion-compose',
+                'longform.render',
+                'longform.qa',
+                'longform.package',
+            ],
             selectedBlocks: [
-                { blockType: 'search', reason: '원문과 보조 자료를 수집해 source digest를 만든다' },
-                { blockType: 'content', reason: '롱폼 outline, full script draft, scene plan을 작성한다' },
-                { blockType: 'data', reason: '제작 기획안을 검수/승인 가능한 구조로 정규화한다' },
-                { blockType: 'analysis', reason: '유료 제작 전 필수 산출물과 비용/렌더 경로를 검수한다' },
+                { blockType: 'longform-source', reason: '원문과 보조 자료를 롱폼 source digest로 정리한다' },
+                { blockType: 'longform-brief', reason: '시청자 약속, 관점, 논리 구조를 잡는다' },
+                { blockType: 'longform-script', reason: '검수 가능한 전체 내레이션 초안을 작성한다' },
+                { blockType: 'longform-storyboard', reason: '대본을 장면 의도와 화면 리듬으로 나눈다' },
+                { blockType: 'longform-scene-json', reason: 'HyperFrames 2K 장면 계약으로 변환한다' },
+                { blockType: 'longform-review', reason: '사용자 검수 전에는 유료 제작을 멈춘다' },
+                { blockType: 'longform-tts', reason: '승인된 대본으로 ElevenLabs 내레이션을 만든다' },
+                { blockType: 'longform-srt-align', reason: 'TTS timing을 기준으로 자막 cue를 정렬한다' },
+                { blockType: 'longform-motion-compose', reason: '장면 계약과 자막으로 모션 composition을 만든다' },
+                { blockType: 'longform-render', reason: 'HyperFrames 경로로 2K MP4를 렌더한다' },
+                { blockType: 'longform-qa', reason: 'MP4, 오디오, 해상도, 자막, 모션 품질을 검수한다' },
+                { blockType: 'longform-package', reason: '미리보기와 다운로드 가능한 최종 패키지를 만든다' },
             ],
             rejectedBlocks: [
+                { blockType: 'search', reason: '롱폼 전용 source digest 노드로 대체한다' },
+                { blockType: 'content', reason: '롱폼 전용 brief/script 노드로 분리한다' },
+                { blockType: 'data', reason: '롱폼 전용 storyboard/scene-json 노드로 분리한다' },
+                { blockType: 'analysis', reason: '롱폼 전용 review 노드로 대체한다' },
                 { blockType: 'media-image', reason: '사용자 확인 전에는 이미지 생성 비용을 발생시키지 않는다' },
-                { blockType: 'media-tts', reason: '사용자 확인 전에는 TTS 비용을 발생시키지 않는다' },
-                { blockType: 'media-video', reason: '사용자 확인 전에는 HyperFrames/MP4 렌더를 실행하지 않는다' },
+                { blockType: 'media-tts', reason: '롱폼 전용 TTS 노드로 대체한다' },
+                { blockType: 'media-video', reason: '롱폼 전용 HyperFrames/MP4 렌더 노드로 대체한다' },
                 { blockType: 'integration', reason: '최종 배포 메타데이터는 영상 제작 완료 후 생성한다' },
             ],
-            assumptions: ['롱폼은 대본/씬 검수 후 유료 제작을 시작한다'],
+            assumptions: ['롱폼은 하나의 캔버스에 전체 제작 공장을 보여주되 대본/씬 검수 후 유료 제작을 시작한다'],
         },
         blocks: [
             {
-                type: 'search',
+                type: 'longform-source',
                 label: '롱폼 자료 수집',
                 config: {
                     mode: 'longform-gate-a',
                     query: topic,
+                    userRequest: topic,
                 },
             },
             {
-                type: 'content',
-                label: '롱폼 기획안 작성',
+                type: 'longform-brief',
+                label: '롱폼 관점 설계',
                 config: {
                     mode: 'longform-gate-a',
                     topic,
                     contentProfileId: contentProfile.contentProfileId,
-                    scriptToneId: contentProfile.scriptToneId,
-                    scriptToneIntensity: contentProfile.scriptToneIntensity,
-                    reviewMode: 'script-first',
                     rendererRoute,
                     targetDurationSec,
                     maxDurationSec: targetDurationSec,
@@ -69,8 +92,23 @@ export function buildLongformGateAWorkflow(
                 },
             },
             {
-                type: 'data',
-                label: '롱폼 기획안 정리',
+                type: 'longform-script',
+                label: '롱폼 대본 작성',
+                config: {
+                    mode: 'longform-gate-a',
+                    topic,
+                    contentProfileId: contentProfile.contentProfileId,
+                    scriptToneId: contentProfile.scriptToneId,
+                    scriptToneIntensity: contentProfile.scriptToneIntensity,
+                    reviewMode: 'script-first',
+                    targetDurationSec,
+                    maxDurationSec: targetDurationSec,
+                    mediaExecutionAllowed: false,
+                },
+            },
+            {
+                type: 'longform-storyboard',
+                label: '롱폼 스토리보드',
                 config: {
                     mode: 'longform-gate-a',
                     rendererRoute,
@@ -78,12 +116,97 @@ export function buildLongformGateAWorkflow(
                 },
             },
             {
-                type: 'analysis',
-                label: '롱폼 제작 검수',
+                type: 'longform-scene-json',
+                label: '롱폼 장면 계약',
+                config: {
+                    mode: 'longform-gate-a',
+                    renderer: 'hyperframes',
+                    rendererRoute,
+                    resolution: '2560x1440',
+                    mediaExecutionAllowed: false,
+                },
+            },
+            {
+                type: 'longform-review',
+                label: '롱폼 사용자 검수',
                 config: {
                     mode: 'longform-gate-a',
                     rendererRoute,
+                    reviewMode: 'script-first',
                     mediaExecutionAllowed: false,
+                },
+            },
+            {
+                type: 'longform-tts',
+                label: '롱폼 음성 생성',
+                config: {
+                    mode: 'longform-gate-b',
+                    provider: 'elevenlabs',
+                    contentProfileId: contentProfile.contentProfileId,
+                    reviewMode: 'script-first',
+                    mediaExecutionAllowed: false,
+                    approvalRequired: true,
+                },
+            },
+            {
+                type: 'longform-srt-align',
+                label: '롱폼 자막 정렬',
+                config: {
+                    mode: 'longform-gate-b',
+                    alignmentMethod: 'elevenlabs-tts-duration-aligned',
+                    contentProfileId: contentProfile.contentProfileId,
+                    mediaExecutionAllowed: false,
+                    approvalRequired: true,
+                },
+            },
+            {
+                type: 'longform-motion-compose',
+                label: '롱폼 모션 설계',
+                config: {
+                    mode: 'longform-gate-b',
+                    rendererRoute,
+                    resolution: '2560x1440',
+                    contentProfileId: contentProfile.contentProfileId,
+                    mediaExecutionAllowed: false,
+                    approvalRequired: true,
+                },
+            },
+            {
+                type: 'longform-render',
+                label: '롱폼 2K 렌더',
+                config: {
+                    mode: 'longform-gate-b',
+                    rendererRoute,
+                    renderer: 'hyperframes',
+                    resolution: '2560x1440',
+                    backgroundMusicPath: 'assets/bgm/default-bgm.mp3',
+                    longformHtmlRenderEstimatedCostUsd: 0.75,
+                    contentProfileId: contentProfile.contentProfileId,
+                    mediaExecutionAllowed: false,
+                    approvalRequired: true,
+                },
+            },
+            {
+                type: 'longform-qa',
+                label: '롱폼 QA',
+                config: {
+                    mode: 'longform-gate-b',
+                    requiredResolution: '2560x1440',
+                    requireAudioStream: true,
+                    requireVideoStream: true,
+                    contentProfileId: contentProfile.contentProfileId,
+                    mediaExecutionAllowed: false,
+                    approvalRequired: true,
+                },
+            },
+            {
+                type: 'longform-package',
+                label: '롱폼 패키지',
+                config: {
+                    mode: 'longform-gate-b',
+                    contentProfileId: contentProfile.contentProfileId,
+                    mediaExecutionAllowed: false,
+                    approvalRequired: true,
                 },
             },
         ],
@@ -91,10 +214,18 @@ export function buildLongformGateAWorkflow(
             { from: 0, to: 1 },
             { from: 1, to: 2 },
             { from: 2, to: 3 },
+            { from: 3, to: 4 },
+            { from: 4, to: 5 },
+            { from: 5, to: 6 },
+            { from: 6, to: 7 },
+            { from: 7, to: 8 },
+            { from: 8, to: 9 },
+            { from: 9, to: 10 },
+            { from: 10, to: 11 },
         ],
-        estimatedCostUsd: LONGFORM_GATE_A_ESTIMATED_COST_USD,
+        estimatedCostUsd: LONGFORM_FULL_FACTORY_ESTIMATED_COST_USD,
         summary:
-            '롱폼 제작 기획안을 먼저 준비합니다. 자료 수집, outline, full script draft, scene plan, 예상 길이/비용/렌더 경로를 만든 뒤 사용자가 확인하면 영상 제작으로 이어집니다.',
+            '롱폼 제작 기획안을 먼저 준비하고, 같은 캔버스에서 검수 후 TTS, 자막 정렬, 모션 구성, 2K 렌더, QA, 패키징까지 이어지는 워크플로우입니다.',
     };
 }
 

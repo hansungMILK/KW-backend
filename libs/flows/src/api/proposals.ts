@@ -1,5 +1,7 @@
 import { api } from '@flows/web-core';
 
+import { normalizeNodeList } from './normalizers';
+
 import type { EdgeData, NodeData } from '../types';
 import type { ProposalApproveRequest, ProposalApproveResponse } from '@flows/contracts';
 
@@ -26,7 +28,7 @@ export const approveProposal = async (
     return {
         id: response.data.proposal.proposalId,
         flowId: response.data.proposal.flowId,
-        nodes: response.data.flow.nodes as unknown as NodeData[],
+        nodes: normalizeNodeList(response.data.flow.nodes),
         edges: response.data.flow.edges as unknown as EdgeData[],
     };
 };

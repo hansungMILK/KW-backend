@@ -284,6 +284,47 @@ describe('mediaVideoBlock', () => {
         });
     });
 
+    it('generates internal longform motion-board visuals when no image assets are supplied', async () => {
+        await mediaVideoBlock.execute(
+            longformVideoInput({
+                gateBApproved: true,
+                images: [],
+                scenes: [
+                    {
+                        sceneId: 'scene-1',
+                        headline: '첫 번째 모션 장면',
+                        layout: 'source-proof',
+                    },
+                ],
+            }),
+            {
+                mode: 'longform-gate-b',
+                rendererRoute: 'hyperframes',
+                htmlComposeEstimatedCostUsd: 1,
+                hyperframesRenderEstimatedCostUsd: 1,
+            },
+            {
+                runId: 'run_1',
+                nodeId: 'node_1',
+            }
+        );
+
+        expect(ffmpegAdapter.compose).toHaveBeenCalledTimes(1);
+        const request = vi.mocked(ffmpegAdapter.compose).mock.calls[0]?.[0];
+        expect(request?.images).toEqual([
+            expect.objectContaining({
+                url: expect.stringContaining('/media/longform-visuals/'),
+                title: '첫 번째 모션 장면',
+                caption: '롱폼 승인 뒤 실제 제작되는 첫 장면입니다.',
+            }),
+        ]);
+        expect(putObject).toHaveBeenCalledWith(
+            expect.stringContaining('media/longform-visuals/'),
+            expect.any(Buffer),
+            'image/x-portable-pixmap'
+        );
+    });
+
     it('rejects longform Gate B when ffprobe QA cannot confirm audio and video streams', async () => {
         vi.mocked(ffmpegAdapter.probeVideo).mockResolvedValueOnce({
             hasVideo: true,

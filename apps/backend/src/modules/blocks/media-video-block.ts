@@ -30,17 +30,22 @@ export const mediaVideoBlock: BlockExecutor = {
             url?: string;
             sceneNumber?: number;
             durationSec?: number;
+            title?: string;
             caption?: string;
             visualText?: string;
             sourceLabel?: string;
         };
         type RawScene = {
+            sceneId?: string;
             sceneNumber?: number;
             durationSec?: number;
+            title?: string;
+            headline?: string;
             caption?: string;
             narration?: string;
             visualText?: string;
             sourceLabel?: string;
+            layout?: string;
             sourceRefs?: unknown[];
             visual?: {
                 sourceLabel?: string;
@@ -56,8 +61,9 @@ export const mediaVideoBlock: BlockExecutor = {
             sceneNumber?: number;
             type?: string;
         };
-        const rawImages: RawImage[] = (inp?.images as RawImage[] | undefined) ?? [];
+        const rawImagesFromInput: RawImage[] = (inp?.images as RawImage[] | undefined) ?? [];
         const rawScenes: RawScene[] = (inp?.normalizedScenes as RawScene[] | undefined) ?? [];
+        const motionScenes: RawScene[] = (inp?.scenes as RawScene[] | undefined) ?? rawScenes;
         const subtitleCues: RawSubtitleCue[] = Array.isArray(inp?.subtitleCues)
             ? (inp.subtitleCues as RawSubtitleCue[])
             : [];
@@ -84,6 +90,9 @@ export const mediaVideoBlock: BlockExecutor = {
         const longformProductionQa = longformGateB
             ? assertLongformProductionInputs(audioObj, subtitleCues, motionCues)
             : undefined;
+        const rawImages = longformGateB
+            ? await ensureLongformMotionBoardImages(rawImagesFromInput, motionScenes, subtitleCues, metadata)
+            : rawImagesFromInput;
         const images = buildSyncedImageSegments(rawImages, rawScenes, subtitleCues, metadata, audioDurationSec);
 
         if (images.length === 0) {
@@ -318,11 +327,114 @@ async function recordVideoTrace(message: string, data?: Record<string, unknown>)
     }
 }
 
+async function ensureLongformMotionBoardImages(
+    images: Array<{
+        url?: string;
+        sceneNumber?: number;
+        durationSec?: number;
+        title?: string;
+        caption?: string;
+        visualText?: string;
+        sourceLabel?: string;
+    }>,
+    scenes: Array<{
+        sceneId?: string;
+        sceneNumber?: number;
+        durationSec?: number;
+        title?: string;
+        headline?: string;
+        caption?: string;
+        narration?: string;
+        visualText?: string;
+        sourceLabel?: string;
+        layout?: string;
+    }>,
+    subtitleCues: Array<{ sceneNumber?: number; text?: string; startSec?: number; endSec?: number }>,
+    metadata?: Record<string, unknown>
+): Promise<
+    Array<{
+        url?: string;
+        sceneNumber?: number;
+        durationSec?: number;
+        title?: string;
+        caption?: string;
+        visualText?: string;
+        sourceLabel?: string;
+    }>
+> {
+    if (images.some(image => typeof image.url === 'string' && image.url.trim().length > 0)) return images;
+
+    const sceneKeys = new Set<number>();
+    for (const cue of subtitleCues) sceneKeys.add(normalizeSceneNumber(cue.sceneNumber, sceneKeys.size + 1));
+    for (const scene of scenes) sceneKeys.add(normalizeSceneNumber(scene.sceneNumber, sceneKeys.size + 1));
+    if (sceneKeys.size === 0) sceneKeys.add(1);
+
+    const generated: Array<{
+        url: string;
+        sceneNumber: number;
+        durationSec?: number;
+        title: string;
+        caption: string;
+        sourceLabel?: string;
+    }> = [];
+    for (const sceneNumber of [...sceneKeys].sort((a, b) => a - b)) {
+        const scene = scenes.find(item => normalizeSceneNumber(item.sceneNumber, sceneNumber) === sceneNumber);
+        const cue = subtitleCues.find(item => normalizeSceneNumber(item.sceneNumber, sceneNumber) === sceneNumber);
+        const title =
+            normalizeSubtitleText(scene?.headline) ||
+            normalizeSubtitleText(scene?.title) ||
+            normalizeSubtitleText(scene?.layout) ||
+            (typeof metadata?.title === 'string' ? metadata.title : `롱폼 장면 ${sceneNumber}`);
+        const caption =
+            normalizeSubtitleText(cue?.text) ||
+            normalizeSubtitleText(scene?.narration) ||
+            normalizeSubtitleText(scene?.caption) ||
+            normalizeSubtitleText(scene?.visualText) ||
+            title;
+        const key = `media/longform-visuals/${randomUUID()}/scene-${sceneNumber}.ppm`;
+        await putObject(key, createLongformMotionBoardPpm(sceneNumber), 'image/x-portable-pixmap');
+        generated.push({
+            url: getPublicUrl(key),
+            sceneNumber,
+            title,
+            caption,
+            sourceLabel: cleanSourceLabel(scene?.sourceLabel),
+            durationSec:
+                typeof scene?.durationSec === 'number' && Number.isFinite(scene.durationSec) && scene.durationSec > 0
+                    ? scene.durationSec
+                    : undefined,
+        });
+    }
+
+    return generated;
+}
+
+function createLongformMotionBoardPpm(seed: number): Buffer {
+    const width = 960;
+    const height = 540;
+    const header = Buffer.from(`P6\n${width} ${height}\n255\n`, 'ascii');
+    const pixels = Buffer.alloc(width * height * 3);
+    const hue = (seed * 37) % 255;
+
+    for (let y = 0; y < height; y += 1) {
+        for (let x = 0; x < width; x += 1) {
+            const offset = (y * width + x) * 3;
+            const vignette = 1 - Math.min(0.55, Math.hypot(x - width / 2, y - height / 2) / Math.hypot(width, height));
+            pixels[offset] = Math.round((12 + ((x / width) * 50 + hue * 0.18)) * vignette);
+            pixels[offset + 1] = Math.round((24 + ((y / height) * 70 + hue * 0.12)) * vignette);
+            pixels[offset + 2] = Math.round((42 + ((1 - x / width) * 95 + hue * 0.2)) * vignette);
+        }
+    }
+
+    return Buffer.concat([header, pixels]);
+}
+
 function buildSyncedImageSegments(
     images: Array<{
         url?: string;
         sceneNumber?: number;
         durationSec?: number;
+        title?: string;
         caption?: string;
         visualText?: string;
         sourceLabel?: string;
@@ -373,7 +485,7 @@ function buildSyncedImageSegments(
             return {
                 url: image.url,
                 durationSec: roundToMillis(cue.endSec - cue.startSec),
-                title,
+                title: image.title ?? title,
                 caption: cue.text,
                 sourceLabel: sourceLabelForImage(image, scenes, metadata?.['sources']),
             };
@@ -383,7 +495,7 @@ function buildSyncedImageSegments(
     return usableImages.map(image => ({
         url: image.url,
         durationSec: durationForImage(image, scenes),
-        title,
+        title: image.title ?? title,
         caption: subtitleForImage(image, scenes),
         sourceLabel: sourceLabelForImage(image, scenes, metadata?.['sources']),
     }));

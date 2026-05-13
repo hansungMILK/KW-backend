@@ -494,6 +494,28 @@ describe('executionEngine asset publication', () => {
         );
     });
 
+    it('uses the media-video timeout budget for longform-render nodes', async () => {
+        vi.useFakeTimers();
+        node = { ...node, blockType: 'longform-render' };
+        executeBlock.mockImplementationOnce(() => new Promise(() => undefined));
+
+        const execution = executionEngine.handleNodeExecution(run.runId, node.nodeId, 'exec-longform-render-timeout');
+        await vi.advanceTimersByTimeAsync(0);
+        await vi.runOnlyPendingTimersAsync();
+        await execution;
+
+        expect(sequence).toContain('node.status:FAILED');
+        expect(updateRunNodeStatus).toHaveBeenCalledWith(
+            run.runId,
+            node.nodeId,
+            'FAILED',
+            expect.objectContaining({
+                errorCode: 'NODE_TIMEOUT',
+                errorMessage: expect.stringContaining('longform-render execution timed out after 900 seconds'),
+            })
+        );
+    });
+
     it('stops a step run after the content node so the script can be reviewed before media nodes spend money', async () => {
         run = {
             runId: 'run-step-review',
@@ -566,6 +588,79 @@ describe('executionEngine asset publication', () => {
         expect(broadcastToFlow.mock.calls.some(([, msg]) => (msg as { type?: string }).type === 'run.completed')).toBe(
             true
         );
+    });
+
+    it('stops a step longform run at longform-review before Gate B nodes spend money', async () => {
+        run = {
+            runId: 'run-longform-step-review',
+            flowId: 'flow-longform-step-review',
+            runType: 'FULL_FLOW',
+            status: 'QUEUED',
+            triggerSource: 'MANUAL',
+            executionMode: 'step',
+            flowSnapshot: {
+                nodes: [],
+                edges: [
+                    { sourceNodeId: 'node-source', targetNodeId: 'node-review' },
+                    { sourceNodeId: 'node-review', targetNodeId: 'node-tts' },
+                    { sourceNodeId: 'node-tts', targetNodeId: 'node-render' },
+                ],
+            },
+            createdAt: new Date().toISOString(),
+        } as Run;
+
+        const runNodes: RunNode[] = [
+            makeRunNode('node-source', 'longform-source', []),
+            makeRunNode('node-review', 'longform-review', ['node-source']),
+            makeRunNode('node-tts', 'longform-tts', ['node-review']),
+            makeRunNode('node-render', 'longform-render', ['node-tts']),
+        ];
+
+        getRun.mockImplementation(async () => run);
+        listRunNodes.mockImplementation(async () => runNodes);
+        getRunNode.mockImplementation(async (_runId, nodeId) => runNodes.find(item => item.nodeId === nodeId) ?? null);
+        putRunNode.mockImplementation(async updatedNode => {
+            const index = runNodes.findIndex(item => item.nodeId === updatedNode.nodeId);
+            if (index >= 0) runNodes[index] = updatedNode;
+        });
+        updateRunStatus.mockImplementation(async (_runId, status, extra) => {
+            run = { ...run, ...extra, status } as Run;
+            return { ok: true, run };
+        });
+        updateRunNodeStatus.mockImplementation(async (_runId, nodeId, status, extra) => {
+            const index = runNodes.findIndex(item => item.nodeId === nodeId);
+            if (index < 0) return { ok: false, error: 'missing node' };
+            runNodes[index] = {
+                ...runNodes[index],
+                ...extra,
+                status,
+            } as RunNode;
+            sequence.push(`node.status:${nodeId}:${status}`);
+            return { ok: true, node: runNodes[index] };
+        });
+        executeBlock.mockImplementation(async blockType => ({
+            output:
+                blockType === 'longform-review'
+                    ? {
+                          gate: 'A',
+                          mode: 'longform-gate-a',
+                          reviewStatus: 'draft',
+                          mediaExecutionAllowed: false,
+                      }
+                    : { ok: true },
+            durationMs: 1,
+        }));
+
+        await executionEngine.handleRunExecution(run.runId, 'exec-longform-step-review');
+
+        expect(executeBlock.mock.calls.map(call => call[0])).toEqual(['longform-source', 'longform-review']);
+        expect(run.status).toBe('COMPLETED');
+        expect(run.finalOutputSummary).toMatchObject({
+            stoppedForReview: true,
+            reviewNodeId: 'node-review',
+        });
+        expect(runNodes.find(item => item.nodeId === 'node-tts')?.status).toBe('SKIPPED');
+        expect(runNodes.find(item => item.nodeId === 'node-render')?.status).toBe('SKIPPED');
     });
 });
 

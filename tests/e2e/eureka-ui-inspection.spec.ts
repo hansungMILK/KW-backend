@@ -6,6 +6,7 @@ import type { APIResponse, Page, Response } from '@playwright/test';
 
 const outputDir = process.env.E2E_OUTPUT_DIR || '/Users/a0000/Downloads/eureka-ui-check';
 const appApiKey = process.env.E2E_APP_API_KEY || 'local-test';
+const apiBaseUrl = process.env.E2E_API_URL || 'http://localhost:8800';
 const agentPrompt = process.env.E2E_AGENT_PROMPT || '입시정보 쇼츠 만들어줘';
 const paidRunTimeoutMs = readPositiveInt(process.env.E2E_PAID_RUN_TIMEOUT_MS, 12 * 60 * 1000);
 
@@ -345,9 +346,18 @@ test.describe('Eureka Flow UI inspection', () => {
         const runId = 'run-longform-gate-a-e2e';
         const longformArtifact = {
             gate: 'A',
-            mode: 'longform-gate-a',
+            mode: 'longform-review',
+            renderer: 'hyperframes',
+            resolution: '2560x1440',
+            reviewStatus: 'draft',
+            mediaExecutionAllowed: false,
             sourceDigest: ['AI 에이전트는 단순 챗봇을 넘어 실제 업무 실행 계층으로 이동하고 있습니다.'],
-            outline: [
+            brief: {
+                thesis: 'AI 에이전트는 챗봇이 아니라 실행 가능한 업무 시스템으로 이동하고 있습니다.',
+                targetAudience: 'AI 도구를 업무 자동화 관점에서 이해하려는 실무자',
+                narrativeAngle: '답변형 AI에서 실행형 AI로 넘어가는 변화',
+            },
+            sections: [
                 {
                     title: '왜 지금 AI 에이전트인가',
                     summary: '모델 성능보다 중요한 변화는 도구를 실제로 호출하는 실행 능력입니다.',
@@ -361,7 +371,14 @@ test.describe('Eureka Flow UI inspection', () => {
                 'AI 에이전트의 미래를 이해하려면 먼저 챗봇과 실행형 소프트웨어를 구분해야 합니다.\n' +
                 '중요한 변화는 답변을 잘하는 모델이 아니라, 사용자의 목표를 받아 도구를 연결하고 결과를 검증하는 시스템입니다.\n' +
                 '정리하면 앞으로 중요한 건 더 긴 답변이 아니라, 믿고 맡길 수 있는 실행 흐름입니다.',
-            scenePlan: [
+            visualChapters: [
+                {
+                    chapterNumber: 1,
+                    headline: '챗봇에서 실행형 시스템으로',
+                    motionPlan: '노드와 도구가 연결되는 모션그래픽',
+                },
+            ],
+            scenes: [
                 {
                     sceneNumber: 1,
                     title: '오프닝',
@@ -378,77 +395,124 @@ test.describe('Eureka Flow UI inspection', () => {
             estimatedDurationSec: 300,
             estimatedCost: { currency: 'USD', total: 0.16, notes: ['Planning only'] },
             rendererRoute: 'hyperframes',
-            mediaExecutionAllowed: false,
         };
         const longformNodes = [
             {
-                id: 'node-longform-search',
-                type: 'search',
-                blockType: 'search',
+                id: 'node-longform-source',
+                type: 'longform-source',
+                blockType: 'longform-source',
                 name: '롱폼 자료 수집',
-                position: { x: 120, y: 160 },
+                position: { x: 120, y: 120 },
                 state: 'IDLE',
-                config: { mode: 'longform-gate-a', query: 'AI 에이전트의 미래' },
+                config: { query: 'AI 에이전트의 미래' },
             },
             {
-                id: 'node-longform-content',
-                type: 'content',
-                blockType: 'content',
-                name: '롱폼 기획안 작성',
-                position: { x: 440, y: 160 },
+                id: 'node-longform-brief',
+                type: 'longform-brief',
+                blockType: 'longform-brief',
+                name: '롱폼 관점 설계',
+                position: { x: 420, y: 120 },
                 state: 'IDLE',
-                config: {
-                    mode: 'longform-gate-a',
-                    contentProfileId: 'longform.explainer.v1',
-                    reviewMode: 'script-first',
-                    rendererRoute: 'hyperframes',
-                    mediaExecutionAllowed: false,
-                    targetDurationSec: 300,
-                    maxDurationSec: 300,
-                },
+                config: { contentProfileId: 'longform.explainer.v1' },
             },
             {
-                id: 'node-longform-data',
-                type: 'data',
-                blockType: 'data',
-                name: '롱폼 기획안 정리',
-                position: { x: 760, y: 160 },
+                id: 'node-longform-script',
+                type: 'longform-script',
+                blockType: 'longform-script',
+                name: '롱폼 대본 작성',
+                position: { x: 720, y: 120 },
                 state: 'IDLE',
-                config: { mode: 'longform-gate-a', mediaExecutionAllowed: false },
+                config: { scriptToneId: 'calm-explainer' },
             },
             {
-                id: 'node-longform-analysis',
-                type: 'analysis',
-                blockType: 'analysis',
-                name: '롱폼 제작 검수',
-                position: { x: 1080, y: 160 },
+                id: 'node-longform-storyboard',
+                type: 'longform-storyboard',
+                blockType: 'longform-storyboard',
+                name: '롱폼 스토리보드',
+                position: { x: 1020, y: 120 },
                 state: 'IDLE',
-                config: { mode: 'longform-gate-a', mediaExecutionAllowed: false },
+                config: {},
+            },
+            {
+                id: 'node-longform-scene-json',
+                type: 'longform-scene-json',
+                blockType: 'longform-scene-json',
+                name: '롱폼 장면 계약',
+                position: { x: 1320, y: 120 },
+                state: 'IDLE',
+                config: { renderer: 'hyperframes', resolution: '2560x1440' },
+            },
+            {
+                id: 'node-longform-review',
+                type: 'longform-review',
+                blockType: 'longform-review',
+                name: '롱폼 사용자 검수',
+                position: { x: 1620, y: 120 },
+                state: 'IDLE',
+                config: { reviewMode: 'script-first', mediaExecutionAllowed: false },
+            },
+            {
+                id: 'node-longform-tts',
+                type: 'longform-tts',
+                blockType: 'longform-tts',
+                name: '롱폼 음성 생성',
+                position: { x: 1920, y: 120 },
+                state: 'IDLE',
+                config: { voiceId: 'pNInz6obpgDQGcFmaJgB', voiceName: 'Adam' },
+            },
+            {
+                id: 'node-longform-srt-align',
+                type: 'longform-srt-align',
+                blockType: 'longform-srt-align',
+                name: '롱폼 자막 정렬',
+                position: { x: 2220, y: 120 },
+                state: 'IDLE',
+                config: { alignmentMethod: 'elevenlabs-tts-duration-aligned' },
+            },
+            {
+                id: 'node-longform-motion-compose',
+                type: 'longform-motion-compose',
+                blockType: 'longform-motion-compose',
+                name: '롱폼 모션 설계',
+                position: { x: 2520, y: 120 },
+                state: 'IDLE',
+                config: { renderer: 'hyperframes' },
+            },
+            {
+                id: 'node-longform-render',
+                type: 'longform-render',
+                blockType: 'longform-render',
+                name: '롱폼 2K 렌더',
+                position: { x: 2820, y: 120 },
+                state: 'IDLE',
+                config: { resolution: '2560x1440', maxCostUsd: 5 },
+            },
+            {
+                id: 'node-longform-qa',
+                type: 'longform-qa',
+                blockType: 'longform-qa',
+                name: '롱폼 QA',
+                position: { x: 3120, y: 120 },
+                state: 'IDLE',
+                config: { requireMp4: true },
+            },
+            {
+                id: 'node-longform-package',
+                type: 'longform-package',
+                blockType: 'longform-package',
+                name: '롱폼 패키지',
+                position: { x: 3420, y: 120 },
+                state: 'IDLE',
+                config: { includeDownload: true },
             },
         ];
-        const longformEdges = [
-            {
-                id: 'edge-longform-search-content',
-                sourceNodeId: 'node-longform-search',
-                sourcePortId: 'out',
-                targetNodeId: 'node-longform-content',
-                targetPortId: 'in',
-            },
-            {
-                id: 'edge-longform-content-data',
-                sourceNodeId: 'node-longform-content',
-                sourcePortId: 'out',
-                targetNodeId: 'node-longform-data',
-                targetPortId: 'in',
-            },
-            {
-                id: 'edge-longform-data-analysis',
-                sourceNodeId: 'node-longform-data',
-                sourcePortId: 'out',
-                targetNodeId: 'node-longform-analysis',
-                targetPortId: 'in',
-            },
-        ];
+        const longformEdges = longformNodes.slice(0, -1).map((node, index) => ({
+            id: `edge-${node.id}-${longformNodes[index + 1].id}`,
+            sourceNodeId: node.id,
+            sourcePortId: 'out',
+            targetNodeId: longformNodes[index + 1].id,
+            targetPortId: 'in',
+        }));
         const contentProfileMetadata = {
             contentProfile: {
                 contentProfileId: 'longform.explainer.v1',
@@ -496,9 +560,9 @@ test.describe('Eureka Flow UI inspection', () => {
                         proposalId,
                         flowId,
                         status: 'PENDING',
-                        estimatedCost: { currency: 'USD', total: 0.16 },
-                        estimatedCostUsd: 0.16,
-                        maxRunEstimatedCostUsd: 2,
+                        estimatedCost: { currency: 'USD', total: 0.82 },
+                        estimatedCostUsd: 0.82,
+                        maxRunEstimatedCostUsd: 5,
                         metadata: contentProfileMetadata,
                         proposedNodes: longformNodes,
                         proposedEdges: longformEdges,
@@ -512,7 +576,7 @@ test.describe('Eureka Flow UI inspection', () => {
                         messageType: 'PROPOSAL',
                         proposalId,
                         content:
-                            '롱폼 제작 기획안을 먼저 준비합니다. 자료 수집, outline, full script draft, scene plan, 예상 길이/비용, HyperFrames 경로를 만든 뒤 사용자가 확인하면 영상 제작으로 이어집니다.',
+                            '롱폼 제작 공장을 준비합니다. 자료 수집부터 검수, Adam TTS, 자막 정렬, HyperFrames 모션 설계, 2K 렌더, QA, 패키지까지 12개 노드로 진행합니다.',
                         createdAt,
                     },
                 }),
@@ -531,7 +595,7 @@ test.describe('Eureka Flow UI inspection', () => {
                         status: 'APPROVED',
                         proposedNodes: longformNodes,
                         proposedEdges: longformEdges,
-                        estimatedCost: { currency: 'USD', total: 0.16 },
+                        estimatedCost: { currency: 'USD', total: 0.82 },
                         metadata: contentProfileMetadata,
                         approvalRequired: true,
                         createdAt,
@@ -581,7 +645,7 @@ test.describe('Eureka Flow UI inspection', () => {
                     flowSnapshot: { nodes: longformNodes, edges: longformEdges },
                     finalOutputSummary: {
                         stoppedForReview: true,
-                        reviewNodeId: 'node-longform-content',
+                        reviewNodeId: 'node-longform-review',
                     },
                     createdAt,
                 }),
@@ -595,8 +659,8 @@ test.describe('Eureka Flow UI inspection', () => {
                     items: [
                         {
                             runId,
-                            nodeId: 'node-longform-search',
-                            blockType: 'search',
+                            nodeId: 'node-longform-source',
+                            blockType: 'longform-source',
                             label: '롱폼 자료 수집',
                             status: 'COMPLETED',
                             progress: 100,
@@ -607,13 +671,13 @@ test.describe('Eureka Flow UI inspection', () => {
                         },
                         {
                             runId,
-                            nodeId: 'node-longform-content',
-                            blockType: 'content',
-                            label: '롱폼 기획안 작성',
+                            nodeId: 'node-longform-review',
+                            blockType: 'longform-review',
+                            label: '롱폼 사용자 검수',
                             status: 'COMPLETED',
                             progress: 100,
                             retryCount: 0,
-                            parentNodeIds: ['node-longform-search'],
+                            parentNodeIds: ['node-longform-scene-json'],
                             outputPayload: longformArtifact,
                             updatedAt: createdAt,
                         },
@@ -630,8 +694,8 @@ test.describe('Eureka Flow UI inspection', () => {
         await page.locator('textarea').last().fill('롱폼 제작해줘. 주제는 AI 에이전트의 미래');
         await page.keyboard.press('Enter');
 
-        await expect(page.getByText('4개 블록 생성')).toBeVisible({ timeout: 10000 });
-        await expect(page.getByText('롱폼 제작 기획안을 먼저 준비합니다')).toBeVisible();
+        await expect(page.getByText('12개 블록 생성')).toBeVisible({ timeout: 10000 });
+        await expect(page.getByText('롱폼 제작 공장을 준비합니다')).toBeVisible();
         await expect(page.getByText('롱폼 해설')).toBeVisible();
         await expect(page.getByText('대본 검수 후 실행')).toBeVisible();
         await expect(page.getByText('대본 단계에서 멈춰 사용자가 검수한 뒤 유료 생성으로 이어갑니다.')).toBeVisible();
@@ -639,18 +703,26 @@ test.describe('Eureka Flow UI inspection', () => {
         await capture(page, '17-longform-gate-a-proposal');
 
         await page.getByText('승인').click();
-        await expect(page.getByText('롱폼 자료 수집')).toBeVisible({ timeout: 10000 });
-        await expect(page.getByText('롱폼 기획안 작성')).toBeVisible();
+        await expect(page.getByText('롱폼 자료 수집').first()).toBeVisible({ timeout: 10000 });
+        await expect(page.getByText('롱폼 관점 설계').first()).toBeVisible();
+        await expect(page.getByText('롱폼 대본 작성').first()).toBeVisible();
+        await expect(page.getByText('롱폼 스토리보드').first()).toBeVisible();
+        await expect(page.getByText('롱폼 장면 계약').first()).toBeVisible();
+        await expect(page.getByText('롱폼 사용자 검수').first()).toBeVisible();
+        await expect(page.getByText('롱폼 음성 생성').first()).toBeVisible();
+        await expect(page.getByText('롱폼 자막 정렬').first()).toBeVisible();
+        await expect(page.getByText('롱폼 모션 설계').first()).toBeVisible();
+        await expect(page.getByText('롱폼 2K 렌더').first()).toBeVisible();
+        await expect(page.getByText('롱폼 QA').first()).toBeVisible();
+        await expect(page.getByText('롱폼 패키지').first()).toBeVisible();
         await expect(page.getByText('이미지 생성', { exact: true })).toHaveCount(0);
-        await expect(page.getByText('음성 생성', { exact: true })).toHaveCount(0);
-        await expect(page.getByText('영상 합성', { exact: true })).toHaveCount(0);
         await capture(page, '18-longform-gate-a-approved');
 
         await page.getByRole('button', { name: /워크플로우 실행|Run Workflow/i }).click();
         await expect(page.getByText('대본 검수 모드로 실행을 시작했습니다.')).toBeVisible({ timeout: 10000 });
-        await expect(page.getByText('롱폼 제작 기획안', { exact: true })).toBeVisible({ timeout: 10000 });
+        await expect(page.getByText('롱폼 제작 기획안', { exact: true }).first()).toBeVisible({ timeout: 10000 });
         await expect(page.getByText('전체 대본 초안')).toBeVisible();
-        await expect(page.getByText('씬 플랜')).toBeVisible();
+        await expect(page.getByText('HyperFrames 장면 계약')).toBeVisible();
         await expect(page.getByText(/hyperframes/i).first()).toBeVisible();
         await expect(page.getByText(/Gate [AB]|게이트/i)).toHaveCount(0);
         await capture(page, '19-longform-gate-a-run-completed');
@@ -669,8 +741,8 @@ test.describe('Eureka Flow UI inspection', () => {
             runRequestBody,
             mediaNodesVisible: {
                 image: (await page.getByText('이미지 생성', { exact: true }).count()) > 0,
-                tts: (await page.getByText('음성 생성', { exact: true }).count()) > 0,
-                video: (await page.getByText('영상 합성', { exact: true }).count()) > 0,
+                tts: (await page.getByText('롱폼 음성 생성', { exact: true }).count()) > 0,
+                video: (await page.getByText('롱폼 2K 렌더', { exact: true }).count()) > 0,
             },
             apiStatuses: summarizeApiStatuses(probe.apiResponses),
         });
@@ -707,7 +779,7 @@ test.describe('Eureka Flow UI inspection', () => {
         const flowId = findCreatedFlowId(probe.apiResponses);
         expect(flowId, 'created flow id should be captured before starting run').toBeTruthy();
 
-        const runStart = await postJson(page, `http://localhost:8800/_apis/flows/${flowId}/runs`, {});
+        const runStart = await postJson(page, `${apiBaseUrl}/_apis/flows/${flowId}/runs`, {});
         fs.writeFileSync(path.join(outputDir, '13-run-start.json'), JSON.stringify(runStart, null, 2));
         expect(runStart.status, `run start should be accepted: ${JSON.stringify(runStart.json)}`).toBe(202);
 
@@ -759,7 +831,7 @@ function attachProbe(page: Page): UiProbe {
 
 async function captureApiResponse(response: Response, apiResponses: ApiResponseLog[]) {
     const url = response.url();
-    if (!url.includes(':8800')) return;
+    if (!url.startsWith(apiBaseUrl)) return;
 
     let body = '';
     try {
@@ -799,7 +871,7 @@ async function createFlowWithCanvas(
     page: Page,
     canvas: { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> }
 ) {
-    const create = await postJson(page, 'http://localhost:8800/_apis/flows', {
+    const create = await postJson(page, `${apiBaseUrl}/_apis/flows`, {
         title: `E2E ${Date.now()}`,
     });
     expect(create.status, `flow create should succeed: ${JSON.stringify(create.json)}`).toBe(201);
@@ -807,7 +879,7 @@ async function createFlowWithCanvas(
     const flowId = String((create.json as Record<string, unknown>).flowId ?? '');
     expect(flowId, 'flow id should be returned').toBeTruthy();
 
-    const update = await page.request.put(`http://localhost:8800/_apis/flows/${flowId}`, {
+    const update = await page.request.put(`${apiBaseUrl}/_apis/flows/${flowId}`, {
         headers: { 'x-api-key': appApiKey },
         data: {
             title: `E2E ${Date.now()}`,
@@ -928,9 +1000,9 @@ async function pollRunToTerminal(page: Page, flowId: string, runId: string) {
     const startedAt = Date.now();
 
     while (Date.now() - startedAt < paidRunTimeoutMs) {
-        const runResponse = await getJson(page, `http://localhost:8800/_apis/runs/${runId}`);
-        const nodesResponse = await getJson(page, `http://localhost:8800/_apis/runs/${runId}/nodes`);
-        const assetsResponse = await getJson(page, `http://localhost:8800/_apis/runs/${runId}/assets`);
+        const runResponse = await getJson(page, `${apiBaseUrl}/_apis/runs/${runId}`);
+        const nodesResponse = await getJson(page, `${apiBaseUrl}/_apis/runs/${runId}/nodes`);
+        const assetsResponse = await getJson(page, `${apiBaseUrl}/_apis/runs/${runId}/assets`);
 
         const runJson = runResponse.json as Record<string, unknown>;
         const nodesJson = nodesResponse.json as { items?: Array<Record<string, unknown>> };
@@ -970,7 +1042,7 @@ async function pollRunToTerminal(page: Page, flowId: string, runId: string) {
         await page.waitForTimeout(5000);
     }
 
-    await postJson(page, `http://localhost:8800/_apis/runs/${runId}/cancel`, {});
+    await postJson(page, `${apiBaseUrl}/_apis/runs/${runId}/cancel`, {});
     return { status: 'TIMEOUT_CANCELLED' };
 }
 

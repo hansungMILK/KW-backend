@@ -11,6 +11,13 @@ const contentNode = (config: Record<string, unknown>): NodeData => ({
     config,
 });
 
+const longformReviewNode = (config: Record<string, unknown>): NodeData => ({
+    id: 'node-longform-review',
+    type: 'longform-review',
+    name: 'Longform review',
+    config,
+});
+
 describe('workflow run mode', () => {
     it('runs in step mode when the approved content node requests script-first review', () => {
         expect(getWorkflowRunMode([contentNode({ reviewMode: 'script-first' })])).toEqual({
@@ -58,6 +65,59 @@ describe('workflow run mode', () => {
                 contentNode({
                     reviewMode: 'script-first',
                     reviewedOutput: { scenes: [{ narration: '검수본' }] },
+                }),
+            ])
+        ).toEqual({
+            executionMode: 'full',
+            scriptReviewFirst: false,
+        });
+    });
+
+    it('runs longform production in step mode until the review artifact is approved', () => {
+        expect(
+            getWorkflowRunMode([
+                longformReviewNode({
+                    reviewMode: 'script-first',
+                    reviewStatus: 'draft',
+                    mediaExecutionAllowed: false,
+                }),
+                {
+                    id: 'node-longform-tts',
+                    type: 'longform-tts',
+                    name: 'Longform TTS',
+                    config: { mode: 'longform-gate-b' },
+                },
+            ])
+        ).toEqual({
+            executionMode: 'step',
+            scriptReviewFirst: true,
+        });
+    });
+
+    it('runs the full longform production workflow after review approval', () => {
+        expect(
+            getWorkflowRunMode([
+                longformReviewNode({
+                    reviewMode: 'script-first',
+                    reviewStatus: 'approved',
+                    approvedArtifactId: 'longform-review-1',
+                }),
+            ])
+        ).toEqual({
+            executionMode: 'full',
+            scriptReviewFirst: false,
+        });
+    });
+
+    it('treats a saved longform review output as approval for the next full production run', () => {
+        expect(
+            getWorkflowRunMode([
+                longformReviewNode({
+                    reviewMode: 'script-first',
+                    reviewedOutput: JSON.stringify({
+                        fullScriptDraft: '검수 완료 대본',
+                        scenes: [{ sceneId: 'scene-1' }],
+                    }),
                 }),
             ])
         ).toEqual({

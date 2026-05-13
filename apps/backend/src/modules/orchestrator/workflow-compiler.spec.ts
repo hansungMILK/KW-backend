@@ -8,6 +8,89 @@ import {
 } from '../image-generation/image-style';
 
 describe('compileWorkflowPlan', () => {
+    it('accepts a full longform production factory without shorts media blocks', () => {
+        const result = compileWorkflowPlan({
+            plan: {
+                goal: '롱폼 제작 기획안을 만들고 사용자가 검수한다',
+                outputType: 'data',
+                planType: 'interactive',
+                requiredCapabilities: [
+                    'source.collect',
+                    'longform.brief',
+                    'longform.script',
+                    'longform.storyboard',
+                    'longform.scene-json',
+                    'longform.review',
+                    'longform.tts',
+                    'longform.srt-align',
+                    'longform.motion-compose',
+                    'longform.render',
+                    'longform.qa',
+                    'longform.package',
+                ],
+                selectedBlocks: [
+                    { blockType: 'longform-source', reason: '원문과 보조 자료를 수집한다' },
+                    { blockType: 'longform-brief', reason: '영상 관점과 구조를 잡는다' },
+                    { blockType: 'longform-script', reason: '롱폼 내레이션 초안을 작성한다' },
+                    { blockType: 'longform-storyboard', reason: '대본을 visual chapter로 바꾼다' },
+                    { blockType: 'longform-scene-json', reason: 'renderer 입력 계약을 만든다' },
+                    { blockType: 'longform-review', reason: '유료 제작 전 사용자 검수를 받는다' },
+                    { blockType: 'longform-tts', reason: '승인된 대본으로 TTS를 만든다' },
+                    { blockType: 'longform-srt-align', reason: 'TTS timing 기준으로 SRT를 정렬한다' },
+                    { blockType: 'longform-motion-compose', reason: 'HyperFrames 모션 composition을 만든다' },
+                    { blockType: 'longform-render', reason: '2K MP4를 렌더한다' },
+                    { blockType: 'longform-qa', reason: 'MP4 품질을 검수한다' },
+                    { blockType: 'longform-package', reason: '최종 미리보기와 다운로드 패키지를 만든다' },
+                ],
+                rejectedBlocks: [
+                    { blockType: 'media-image', reason: '롱폼은 승인 전 이미지 생성 중심 플로우가 아니다' },
+                    { blockType: 'media-tts', reason: '승인 전 TTS 비용을 발생시키지 않는다' },
+                    { blockType: 'media-video', reason: '승인 전 MP4 렌더를 실행하지 않는다' },
+                ],
+                assumptions: ['장면 수와 화풍은 사용자가 고르지 않는다'],
+            },
+            blocks: [
+                { type: 'longform-source', label: '롱폼 자료 수집', config: { mode: 'longform-gate-a' } },
+                { type: 'longform-brief', label: '롱폼 관점 설계', config: { mode: 'longform-gate-a' } },
+                { type: 'longform-script', label: '롱폼 대본 작성', config: { mode: 'longform-gate-a' } },
+                {
+                    type: 'longform-storyboard',
+                    label: '롱폼 스토리보드',
+                    config: { mode: 'longform-gate-a' },
+                },
+                {
+                    type: 'longform-scene-json',
+                    label: '롱폼 장면 계약',
+                    config: { mode: 'longform-gate-a', renderer: 'hyperframes' },
+                },
+                { type: 'longform-review', label: '롱폼 사용자 검수', config: { mode: 'longform-gate-a' } },
+                { type: 'longform-tts', label: '롱폼 음성 생성', config: { mode: 'longform-gate-b' } },
+                { type: 'longform-srt-align', label: '롱폼 자막 정렬', config: { mode: 'longform-gate-b' } },
+                { type: 'longform-motion-compose', label: '롱폼 모션 설계', config: { mode: 'longform-gate-b' } },
+                { type: 'longform-render', label: '롱폼 2K 렌더', config: { mode: 'longform-gate-b' } },
+                { type: 'longform-qa', label: '롱폼 QA', config: { mode: 'longform-gate-b' } },
+                { type: 'longform-package', label: '롱폼 패키지', config: { mode: 'longform-gate-b' } },
+            ],
+            edges: [
+                { from: 0, to: 1 },
+                { from: 1, to: 2 },
+                { from: 2, to: 3 },
+                { from: 3, to: 4 },
+                { from: 4, to: 5 },
+                { from: 5, to: 6 },
+                { from: 6, to: 7 },
+                { from: 7, to: 8 },
+                { from: 8, to: 9 },
+                { from: 9, to: 10 },
+                { from: 10, to: 11 },
+            ],
+            estimatedCostUsd: 0.82,
+            summary: '검수 후 제작까지 이어지는 롱폼 공장을 만듭니다.',
+        });
+
+        expect(result.ok).toBe(true);
+    });
+
     it('rejects video blocks when the workflow plan is text-only', () => {
         const result = compileWorkflowPlan({
             plan: {

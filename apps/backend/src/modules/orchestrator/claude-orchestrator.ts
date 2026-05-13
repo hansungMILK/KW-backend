@@ -1,3 +1,4 @@
+import { buildLongformGateAWorkflow, enforceLongformGateAProfile, isLongformContentProfile } from './longform-gate-a';
 import { ORCHESTRATOR_SYSTEM_PROMPT, PROMPT_VERSION, buildUserPrompt } from './prompt-templates';
 import { parseClaudeResponse } from './response-parser';
 import { compileWorkflowPlan, seedRootBlockInputs } from './workflow-compiler';
@@ -34,6 +35,18 @@ const COST_ESTIMATES: Record<AllowedBlockType, number> = {
     'media-tts': 0.1,
     'media-video': 0.2,
     integration: 0.02,
+    'longform-source': 0.02,
+    'longform-brief': 0.03,
+    'longform-script': 0.04,
+    'longform-storyboard': 0.03,
+    'longform-scene-json': 0.02,
+    'longform-review': 0.02,
+    'longform-tts': 0.08,
+    'longform-srt-align': 0.01,
+    'longform-motion-compose': 0.05,
+    'longform-render': 0.5,
+    'longform-qa': 0.01,
+    'longform-package': 0.01,
 };
 
 /**
@@ -87,31 +100,35 @@ export const claudeOrchestrator: Orchestrator = {
                 return buildFallbackProposal(`AI 응답을 처리할 수 없습니다. 다시 시도해주세요. (${parseResult.error})`);
             }
 
-            const compileResult = compileWorkflowPlan(parseResult.data);
-            if (!compileResult.ok) {
-                await traceService.record(flowId, null, 'ERROR', 'Claude workflow plan rejected', {
-                    error: compileResult.error,
-                    promptVersion: PROMPT_VERSION,
-                    outputType: parseResult.data.plan.outputType,
-                    selectedBlocks: parseResult.data.plan.selectedBlocks.map(block => block.blockType),
-                });
+            const contentProfile = buildContentProfilePreferences({
+                userMessage,
+                outputType: parseResult.data.plan.outputType,
+                hasMediaVideo: parseResult.data.blocks.some(block => block.type === 'media-video'),
+                hasMediaImage: parseResult.data.blocks.some(block => block.type === 'media-image'),
+            });
+            const enforcedContentProfile = enforceLongformGateAProfile(contentProfile);
+            let data = buildLongformGateAWorkflow(userMessage, enforcedContentProfile);
+            if (!isLongformContentProfile(enforcedContentProfile.contentProfileId)) {
+                const compileResult = compileWorkflowPlan(parseResult.data);
+                if (!compileResult.ok) {
+                    await traceService.record(flowId, null, 'ERROR', 'Claude workflow plan rejected', {
+                        error: compileResult.error,
+                        promptVersion: PROMPT_VERSION,
+                        outputType: parseResult.data.plan.outputType,
+                        selectedBlocks: parseResult.data.plan.selectedBlocks.map(block => block.blockType),
+                    });
 
-                return buildFallbackProposal(
-                    `워크플로우 계획이 요청과 맞지 않습니다. 다시 시도해주세요. (${compileResult.error})`
-                );
+                    return buildFallbackProposal(
+                        `워크플로우 계획이 요청과 맞지 않습니다. 다시 시도해주세요. (${compileResult.error})`
+                    );
+                }
+                data = seedRootBlockInputs(compileResult.data, userMessage);
             }
 
             // 4. Convert to ProposalResult
-            const data = seedRootBlockInputs(compileResult.data, userMessage);
             const mediaImageBlock = data.blocks.find(block => block.type === 'media-image');
             const sceneCount = resolveProposalSceneCount(userMessage, data);
             const textAndOtherEstimatedCostUsd = estimateNonImageCostUsd(data.blocks);
-            const contentProfile = buildContentProfilePreferences({
-                userMessage,
-                outputType: data.plan.outputType,
-                hasMediaVideo: data.blocks.some(block => block.type === 'media-video'),
-                hasMediaImage: data.blocks.some(block => block.type === 'media-image'),
-            });
             const imageGeneration = mediaImageBlock
                 ? buildImageGenerationPreferences({
                       userMessage,
@@ -133,7 +150,7 @@ export const claudeOrchestrator: Orchestrator = {
                     blockType: block.type,
                     position: { x: 300, y: 100 + i * 120 },
                     state: 'IDLE',
-                    config: enrichContentProfileNodeConfig(config, contentProfile, block.type),
+                    config: enrichContentProfileNodeConfig(config, enforcedContentProfile, block.type),
                 };
             });
 
@@ -162,9 +179,9 @@ export const claudeOrchestrator: Orchestrator = {
                 blockCount: nodes.length,
                 edgeCount: edges.length,
                 estimatedCost: total,
-                contentProfileId: contentProfile.contentProfileId,
-                scriptToneId: contentProfile.scriptToneId,
-                reviewMode: contentProfile.reviewMode,
+                contentProfileId: enforcedContentProfile.contentProfileId,
+                scriptToneId: enforcedContentProfile.scriptToneId,
+                reviewMode: enforcedContentProfile.reviewMode,
                 plan: data.plan,
                 latencyMs: Date.now() - startMs,
             });
@@ -179,7 +196,7 @@ export const claudeOrchestrator: Orchestrator = {
                 },
                 metadata: {
                     ...(imageGeneration ? { imageGeneration } : {}),
-                    contentProfile,
+                    contentProfile: enforcedContentProfile,
                 },
                 approvalRequired: true,
                 assistantMessage:

@@ -451,4 +451,70 @@ describe('proposalService.approve image generation overrides', () => {
             }),
         ]);
     });
+
+    it('copies longform render cost breakdown into a longform-render node config', async () => {
+        const proposal: Proposal = {
+            proposalId: 'proposal-5',
+            flowId: 'flow-5',
+            sourceMessageId: 'message-5',
+            status: 'PENDING',
+            proposedNodes: [
+                {
+                    id: 'node-render',
+                    blockType: 'longform-render',
+                    type: 'longform-render',
+                    config: {
+                        rendererRoute: 'hyperframes',
+                    },
+                },
+            ],
+            proposedEdges: [],
+            estimatedCost: {
+                currency: 'USD',
+                total: 4.2,
+                breakdown: [
+                    { blockType: 'hyperframes-compose', amount: 2.1 },
+                    { blockType: 'hyperframes-render', amount: 1.8 },
+                ],
+            },
+            metadata: {
+                contentProfile: {
+                    contentProfileId: 'longform.explainer.v1',
+                    scriptToneId: 'calm-explainer',
+                    scriptToneIntensity: 'medium',
+                    reviewMode: 'script-first',
+                },
+            },
+            approvalRequired: true,
+            createdAt: '2026-05-11T00:00:00.000Z',
+            updatedAt: '2026-05-11T00:00:00.000Z',
+        };
+
+        getProposal.mockResolvedValue(proposal);
+        getFlow.mockResolvedValue({
+            id: 'flow-5',
+            name: 'Flow',
+            state: 'DRAFT',
+            nodes: [],
+            edges: [],
+            createdAt: '2026-05-11T00:00:00.000Z',
+            updatedAt: '2026-05-11T00:00:00.000Z',
+        });
+
+        const result = await proposalService.approve('proposal-5');
+
+        expect(result.ok).toBe(true);
+        const savedFlow = putFlow.mock.calls[0]?.[0];
+        expect(savedFlow?.nodes).toEqual([
+            expect.objectContaining({
+                id: 'node-render',
+                config: expect.objectContaining({
+                    rendererRoute: 'hyperframes',
+                    htmlComposeEstimatedCostUsd: 2.1,
+                    hyperframesRenderEstimatedCostUsd: 1.8,
+                    longformHtmlRenderEstimatedCostUsd: 3.9,
+                }),
+            }),
+        ]);
+    });
 });

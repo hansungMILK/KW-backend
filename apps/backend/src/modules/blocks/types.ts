@@ -19,6 +19,18 @@ export const BLOCK_TYPES = [
     'media-tts',
     'media-video',
     'integration',
+    'longform-source',
+    'longform-brief',
+    'longform-script',
+    'longform-storyboard',
+    'longform-scene-json',
+    'longform-review',
+    'longform-tts',
+    'longform-srt-align',
+    'longform-motion-compose',
+    'longform-render',
+    'longform-qa',
+    'longform-package',
 ] as const;
 
 export type BlockType = (typeof BLOCK_TYPES)[number];

@@ -136,6 +136,9 @@ const formatUsd = (value: unknown): string | undefined => {
     return `$${value.toFixed(value >= 1 ? 2 : 3)}`;
 };
 
+const isLongformContentProfileId = (value: unknown): boolean =>
+    typeof value === 'string' && value.startsWith('longform.');
+
 const toUserVisibleAgentError = (error: unknown): string => {
     const message = extractErrorMessage(error);
     if (/PAID_OPENAI_DISABLED|Paid OpenAI calls are disabled/i.test(message)) {
@@ -309,15 +312,21 @@ export const FlowAgentPanel = ({
         try {
             const imageGeneration = asImageGenerationMetadata(proposal.metadata);
             const contentProfile = asContentProfileMetadata(proposal.metadata);
-            const result = await approveProposal(proposal.id, {
-                imageStyleId: proposalImageStyles[proposal.id] ?? imageGeneration?.imageStyleId,
-                imageQuality: proposalImageQualities[proposal.id] ?? imageGeneration?.imageQuality,
-                sceneCount: proposalSceneCounts[proposal.id] ?? imageGeneration?.sceneCount,
+            const selectedContentProfileId = proposalContentProfiles[proposal.id] ?? contentProfile?.contentProfileId;
+            const approvalOptions = {
                 scriptToneId: proposalScriptTones[proposal.id] ?? contentProfile?.scriptToneId,
                 scriptToneIntensity: proposalScriptToneIntensities[proposal.id] ?? contentProfile?.scriptToneIntensity,
                 reviewMode: proposalReviewModes[proposal.id] ?? contentProfile?.reviewMode,
-                contentProfileId: proposalContentProfiles[proposal.id] ?? contentProfile?.contentProfileId,
-            });
+                contentProfileId: selectedContentProfileId,
+                ...(!isLongformContentProfileId(selectedContentProfileId)
+                    ? {
+                          imageStyleId: proposalImageStyles[proposal.id] ?? imageGeneration?.imageStyleId,
+                          imageQuality: proposalImageQualities[proposal.id] ?? imageGeneration?.imageQuality,
+                          sceneCount: proposalSceneCounts[proposal.id] ?? imageGeneration?.sceneCount,
+                      }
+                    : {}),
+            };
+            const result = await approveProposal(proposal.id, approvalOptions);
             await onApproveProposal?.(result.nodes, result.edges);
             setApprovedProposalIds(prev => ({ ...prev, [proposal.id]: true }));
             setMessages(prev =>
@@ -462,6 +471,7 @@ export const FlowAgentPanel = ({
                             proposalContentProfiles[proposal.id] ??
                             contentProfile?.contentProfileId ??
                             'shorts.info.v1';
+                        const isLongformProposal = isLongformContentProfileId(selectedContentProfileId);
                         const selectedStyleId =
                             proposalImageStyles[proposal.id] ??
                             imageGeneration?.imageStyleId ??
@@ -489,6 +499,7 @@ export const FlowAgentPanel = ({
                                   { count: 12, label: '12장' },
                                   { count: 16, label: '16장' },
                               ];
+                        const shouldShowImageGeneration = Boolean(imageGeneration) && !isLongformProposal;
                         const isApproving = Boolean(approvingProposalIds[proposal.id]);
                         const isApproved = Boolean(approvedProposalIds[proposal.id]);
                         return (
@@ -638,7 +649,7 @@ export const FlowAgentPanel = ({
                                             )}
                                         </div>
                                     )}
-                                    {imageGeneration && (
+                                    {shouldShowImageGeneration && imageGeneration && (
                                         <div className="rounded-md border border-border bg-background/40 p-2 space-y-2">
                                             <div className="text-[11px] font-semibold text-foreground">이미지 설정</div>
                                             <div className="text-[10px] text-muted-foreground">

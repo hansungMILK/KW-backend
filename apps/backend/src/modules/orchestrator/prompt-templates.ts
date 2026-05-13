@@ -23,7 +23,7 @@ ${getBlockCatalogPrompt()}
 - If the request needs current facts, URLs, prices, news, official documents, or source verification, include search.
 - If the request is just text writing, summarization, translation, or explanation, keep the workflow text/data oriented.
 - If the request is a Shorts/video request, build a video pipeline with source/script/structured data/review/image/TTS/video and optional metadata.
-- If the request is a longform request, build the planning/review workflow first: source collection, outline/full script draft/scene plan normalization, and quality review. Do not include media-image, media-tts, media-video, HyperFrames render, MP4 render, or integration before the user approves the planning artifacts.
+- If the request is a longform request, use the dedicated longform production factory blocks in one canvas: longform-source -> longform-brief -> longform-script -> longform-storyboard -> longform-scene-json -> longform-review -> longform-tts -> longform-srt-align -> longform-motion-compose -> longform-render -> longform-qa -> longform-package. Gate B blocks must set mediaExecutionAllowed:false and approvalRequired:true until review approval. Do not include generic search/content/data/analysis, media-image, media-tts, media-video, or integration in the longform recipe.
 - If the request is a single image request, use content -> media-image only unless search is needed for factual visual accuracy.
 
 ## DAG Rules
@@ -173,36 +173,64 @@ User: "롱폼 제작해줘. 주제는 AI 에이전트의 미래"
 Assistant:
 {
   "plan": {
-    "goal": "AI 에이전트의 미래에 대한 롱폼 제작 기획안을 만든다",
-    "outputType": "data",
+    "goal": "AI 에이전트의 미래에 대한 롱폼 제작 공장을 만든다",
+    "outputType": "video",
     "planType": "interactive",
-    "requiredCapabilities": ["source.collect", "text.generate", "data.structure", "quality.review"],
+    "requiredCapabilities": ["longform.source", "longform.brief", "longform.script", "longform.storyboard", "longform.scene-json", "longform.review", "longform.tts", "longform.srt-align", "longform.motion-compose", "longform.render", "longform.qa", "longform.package"],
     "selectedBlocks": [
-      { "blockType": "search", "reason": "자료와 출처를 수집한다" },
-      { "blockType": "content", "reason": "outline, full script draft, scene plan을 작성한다" },
-      { "blockType": "data", "reason": "제작 기획안을 구조화한다" },
-      { "blockType": "analysis", "reason": "유료 제작 전 필수 산출물을 검수한다" }
+      { "blockType": "longform-source", "reason": "원문과 보조 자료를 롱폼 source digest로 정리한다" },
+      { "blockType": "longform-brief", "reason": "시청자 약속, 관점, 논리 구조를 잡는다" },
+      { "blockType": "longform-script", "reason": "검수 가능한 전체 내레이션 초안을 작성한다" },
+      { "blockType": "longform-storyboard", "reason": "대본을 장면 의도와 화면 리듬으로 나눈다" },
+      { "blockType": "longform-scene-json", "reason": "HyperFrames 2K 장면 계약으로 변환한다" },
+      { "blockType": "longform-review", "reason": "사용자 검수 전에는 유료 제작을 멈춘다" },
+      { "blockType": "longform-tts", "reason": "승인된 대본으로 ElevenLabs 내레이션을 만든다" },
+      { "blockType": "longform-srt-align", "reason": "TTS timing을 기준으로 자막 cue를 정렬한다" },
+      { "blockType": "longform-motion-compose", "reason": "장면 계약과 자막으로 모션 composition을 만든다" },
+      { "blockType": "longform-render", "reason": "HyperFrames 경로로 2K MP4를 렌더한다" },
+      { "blockType": "longform-qa", "reason": "MP4, 오디오, 해상도, 자막, 모션 품질을 검수한다" },
+      { "blockType": "longform-package", "reason": "미리보기와 다운로드 가능한 최종 패키지를 만든다" }
     ],
     "rejectedBlocks": [
+      { "blockType": "search", "reason": "롱폼 전용 source digest 노드로 대체한다" },
+      { "blockType": "content", "reason": "롱폼 전용 brief/script 노드로 분리한다" },
+      { "blockType": "data", "reason": "롱폼 전용 storyboard/scene-json 노드로 분리한다" },
+      { "blockType": "analysis", "reason": "롱폼 전용 review 노드로 대체한다" },
       { "blockType": "media-image", "reason": "사용자 확인 전에는 이미지 생성 비용을 발생시키지 않는다" },
-      { "blockType": "media-tts", "reason": "사용자 확인 전에는 TTS 비용을 발생시키지 않는다" },
-      { "blockType": "media-video", "reason": "사용자 확인 전에는 영상 렌더를 실행하지 않는다" }
+      { "blockType": "media-tts", "reason": "롱폼 전용 TTS 노드로 대체한다" },
+      { "blockType": "media-video", "reason": "롱폼 전용 HyperFrames/MP4 렌더 노드로 대체한다" }
     ],
     "assumptions": ["대본과 씬 승인 후 유료 제작을 시작한다"]
   },
   "blocks": [
-    { "type": "search", "label": "롱폼 자료 수집", "config": { "mode": "longform-gate-a" } },
-    { "type": "content", "label": "롱폼 기획안 작성", "config": { "mode": "longform-gate-a", "rendererRoute": "hyperframes", "mediaExecutionAllowed": false } },
-    { "type": "data", "label": "롱폼 기획안 정리", "config": { "mode": "longform-gate-a", "mediaExecutionAllowed": false } },
-    { "type": "analysis", "label": "롱폼 제작 검수", "config": { "mode": "longform-gate-a", "mediaExecutionAllowed": false } }
+    { "type": "longform-source", "label": "롱폼 자료 수집", "config": { "mode": "longform-gate-a" } },
+    { "type": "longform-brief", "label": "롱폼 관점 설계", "config": { "mode": "longform-gate-a", "rendererRoute": "hyperframes", "targetDurationSec": 300, "mediaExecutionAllowed": false } },
+    { "type": "longform-script", "label": "롱폼 대본 작성", "config": { "mode": "longform-gate-a", "reviewMode": "script-first", "mediaExecutionAllowed": false } },
+    { "type": "longform-storyboard", "label": "롱폼 스토리보드", "config": { "mode": "longform-gate-a", "rendererRoute": "hyperframes", "mediaExecutionAllowed": false } },
+    { "type": "longform-scene-json", "label": "롱폼 장면 계약", "config": { "mode": "longform-gate-a", "renderer": "hyperframes", "rendererRoute": "hyperframes", "resolution": "2560x1440", "mediaExecutionAllowed": false } },
+    { "type": "longform-review", "label": "롱폼 사용자 검수", "config": { "mode": "longform-gate-a", "reviewMode": "script-first", "mediaExecutionAllowed": false } },
+    { "type": "longform-tts", "label": "롱폼 음성 생성", "config": { "mode": "longform-gate-b", "provider": "elevenlabs", "approvalRequired": true, "mediaExecutionAllowed": false } },
+    { "type": "longform-srt-align", "label": "롱폼 자막 정렬", "config": { "mode": "longform-gate-b", "alignmentMethod": "elevenlabs-tts-duration-aligned", "approvalRequired": true, "mediaExecutionAllowed": false } },
+    { "type": "longform-motion-compose", "label": "롱폼 모션 설계", "config": { "mode": "longform-gate-b", "rendererRoute": "hyperframes", "resolution": "2560x1440", "approvalRequired": true, "mediaExecutionAllowed": false } },
+    { "type": "longform-render", "label": "롱폼 2K 렌더", "config": { "mode": "longform-gate-b", "renderer": "hyperframes", "rendererRoute": "hyperframes", "resolution": "2560x1440", "backgroundMusicPath": "assets/bgm/default-bgm.mp3", "longformHtmlRenderEstimatedCostUsd": 0.75, "approvalRequired": true, "mediaExecutionAllowed": false } },
+    { "type": "longform-qa", "label": "롱폼 QA", "config": { "mode": "longform-gate-b", "requiredResolution": "2560x1440", "requireAudioStream": true, "requireVideoStream": true, "approvalRequired": true, "mediaExecutionAllowed": false } },
+    { "type": "longform-package", "label": "롱폼 패키지", "config": { "mode": "longform-gate-b", "approvalRequired": true, "mediaExecutionAllowed": false } }
   ],
   "edges": [
     { "from": 0, "to": 1 },
     { "from": 1, "to": 2 },
-    { "from": 2, "to": 3 }
+    { "from": 2, "to": 3 },
+    { "from": 3, "to": 4 },
+    { "from": 4, "to": 5 },
+    { "from": 5, "to": 6 },
+    { "from": 6, "to": 7 },
+    { "from": 7, "to": 8 },
+    { "from": 8, "to": 9 },
+    { "from": 9, "to": 10 },
+    { "from": 10, "to": 11 }
   ],
-  "estimatedCostUsd": 0.16,
-  "summary": "롱폼 제작 기획에서 자료, 아웃라인, 전체 대본 초안, 씬 플랜, 예상 길이/비용/렌더 경로를 만든 뒤 사용자가 확인합니다. 승인 전에는 이미지, TTS, 영상 렌더를 실행하지 않습니다."
+  "estimatedCostUsd": 0.82,
+  "summary": "롱폼 제작 기획에서 자료, 아웃라인, 전체 대본 초안, 씬 플랜을 만들고, 검수 후 TTS, 자막, 모션 구성, 2K 렌더, QA, 패키징까지 이어집니다. 승인 전에는 유료 제작을 실행하지 않습니다."
 }
 `;
 
