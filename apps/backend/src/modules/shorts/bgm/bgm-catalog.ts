@@ -3,11 +3,12 @@ import { isAbsolute, join, resolve } from 'path';
 
 import { env } from '../../../config/env';
 
-export type ShortsBgmMood = 'default-comic';
+export type ShortsBgmMood = 'default';
 
 export interface ShortsBgmTrack {
     id: string;
     title: string;
+    artist?: string;
     filename: string;
     fallbackFilename?: string;
     mood: ShortsBgmMood;
@@ -25,13 +26,15 @@ const ASSET_DIR = env.shortsBgmAssetsDir;
 
 export const SHORTS_BGM_CATALOG: ShortsBgmTrack[] = [
     {
-        id: 'default-comic-mi-steak-loop',
-        title: 'I My Mi-steak Looping',
-        filename: 'default-comic-mi-steak-loop.mp3',
-        mood: 'default-comic',
-        tags: ['default', 'comic', 'shorts', 'explainer', 'meme', 'korean-shorts'],
-        source: 'user-supplied Shorts BGM template',
+        id: 'default-bgm',
+        title: 'Glass Horizon',
+        artist: 'loudsquaredance310',
+        filename: 'default-bgm.mp3',
+        mood: 'default',
+        tags: ['default', 'shorts', 'longform', 'explainer', 'korean-video'],
+        source: 'user-supplied default BGM template',
         license: 'User-supplied asset; verify project usage rights before public/commercial deployment',
+        attribution: 'Glass Horizon - loudsquaredance310',
     },
 ];
 

@@ -16,6 +16,7 @@ export interface VideoCompositionRequest {
               path?: string;
               volume?: number;
               title?: string;
+              artist?: string;
               license?: string;
               attribution?: string;
           };

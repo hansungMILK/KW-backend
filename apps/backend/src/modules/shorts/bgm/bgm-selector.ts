@@ -20,11 +20,11 @@ export function selectBgmForShorts(input: {
     const available = listAvailableShortsBgmTracks();
     if (available.length === 0) return undefined;
 
-    const track = available.find(item => item.id === 'default-comic-mi-steak-loop') ?? available[0];
+    const track = available.find(item => item.id === 'default-bgm') ?? available[0];
 
     return {
         track,
         volume: env.shortsBgmVolume,
-        reason: 'default Shorts BGM',
+        reason: 'default BGM',
     };
 }

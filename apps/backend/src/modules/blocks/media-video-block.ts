@@ -129,6 +129,7 @@ export const mediaVideoBlock: BlockExecutor = {
                                   path: backgroundMusic.track.filePath,
                                   volume: backgroundMusic.volume,
                                   title: backgroundMusic.track.title,
+                                  artist: backgroundMusic.track.artist,
                                   license: backgroundMusic.track.license,
                                   attribution: backgroundMusic.track.attribution,
                               }
@@ -156,6 +157,7 @@ export const mediaVideoBlock: BlockExecutor = {
                 ? {
                       id: backgroundMusic.track.id,
                       title: backgroundMusic.track.title,
+                      artist: backgroundMusic.track.artist,
                       mood: backgroundMusic.track.mood,
                       volume: backgroundMusic.volume,
                       source: backgroundMusic.track.source,

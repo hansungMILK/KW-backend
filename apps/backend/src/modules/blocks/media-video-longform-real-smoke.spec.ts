@@ -121,7 +121,6 @@ describe('mediaVideoBlock longform real MP4 smoke', () => {
                     rendererRoute: 'hyperframes',
                     htmlComposeEstimatedCostUsd: 0.25,
                     hyperframesRenderEstimatedCostUsd: 0.25,
-                    backgroundMusic: false,
                 },
                 {
                     runId: 'run-longform-b-real-smoke',
@@ -132,6 +131,7 @@ describe('mediaVideoBlock longform real MP4 smoke', () => {
             const output = result.output as Record<string, unknown>;
             const video = output['video'] as Record<string, unknown>;
             const qa = output['qa'] as Record<string, unknown>;
+            const backgroundMusic = output['backgroundMusic'] as Record<string, unknown>;
             const asset = result.assets?.[0];
             const s3Key = asset?.metadata?.['s3Key'];
 
@@ -143,6 +143,11 @@ describe('mediaVideoBlock longform real MP4 smoke', () => {
                 hasAudio: true,
                 width: 2560,
                 height: 1440,
+            });
+            expect(backgroundMusic).toMatchObject({
+                id: 'default-bgm',
+                title: 'Glass Horizon',
+                artist: 'loudsquaredance310',
             });
             expect(typeof s3Key).toBe('string');
             expect(await readFile(getLocalAssetPath(s3Key as string))).toHaveLength(Number(video['sizeBytes']));
