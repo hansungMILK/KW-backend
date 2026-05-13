@@ -17,6 +17,14 @@ const WORKFLOW_ACTION_TERMS = [
     '구성',
     '실행',
     '자동화',
+    '설명',
+    '요약',
+    '정리',
+    '분석',
+    '알려',
+    '해설',
+    '읽어',
+    '브리핑',
     'build',
     'create',
     'generate',
@@ -24,6 +32,11 @@ const WORKFLOW_ACTION_TERMS = [
     'run',
     'execute',
     'automate',
+    'explain',
+    'summarize',
+    'analyze',
+    'brief',
+    'review',
 ] as const;
 
 const WORKFLOW_TARGET_TERMS = [
@@ -41,6 +54,19 @@ const WORKFLOW_TARGET_TERMS = [
     '영상',
     '비디오',
     '콘텐츠',
+    '롱폼',
+    '긴영상',
+    '유튜브',
+    '대본',
+    '스크립트',
+    '링크',
+    '주소',
+    'url',
+    '본문',
+    '원문',
+    '기사',
+    '글',
+    '페이지',
     'workflow',
     'flow',
     'automation',
@@ -53,15 +79,65 @@ const WORKFLOW_TARGET_TERMS = [
     'photo',
     'illustration',
     'video',
+    'longform',
+    'youtube',
+    'script',
+    'link',
+    'source',
+    'article',
+    'page',
 ] as const;
+
+const URL_PATTERN = /https?:\/\/[^\s"'<>]+/i;
+
+const URL_SOURCE_TERMS = [
+    '링크',
+    '주소',
+    'url',
+    '본문',
+    '원문',
+    '기사',
+    '글',
+    '페이지',
+    '사이트',
+    '출처',
+    'link',
+    'source',
+    'article',
+    'page',
+] as const;
+
+const LONGFORM_TARGET_TERMS = ['롱폼', '긴영상', '유튜브', 'longform', 'youtube'] as const;
 
 const normalizeIntentText = (text: string): string => text.toLowerCase().replace(/\s+/g, '');
 
+const hasAnyTerm = (normalizedText: string, terms: readonly string[]): boolean =>
+    terms.some(term => normalizedText.includes(term.toLowerCase()));
+
+const getDeterministicProposalReason = (text: string): string | undefined => {
+    const normalized = normalizeIntentText(text);
+    const hasAction = hasAnyTerm(normalized, WORKFLOW_ACTION_TERMS);
+    const hasTarget = hasAnyTerm(normalized, WORKFLOW_TARGET_TERMS);
+    const hasUrl = URL_PATTERN.test(text);
+    const hasUrlSource = hasAnyTerm(normalized, URL_SOURCE_TERMS);
+    const hasLongformTarget = hasAnyTerm(normalized, LONGFORM_TARGET_TERMS);
+
+    if (hasUrl && (hasAction || hasTarget || hasUrlSource)) {
+        return 'URL 원문 수집 기반 워크플로우 요청';
+    }
+
+    if (hasLongformTarget && hasAction) {
+        return '롱폼 제작 워크플로우 요청';
+    }
+
+    return undefined;
+};
+
 const hasWorkflowProposalSignal = (text: string): boolean => {
     const normalized = normalizeIntentText(text);
-    const hasAction = WORKFLOW_ACTION_TERMS.some(term => normalized.includes(term));
-    const hasTarget = WORKFLOW_TARGET_TERMS.some(term => normalized.includes(term));
-    return hasAction && hasTarget;
+    const hasAction = hasAnyTerm(normalized, WORKFLOW_ACTION_TERMS);
+    const hasTarget = hasAnyTerm(normalized, WORKFLOW_TARGET_TERMS);
+    return Boolean(getDeterministicProposalReason(text)) || (hasAction && hasTarget);
 };
 
 const AVAILABLE_BLOCKS = [
@@ -73,6 +149,18 @@ const AVAILABLE_BLOCKS = [
     'media-tts',
     'media-video',
     'integration',
+    'longform-source',
+    'longform-brief',
+    'longform-script',
+    'longform-storyboard',
+    'longform-scene-json',
+    'longform-review',
+    'longform-tts',
+    'longform-srt-align',
+    'longform-motion-compose',
+    'longform-render',
+    'longform-qa',
+    'longform-package',
 ] as const;
 
 const INTENT_ROUTER_SYSTEM_PROMPT = `You route messages for Flow Agent, a Korean workflow-building chatbot.
@@ -82,6 +170,7 @@ Choose "proposal" when the user is asking the product to create, design, run, mo
 Only choose "proposal" when the workflow/video/image/automation creation intent is explicit.
 If the message is a greeting, reaction, short phrase, vague topic, or casual chat without an explicit make/create/run/design request, choose "chat".
 If a workflow creation request is explicit but missing details, choose "proposal"; the orchestrator will use sensible defaults and surface assumptions.
+If the message contains a URL and asks to explain, summarize, make a video, make Shorts, make longform, or write a script from that URL, choose "proposal"; URL source collection is handled by workflow blocks.
 Do not choose "chat" just to ask audience/tone/detail questions when the user clearly says "make/create/build/generate".
 Choose "chat" for greetings, small talk, questions about capabilities, vague messages, troubleshooting, or when you need to explain/clarify before creating a workflow.
 
@@ -94,6 +183,8 @@ const INTENT_ROUTER_EXAMPLES = `Examples:
 - "바나나가 춤추는 이미지 생성해줘" -> {"action":"proposal","reason":"이미지 생성 워크플로우 요청"}
 - "최신 이슈를 정보전달 쇼츠로 만들어줘" -> {"action":"proposal","reason":"쇼츠 제작 요청"}
 - "뉴스 요약 영상 생성해줘" -> {"action":"proposal","reason":"영상 워크플로우 생성 요청"}
+- "이 링크 내용 설명해줘 https://example.com/post" -> {"action":"proposal","reason":"URL 원문 기반 설명 요청"}
+- "롱폼만들어줘. 주제는 이 링크 설명해주기 https://example.com/post" -> {"action":"proposal","reason":"URL 원문 기반 롱폼 제작 요청"}
 - "이 플로우 실행해줘" -> {"action":"proposal","reason":"실행 요청"}`;
 
 const CHAT_SYSTEM_PROMPT = `You are Flow Agent inside a serverless n8n-like workflow builder.
@@ -105,6 +196,7 @@ Product reality:
 - The first polished template is Shorts creation: search -> content -> data -> analysis -> media-image + media-tts -> media-video -> integration.
 - Standalone image generation uses the minimal content -> media-image workflow.
 - A one-minute Shorts video is made from 10-15 vertical images, captions, ElevenLabs TTS, BGM, and FFmpeg MP4 composition.
+- URL links are valid workflow sources. Do not say you cannot open/read URLs when the user is asking to make, explain, summarize, script, Shorts, video, or longform content from a URL.
 - Do not claim that a workflow, image, audio, or video was created unless the system actually creates it.
 - If the user only greets you, greet back and suggest one concrete next request.
 - If the user asks a vague production request, ask the smallest necessary clarifying question or offer a sensible default.
@@ -121,6 +213,11 @@ export async function classifyMessageIntent(
     history: Message[],
     currentContext?: Record<string, unknown>
 ): Promise<ChatIntent> {
+    const deterministicProposalReason = getDeterministicProposalReason(userMessage);
+    if (deterministicProposalReason) {
+        return { action: 'proposal', reason: deterministicProposalReason };
+    }
+
     if (!hasWorkflowProposalSignal(userMessage)) {
         return { action: 'chat', reason: '워크플로우 생성/실행 의도가 명시되지 않음' };
     }

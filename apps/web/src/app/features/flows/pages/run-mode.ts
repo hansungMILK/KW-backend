@@ -19,13 +19,11 @@ const hasApprovedLongformReview = (node: NodeData | undefined): boolean => {
     if (!config) return false;
 
     const approvedArtifactId = config['approvedArtifactId'];
-    const reviewedOutput = config['reviewedOutput'];
     return (
         config['mediaExecutionAllowed'] === true ||
         config['reviewStatus'] === 'approved' ||
-        (typeof approvedArtifactId === 'string' && approvedArtifactId.trim().length > 0) ||
-        (typeof reviewedOutput === 'string' && reviewedOutput.trim().length > 0) ||
-        (!!reviewedOutput && typeof reviewedOutput === 'object' && !Array.isArray(reviewedOutput))
+        config['gateBApproved'] === true ||
+        (typeof approvedArtifactId === 'string' && approvedArtifactId.trim().length > 0)
     );
 };
 

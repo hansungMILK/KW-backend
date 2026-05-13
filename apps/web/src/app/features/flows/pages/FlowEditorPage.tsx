@@ -149,6 +149,14 @@ export const FlowEditorPage = () => {
     const [latestProposal, setLatestProposal] = useState<ProposalCreatedMessage | null>(null);
     const [pendingWorkflowLoad, setPendingWorkflowLoad] = useState<PendingWorkflowLoad | null>(null);
 
+    const resetRunUi = useCallback(() => {
+        setRunStatus(null);
+        setRunActivity(null);
+        setActiveRunId(null);
+        setLatestProposal(null);
+        setPendingWorkflowLoad(null);
+    }, []);
+
     const getCanvasNodeLabel = useCallback(
         (nodeId: string): string => {
             const node = canvasRef.current?.getWorkflow()?.nodes?.find(item => item.id === nodeId);
@@ -891,6 +899,7 @@ export const FlowEditorPage = () => {
         if (!canvasRef.current) return;
         if (window.confirm(t('flowEditor.confirmNewFlow'))) {
             canvasRef.current.newWorkflow();
+            resetRunUi();
             lastSavedStateRef.current = serializeWorkflowState({ nodes: [], connections: [] });
             const newId = await createNewFlow();
             if (newId) {
@@ -926,7 +935,15 @@ export const FlowEditorPage = () => {
         if (!canvasRef.current) return;
         if (window.confirm(t('flowEditor.confirmClearCanvas'))) {
             canvasRef.current.clearWorkflow();
-            showNotification(t('flowEditor.canvasCleared'), 'success');
+            resetRunUi();
+            lastSavedStateRef.current = serializeWorkflowState({ nodes: [], connections: [] });
+            lastLocalUpdateTimestampRef.current = Date.now();
+            void saveCurrentFlow({ nodes: [], edges: [] }).then(result => {
+                showNotification(
+                    result.success ? t('flowEditor.canvasCleared') : t('flowEditor.failedToSaveWorkflow'),
+                    result.success ? 'success' : 'error'
+                );
+            });
         }
     };
 

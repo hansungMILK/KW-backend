@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mediaVideoBlock } from './media-video-block';
 import { putObject } from '../../adapters/aws/s3';
 import { ffmpegAdapter } from '../../adapters/external/ffmpeg-adapter';
+import { hyperframesAdapter } from '../../adapters/external/hyperframes-adapter';
 
 vi.mock('../../adapters/aws/s3', () => ({
     getPublicUrl: (key: string) => `http://localhost:8800/_local-assets/${key}`,
@@ -22,6 +23,16 @@ vi.mock('../../adapters/external/ffmpeg-adapter', () => ({
             width: 2560,
             height: 1440,
             durationSec: 5,
+        })),
+    },
+}));
+
+vi.mock('../../adapters/external/hyperframes-adapter', () => ({
+    hyperframesAdapter: {
+        renderLongform: vi.fn(async () => ({
+            videoBuffer: Buffer.from('video'),
+            durationSec: 5,
+            sizeBytes: 5,
         })),
     },
 }));
@@ -68,7 +79,7 @@ describe('mediaVideoBlock', () => {
             )
         ).rejects.toThrow(/approved planning artifact/i);
 
-        expect(ffmpegAdapter.compose).not.toHaveBeenCalled();
+        expect(hyperframesAdapter.renderLongform).not.toHaveBeenCalled();
         expect(putObject).not.toHaveBeenCalled();
     });
 
@@ -89,7 +100,7 @@ describe('mediaVideoBlock', () => {
             )
         ).rejects.toThrow(/LONGFORM_HTML_RENDER_COST_LIMIT_EXCEEDED/);
 
-        expect(ffmpegAdapter.compose).not.toHaveBeenCalled();
+        expect(hyperframesAdapter.renderLongform).not.toHaveBeenCalled();
         expect(putObject).not.toHaveBeenCalled();
     });
 
@@ -105,7 +116,7 @@ describe('mediaVideoBlock', () => {
             )
         ).rejects.toThrow(/requires render cost estimate/i);
 
-        expect(ffmpegAdapter.compose).not.toHaveBeenCalled();
+        expect(hyperframesAdapter.renderLongform).not.toHaveBeenCalled();
         expect(putObject).not.toHaveBeenCalled();
     });
 
@@ -137,7 +148,7 @@ describe('mediaVideoBlock', () => {
             )
         ).rejects.toThrow(/approved planning artifact/i);
 
-        expect(ffmpegAdapter.compose).not.toHaveBeenCalled();
+        expect(hyperframesAdapter.renderLongform).not.toHaveBeenCalled();
         expect(putObject).not.toHaveBeenCalled();
     });
 
@@ -164,7 +175,7 @@ describe('mediaVideoBlock', () => {
             )
         ).rejects.toThrow(/ElevenLabs TTS/i);
 
-        expect(ffmpegAdapter.compose).not.toHaveBeenCalled();
+        expect(hyperframesAdapter.renderLongform).not.toHaveBeenCalled();
         expect(putObject).not.toHaveBeenCalled();
     });
 
@@ -188,7 +199,7 @@ describe('mediaVideoBlock', () => {
             )
         ).rejects.toThrow(/subtitle/i);
 
-        expect(ffmpegAdapter.compose).not.toHaveBeenCalled();
+        expect(hyperframesAdapter.renderLongform).not.toHaveBeenCalled();
         expect(putObject).not.toHaveBeenCalled();
     });
 
@@ -212,7 +223,7 @@ describe('mediaVideoBlock', () => {
             )
         ).rejects.toThrow(/motion graphics/i);
 
-        expect(ffmpegAdapter.compose).not.toHaveBeenCalled();
+        expect(hyperframesAdapter.renderLongform).not.toHaveBeenCalled();
         expect(putObject).not.toHaveBeenCalled();
     });
 
@@ -231,15 +242,17 @@ describe('mediaVideoBlock', () => {
             }
         );
 
-        expect(ffmpegAdapter.compose).toHaveBeenCalledTimes(1);
-        expect(ffmpegAdapter.compose).toHaveBeenCalledWith(
+        expect(hyperframesAdapter.renderLongform).toHaveBeenCalledTimes(1);
+        expect(hyperframesAdapter.renderLongform).toHaveBeenCalledWith(
             expect.objectContaining({
                 outputWidth: 2560,
                 outputHeight: 1440,
-                outputFormat: 'mp4',
-                motionMode: 'ken-burns',
+                scenes: expect.any(Array),
+                subtitleCues: expect.any(Array),
+                motionCues: expect.any(Array),
             })
         );
+        expect(ffmpegAdapter.compose).not.toHaveBeenCalled();
         expect(ffmpegAdapter.probeVideo).toHaveBeenCalledWith(Buffer.from('video'));
         expect(result.output.video).toMatchObject({
             url: expect.stringContaining('/media/video/'),
@@ -284,7 +297,32 @@ describe('mediaVideoBlock', () => {
         });
     });
 
-    it('generates internal longform motion-board visuals when no image assets are supplied', async () => {
+    it('honors the explicit longform backgroundMusicPath instead of reselecting Shorts BGM', async () => {
+        await mediaVideoBlock.execute(
+            longformVideoInput({ gateBApproved: true }),
+            {
+                mode: 'longform-gate-b',
+                rendererRoute: 'hyperframes',
+                backgroundMusicPath: 'assets/bgm/default-bgm.mp3',
+                htmlComposeEstimatedCostUsd: 1,
+                hyperframesRenderEstimatedCostUsd: 1,
+            },
+            {
+                runId: 'run_1',
+                nodeId: 'node_1',
+            }
+        );
+
+        const request = vi.mocked(hyperframesAdapter.renderLongform).mock.calls[0]?.[0];
+        expect(request?.backgroundMusic).toEqual(
+            expect.objectContaining({
+                path: 'assets/bgm/default-bgm.mp3',
+                title: 'Longform default BGM',
+            })
+        );
+    });
+
+    it('passes scene contracts to Hyperframes without generating internal PPM placeholder boards', async () => {
         await mediaVideoBlock.execute(
             longformVideoInput({
                 gateBApproved: true,
@@ -309,16 +347,16 @@ describe('mediaVideoBlock', () => {
             }
         );
 
-        expect(ffmpegAdapter.compose).toHaveBeenCalledTimes(1);
-        const request = vi.mocked(ffmpegAdapter.compose).mock.calls[0]?.[0];
-        expect(request?.images).toEqual([
+        expect(hyperframesAdapter.renderLongform).toHaveBeenCalledTimes(1);
+        const request = vi.mocked(hyperframesAdapter.renderLongform).mock.calls[0]?.[0];
+        expect(request?.scenes).toEqual([
             expect.objectContaining({
-                url: expect.stringContaining('/media/longform-visuals/'),
-                title: '첫 번째 모션 장면',
-                caption: '롱폼 승인 뒤 실제 제작되는 첫 장면입니다.',
+                sceneId: 'scene-1',
+                headline: '첫 번째 모션 장면',
+                layout: 'source-proof',
             }),
         ]);
-        expect(putObject).toHaveBeenCalledWith(
+        expect(putObject).not.toHaveBeenCalledWith(
             expect.stringContaining('media/longform-visuals/'),
             expect.any(Buffer),
             'image/x-portable-pixmap'

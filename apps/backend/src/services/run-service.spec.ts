@@ -30,6 +30,11 @@ vi.mock('../adapters/aws/queue', () => ({
     },
 }));
 
+vi.mock('../adapters/ai/paid-openai-guard', () => ({
+    PAID_OPENAI_DISABLED: 'PAID_OPENAI_DISABLED',
+    isPaidOpenAIAllowed: vi.fn(() => true),
+}));
+
 vi.mock('./settings-service', () => ({
     settingsService: {
         getKeyForProviderAsync: vi.fn(),
@@ -211,7 +216,7 @@ describe('runService cost guards', () => {
         expect(sendQueueMessage).toHaveBeenCalled();
     });
 
-    it('requires provider keys for longform Gate B execution nodes before queueing', async () => {
+    it('requires provider keys for longform OpenAI planning and Gate B execution before queueing', async () => {
         getFlow.mockResolvedValueOnce({
             id: 'flow-longform-providers',
             name: 'Longform provider guard flow',
@@ -246,7 +251,7 @@ describe('runService cost guards', () => {
                 ok: false,
                 error: 'MISSING_API_KEYS',
                 status: 422,
-                missingProviders: ['elevenlabs'],
+                missingProviders: ['openai', 'elevenlabs'],
             })
         );
         expect(putRun).not.toHaveBeenCalled();

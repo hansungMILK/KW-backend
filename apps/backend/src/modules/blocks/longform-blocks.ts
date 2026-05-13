@@ -1,5 +1,7 @@
+import { contentBlock } from './content-block';
 import { mediaTtsBlock } from './media-tts-block';
 import { mediaVideoBlock } from './media-video-block';
+import { searchBlock } from './search-block';
 import { env } from '../../config/env';
 
 import type { BlockExecutor, BlockExecutorResult } from './types';
@@ -13,7 +15,19 @@ export const longformSourceBlock: BlockExecutor = {
     blockType: 'longform-source',
     async execute(input: unknown, config?: RecordValue): Promise<BlockExecutorResult> {
         const start = Date.now();
-        const articles = extractArticles(input);
+        const inputRecord = toRecord(input);
+        const requestText =
+            firstString(
+                config?.userRequest,
+                config?.query,
+                inputRecord.userRequest,
+                inputRecord.query,
+                inputRecord.topic,
+                input
+            ) ?? '롱폼 만들어줘';
+        const collectedInput = await collectLongformSourceInput(input, config);
+        const articles = extractArticles(collectedInput);
+        assertRequestedPrimaryUrlsCollected(requestText, articles);
         const primarySources = articles.filter(article => article.primarySource || article.sourcePriority === 1);
         const effectivePrimarySources = primarySources.length > 0 ? primarySources : articles.slice(0, 1);
         const supportingSources = articles.filter(article => !effectivePrimarySources.includes(article));
@@ -38,7 +52,7 @@ export const longformSourceBlock: BlockExecutor = {
                     whyItMatters: '시청자가 이 이슈의 배경과 의미를 이해할 수 있게 만든다.',
                     caveats: supportingSources.length > 0 ? ['보조 출처는 원문을 대체하지 않는다.'] : [],
                 },
-                requestText: firstString(config?.userRequest, config?.query, input) ?? '롱폼 만들어줘',
+                requestText: firstString(config?.userRequest, config?.query, collectedInput, input) ?? requestText,
             },
             durationMs: Date.now() - start,
         };
@@ -79,23 +93,36 @@ export const longformBriefBlock: BlockExecutor = {
 
 export const longformScriptBlock: BlockExecutor = {
     blockType: 'longform-script',
-    async execute(input: unknown): Promise<BlockExecutorResult> {
+    async execute(input: unknown, config?: RecordValue): Promise<BlockExecutorResult> {
         const start = Date.now();
         const brief = toRecord(input);
-        const titleCandidates = Array.isArray(brief.titleCandidates) ? brief.titleCandidates : [];
-        const topic = firstString(brief.angle, titleCandidates[0], brief.requestText) ?? '롱폼 주제';
-        const sourceIds = arrayOfRecords(brief.primarySources).map(
-            (source, index) => firstString(source.id) ?? `source-${index + 1}`
-        );
-        const sections = buildScriptSections(topic);
+        const writerInput = withWriterArticles(brief);
+        const result = await contentBlock.execute(writerInput, {
+            ...config,
+            mode: 'longform-gate-a',
+            gate: 'A',
+            contentProfileId: firstString(config?.contentProfileId, brief.contentProfileId) ?? 'longform.explainer.v1',
+            rendererRoute: firstString(config?.rendererRoute, brief.rendererRoute) ?? 'hyperframes',
+            targetDurationSec:
+                positiveNumber(config?.targetDurationSec, brief.estimatedDurationSec) ?? DEFAULT_DURATION_SEC,
+            maxDurationSec: positiveNumber(config?.maxDurationSec, brief.maxDurationSec),
+        });
+        const generated = toRecord(result.output);
+        const sourceIds = extractSourceIds(generated, writerInput, brief);
+        const sections = buildSectionsFromGenerated(generated, writerInput);
 
         return {
             output: {
                 ...brief,
-                fullScriptDraft: sections.map(section => section.narration).join('\n\n'),
+                ...generated,
+                fullScriptDraft:
+                    firstString(generated.fullScriptDraft) ??
+                    sections
+                        .map(section => firstString(section.narration, section.summary, section.title) ?? '')
+                        .join('\n\n'),
                 sections,
                 sourceMap: sections.map(section => ({
-                    sectionId: section.sectionId,
+                    sectionId: firstString(section.sectionId) ?? `section-${sections.indexOf(section) + 1}`,
                     sourceIds: sourceIds.length > 0 ? sourceIds : ['source-1'],
                 })),
             },
@@ -184,11 +211,7 @@ export const longformReviewBlock: BlockExecutor = {
         const start = Date.now();
         const base = toRecord(input);
         const reviewed = parseRecord(config?.reviewedOutput);
-        const approved =
-            reviewed !== undefined ||
-            config?.reviewStatus === 'approved' ||
-            config?.mediaExecutionAllowed === true ||
-            config?.gateBApproved === true;
+        const approved = hasExplicitLongformApproval(config);
         const reviewInput = reviewed ? { ...base, ...reviewed } : base;
         const approvedGateAArtifact = approved ? buildApprovedGateAArtifact(reviewInput, config) : undefined;
 
@@ -269,14 +292,17 @@ export const longformMotionComposeBlock: BlockExecutor = {
         const record = toRecord(input);
         const scenes = arrayOfRecords(record.scenes);
         const subtitleCues = arrayOfRecords(record.subtitleCues);
-        const motionCues = subtitleCues.map((cue, index) => ({
-            sceneId: firstString(scenes[Math.min(index, Math.max(0, scenes.length - 1))]?.sceneId) ?? 'scene-1',
-            cueIndex: positiveNumber(cue.cueIndex) ?? index,
-            type: pickEmphasis(index),
-            targetIds: ['headline'],
-            startSec: positiveNumber(cue.startSec) ?? index * 4,
-            endSec: positiveNumber(cue.endSec) ?? index * 4 + 4,
-        }));
+        const motionCues = subtitleCues.map((cue, index) => {
+            const sceneId = firstString(scenes[Math.min(index, Math.max(0, scenes.length - 1))]?.sceneId) ?? 'scene-1';
+            return {
+                sceneId,
+                cueIndex: positiveNumber(cue.cueIndex) ?? index,
+                type: pickEmphasis(index),
+                targetIds: resolveMotionTargetIds(scenes, sceneId, index),
+                startSec: positiveNumber(cue.startSec) ?? index * 4,
+                endSec: positiveNumber(cue.endSec) ?? index * 4 + 4,
+            };
+        });
         return {
             output: {
                 ...record,
@@ -306,10 +332,18 @@ export const longformQaBlock: BlockExecutor = {
         const start = Date.now();
         const record = toRecord(input);
         const video = toRecord(record.video);
+        const probe = toRecord(record.qa);
         const width = positiveNumber(video.width);
         const height = positiveNumber(video.height);
+        const probeWidth = positiveNumber(probe.width);
+        const probeHeight = positiveNumber(probe.height);
+        const probeDurationSec = positiveNumber(probe.durationSec);
         const hasPreview = Boolean(firstString(video.previewUrl, video.url));
-        const passed = width === 2560 && height === 1440 && hasPreview;
+        const videoStream = probe.hasVideo === true;
+        const audioStream = probe.hasAudio === true;
+        const resolution2k = width === 2560 && height === 1440 && probeWidth === 2560 && probeHeight === 1440;
+        const durationPresent = probeDurationSec !== undefined;
+        const passed = hasPreview && videoStream && audioStream && resolution2k && durationPresent;
         return {
             output: {
                 ...record,
@@ -317,7 +351,10 @@ export const longformQaBlock: BlockExecutor = {
                     passed,
                     checks: {
                         previewUrl: hasPreview,
-                        resolution2k: width === 2560 && height === 1440,
+                        videoStream,
+                        audioStream,
+                        resolution2k,
+                        durationPresent,
                     },
                 },
             },
@@ -363,6 +400,139 @@ function extractArticles(input: unknown): RecordValue[] {
     }));
 }
 
+function assertRequestedPrimaryUrlsCollected(requestText: string, articles: RecordValue[]): void {
+    const requestedUrls = extractUrls(requestText);
+    if (requestedUrls.length === 0) return;
+    const collectedUrls = new Set(
+        articles
+            .filter(article => article.primarySource || article.sourcePriority === 1)
+            .map(article => firstString(article.url))
+            .filter((url): url is string => Boolean(url))
+    );
+    const missingUrls = requestedUrls.filter(url => !collectedUrls.has(url));
+    if (missingUrls.length === 0) return;
+
+    throw new Error(
+        `longform-source requires readable primary URL text before script generation: ${missingUrls.join(', ')}`
+    );
+}
+
+function extractUrls(text: string): string[] {
+    return Array.from(text.matchAll(/https?:\/\/[^\s"'<>]+/gi), match => match[0].replace(/[),.;!?]+$/g, ''));
+}
+
+async function collectLongformSourceInput(input: unknown, config?: RecordValue): Promise<unknown> {
+    if (extractArticles(input).length > 0) return input;
+
+    const record = toRecord(input);
+    const query = firstString(
+        config?.userRequest,
+        config?.query,
+        record.userRequest,
+        record.query,
+        record.topic,
+        input
+    );
+    if (!query) return input;
+
+    const result = await searchBlock.execute(query, config);
+    return {
+        ...toRecord(result.output),
+        requestText: query,
+    };
+}
+
+function extractSourceIds(...records: RecordValue[]): string[] {
+    const sources = records.flatMap(record => [
+        ...arrayOfRecords(record.primarySources),
+        ...arrayOfRecords(record.sources),
+        ...arrayOfRecords(record.articles),
+    ]);
+    return [
+        ...new Set(
+            sources
+                .map((source, index) => firstString(source.id) ?? `source-${index + 1}`)
+                .filter((id): id is string => Boolean(id))
+        ),
+    ];
+}
+
+function withWriterArticles(brief: RecordValue): RecordValue {
+    if (arrayOfRecords(brief.articles).length > 0) return brief;
+    const sources = [...arrayOfRecords(brief.primarySources), ...arrayOfRecords(brief.supportingSources)];
+    return sources.length > 0
+        ? {
+              ...brief,
+              articles: sources,
+          }
+        : brief;
+}
+
+function buildSectionsFromGenerated(generated: RecordValue, brief: RecordValue): RecordValue[] {
+    const existingSections = arrayOfRecords(generated.sections);
+    if (existingSections.length > 0) return existingSections;
+
+    const paragraphs = splitDraftParagraphs(firstString(generated.fullScriptDraft, brief.fullScriptDraft));
+    const outline = arrayOfRecords(generated.outline);
+    if (outline.length > 0) {
+        return outline.map((item, index) => ({
+            sectionId: firstString(item.sectionId, item.id) ?? `section-${index + 1}`,
+            title: firstString(item.title) ?? `섹션 ${index + 1}`,
+            purpose: firstString(item.purpose) ?? pickPurpose(index),
+            summary: firstString(item.summary),
+            narration: paragraphs[index] ?? firstString(item.narration, item.body, item.summary, item.title) ?? '',
+        }));
+    }
+
+    const scenePlan = arrayOfRecords(generated.scenePlan);
+    if (scenePlan.length > 0) {
+        return scenePlan.map((scene, index) => ({
+            sectionId: `section-${index + 1}`,
+            title: firstString(scene.title) ?? `장면 ${index + 1}`,
+            purpose: pickPurpose(index),
+            summary: firstString(scene.visualPlan),
+            narration:
+                paragraphs[index] ?? firstString(scene.narration, scene.summary, scene.visualPlan, scene.title) ?? '',
+            durationSec: positiveNumber(scene.durationSec),
+        }));
+    }
+
+    const sourceDigest = stringArray(generated.sourceDigest).length
+        ? stringArray(generated.sourceDigest)
+        : stringArray(brief.sourceDigest);
+    if (sourceDigest.length > 0) {
+        return sourceDigest.slice(0, DEFAULT_SECTION_COUNT).map((digest, index) => ({
+            sectionId: `section-${index + 1}`,
+            title: index === 0 ? '핵심 요약' : `근거 ${index}`,
+            purpose: pickPurpose(index),
+            narration: digest,
+        }));
+    }
+
+    return [
+        {
+            sectionId: 'section-1',
+            title: firstString(generated.title, brief.angle, brief.requestText) ?? '롱폼 해설',
+            purpose: 'explain',
+            narration:
+                firstString(generated.fullScriptDraft, brief.requestText) ??
+                '수집된 자료를 바탕으로 롱폼 대본을 다시 생성해야 합니다.',
+        },
+    ];
+}
+
+function splitDraftParagraphs(value: string | undefined): string[] {
+    if (!value) return [];
+    return value
+        .split(/\n{2,}/)
+        .map(line => cleanText(line))
+        .filter(Boolean);
+}
+
+function stringArray(value: unknown): string[] {
+    return Array.isArray(value) ? value.map(String).map(cleanText).filter(Boolean) : [];
+}
+
 function parseRecord(value: unknown): RecordValue | undefined {
     if (isRecordValue(value)) return value;
     if (typeof value !== 'string' || !value.trim()) return undefined;
@@ -372,6 +542,15 @@ function parseRecord(value: unknown): RecordValue | undefined {
     } catch {
         return undefined;
     }
+}
+
+function hasExplicitLongformApproval(config: RecordValue | undefined): boolean {
+    return (
+        config?.reviewStatus === 'approved' ||
+        config?.mediaExecutionAllowed === true ||
+        config?.gateBApproved === true ||
+        config?.reviewDecision === 'approved'
+    );
 }
 
 function buildApprovedGateAArtifact(input: RecordValue, config?: RecordValue): RecordValue {
@@ -420,13 +599,30 @@ function buildLongformTtsInput(input: unknown): RecordValue & {
     normalizedScenes: Array<{ sceneNumber: number; narration: string; durationSec: number }>;
 } {
     const record = toRecord(input);
-    const existingScenes = arrayOfRecords(record.normalizedScenes).length
-        ? arrayOfRecords(record.normalizedScenes)
-        : arrayOfRecords(record.scenes);
-    const scenesWithNarration = existingScenes
+    const approvedArtifact = toRecord(record.approvedGateAArtifact);
+    const approvedSectionScenes = arrayOfRecords(approvedArtifact.sections)
+        .map((section, index) => ({
+            sceneNumber: positiveNumber(section.sceneNumber) ?? index + 1,
+            narration: firstString(section.narration, section.body, section.summary, section.title) ?? '',
+            durationSec: positiveNumber(section.durationSec) ?? 24,
+        }))
+        .filter(scene => scene.narration.trim().length > 0);
+    const approvedDraftScenes = firstString(approvedArtifact.fullScriptDraft)
+        ?.split(/\n{2,}/)
+        .map(line => line.trim())
+        .filter(Boolean)
+        .map((line, index) => ({
+            sceneNumber: index + 1,
+            narration: line,
+            durationSec: 24,
+        }));
+    const approvedScenes = approvedSectionScenes.length ? approvedSectionScenes : (approvedDraftScenes ?? []);
+
+    const existingScenes = arrayOfRecords(record.normalizedScenes);
+    const normalizedInputScenes = existingScenes
         .map((scene, index) => ({
             sceneNumber: positiveNumber(scene.sceneNumber) ?? index + 1,
-            narration: firstString(scene.narration, scene.caption, scene.headline, scene.title) ?? '',
+            narration: firstString(scene.narration, scene.caption) ?? '',
             durationSec: positiveNumber(scene.durationSec) ?? 12,
         }))
         .filter(scene => scene.narration.trim().length > 0);
@@ -449,11 +645,13 @@ function buildLongformTtsInput(input: unknown): RecordValue & {
             durationSec: 24,
         }));
 
-    const normalizedScenes = scenesWithNarration.length
-        ? scenesWithNarration
-        : sectionScenes.length
-          ? sectionScenes
-          : (draftScenes ?? []);
+    const normalizedScenes = approvedScenes.length
+        ? approvedScenes
+        : normalizedInputScenes.length
+          ? normalizedInputScenes
+          : sectionScenes.length
+            ? sectionScenes
+            : (draftScenes ?? []);
 
     return {
         ...record,
@@ -498,45 +696,23 @@ function digestArticle(article: RecordValue): string {
     return trimText(cleanText(firstString(article.summary, article.fullText, article.title) ?? ''), 240);
 }
 
-function buildScriptSections(topic: string) {
-    return [
-        {
-            sectionId: 'section-1',
-            title: '오프닝',
-            purpose: 'hook',
-            narration: `${topic} 이슈는 겉보기보다 구조가 중요합니다. 먼저 핵심부터 잡겠습니다.`,
-        },
-        {
-            sectionId: 'section-2',
-            title: '배경',
-            purpose: 'context',
-            narration: `이 사안의 출발점은 관련 자료에서 확인되는 변화와 시장의 반응입니다.`,
-        },
-        {
-            sectionId: 'section-3',
-            title: '핵심 설명',
-            purpose: 'explain',
-            narration: `여기서 중요한 건 단순한 소식이 아니라 왜 이 변화가 의미를 갖는지입니다.`,
-        },
-        {
-            sectionId: 'section-4',
-            title: '근거 확인',
-            purpose: 'evidence',
-            narration: `원문과 보조 자료를 나눠 보면 확인된 사실과 아직 조심해야 할 부분이 갈립니다.`,
-        },
-        {
-            sectionId: 'section-5',
-            title: '정리',
-            purpose: 'conclusion',
-            narration: `정리하면 중요한 건 화제성보다 이 흐름이 앞으로 어떤 선택을 만들지입니다.`,
-        },
-    ] as const;
-}
-
 function sourceIdsForSection(sourceMap: unknown, sectionId: string): string[] {
     return arrayOfRecords(sourceMap)
         .filter(item => firstString(item.sectionId) === sectionId)
         .flatMap(item => (Array.isArray(item.sourceIds) ? item.sourceIds.map(String) : []));
+}
+
+function resolveMotionTargetIds(scenes: RecordValue[], sceneId: string, index: number): string[] {
+    const scene =
+        scenes.find(item => firstString(item.sceneId) === sceneId) ??
+        scenes[Math.min(index, Math.max(0, scenes.length - 1))];
+    const objects = arrayOfRecords(scene?.objects);
+    const headlineObject = objects.find(object => firstString(object.type) === 'headline');
+    const headlineId = firstString(headlineObject?.id);
+    if (headlineId) return [headlineId];
+
+    const firstObjectId = firstString(objects[0]?.id);
+    return firstObjectId ? [firstObjectId] : ['headline'];
 }
 
 function pickArchetype(index: number): string {
@@ -545,6 +721,10 @@ function pickArchetype(index: number): string {
 
 function pickEmphasis(index: number): string {
     return ['highlight', 'draw-line', 'count-up', 'zoom', 'reveal'][index % DEFAULT_SECTION_COUNT];
+}
+
+function pickPurpose(index: number): string {
+    return ['hook', 'context', 'explain', 'evidence', 'conclusion'][index % DEFAULT_SECTION_COUNT];
 }
 
 function toRecord(value: unknown): RecordValue {

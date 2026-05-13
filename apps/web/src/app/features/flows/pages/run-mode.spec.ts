@@ -109,7 +109,7 @@ describe('workflow run mode', () => {
         });
     });
 
-    it('treats a saved longform review output as approval for the next full production run', () => {
+    it('keeps longform production in step mode when the draft was saved but not explicitly approved', () => {
         expect(
             getWorkflowRunMode([
                 longformReviewNode({
@@ -121,8 +121,8 @@ describe('workflow run mode', () => {
                 }),
             ])
         ).toEqual({
-            executionMode: 'full',
-            scriptReviewFirst: false,
+            executionMode: 'step',
+            scriptReviewFirst: true,
         });
     });
 });

@@ -937,7 +937,15 @@ const FriendlyOutputPreview: React.FC<{
     reviewEnabled?: boolean;
     reviewedOutputSaved?: boolean;
     onReviewedOutputSave?: (value: Record<string, unknown>) => void;
-}> = ({ value, maxHeight, reviewEnabled = false, reviewedOutputSaved = false, onReviewedOutputSave }) => {
+    onLongformReviewApprove?: (value: Record<string, unknown>) => void;
+}> = ({
+    value,
+    maxHeight,
+    reviewEnabled = false,
+    reviewedOutputSaved = false,
+    onReviewedOutputSave,
+    onLongformReviewApprove,
+}) => {
     const recordValue = isRecordValue(value) ? value : null;
     const scenes = asRecordArray(recordValue?.scenes);
     const initialDraft = recordValue
@@ -1134,13 +1142,23 @@ const FriendlyOutputPreview: React.FC<{
                         />
                         <button
                             type="button"
-                            className="w-full rounded bg-primary px-2 py-1.5 text-[10px] font-medium text-primary-foreground hover:bg-primary/90"
+                            className="w-full rounded border border-sky-400/40 bg-sky-500/10 px-2 py-1.5 text-[10px] font-medium text-sky-100 hover:bg-sky-500/20"
                             onClick={event => {
                                 event.stopPropagation();
                                 onReviewedOutputSave?.(applyLongformDraft(recordValue, draft));
                             }}
                         >
                             {reviewedOutputSaved ? '롱폼 검수본 다시 저장' : '롱폼 대본 검수본 저장'}
+                        </button>
+                        <button
+                            type="button"
+                            className="w-full rounded bg-primary px-2 py-1.5 text-[10px] font-semibold text-primary-foreground hover:bg-primary/90"
+                            onClick={event => {
+                                event.stopPropagation();
+                                onLongformReviewApprove?.(applyLongformDraft(recordValue, draft));
+                            }}
+                        >
+                            승인하고 유료 제작 허용
                         </button>
                     </div>
                 )}
@@ -1361,6 +1379,13 @@ const OutputPreview: React.FC<VisualizationProps & { onConfigChange?: (key: stri
                         typeof node.config?.reviewedOutput === 'string' && node.config.reviewedOutput.length > 0
                     }
                     onReviewedOutputSave={updated => onConfigChange?.('reviewedOutput', JSON.stringify(updated))}
+                    onLongformReviewApprove={updated => {
+                        onConfigChange?.('reviewedOutput', JSON.stringify(updated));
+                        onConfigChange?.('reviewStatus', 'approved');
+                        onConfigChange?.('mediaExecutionAllowed', true);
+                        onConfigChange?.('gateBApproved', true);
+                        onConfigChange?.('approvedArtifactId', `longform-review-${Date.now()}`);
+                    }}
                 />
             );
         }

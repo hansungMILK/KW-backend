@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 
 import { getPublicUrl, putObject } from '../../adapters/aws/s3';
 import { ffmpegAdapter } from '../../adapters/external/ffmpeg-adapter';
+import { hyperframesAdapter } from '../../adapters/external/hyperframes-adapter';
 import { env } from '../../config/env';
 import { traceService } from '../../services/trace-service';
 import { selectBgmForShorts } from '../shorts/bgm/bgm-selector';
@@ -70,6 +71,8 @@ export const mediaVideoBlock: BlockExecutor = {
         const motionCues: RawMotionCue[] = Array.isArray(inp?.motionCues) ? (inp.motionCues as RawMotionCue[]) : [];
         const metadata = inp?.metadata as Record<string, unknown> | undefined;
         const longformGateB = isLongformGateB(input, config);
+        const rendererRoute = resolveRendererRoute(input, config);
+        const useHyperframesRenderer = longformGateB && rendererRoute.toLowerCase().includes('hyperframes');
         const enableBackgroundMusic = longformGateB || config?.backgroundMusic !== false;
 
         if (longformGateB) {
@@ -90,12 +93,14 @@ export const mediaVideoBlock: BlockExecutor = {
         const longformProductionQa = longformGateB
             ? assertLongformProductionInputs(audioObj, subtitleCues, motionCues)
             : undefined;
-        const rawImages = longformGateB
-            ? await ensureLongformMotionBoardImages(rawImagesFromInput, motionScenes, subtitleCues, metadata)
-            : rawImagesFromInput;
+        const rawImages = useHyperframesRenderer
+            ? rawImagesFromInput
+            : longformGateB
+              ? await ensureLongformMotionBoardImages(rawImagesFromInput, motionScenes, subtitleCues, metadata)
+              : rawImagesFromInput;
         const images = buildSyncedImageSegments(rawImages, rawScenes, subtitleCues, metadata, audioDurationSec);
 
-        if (images.length === 0) {
+        if (!useHyperframesRenderer && images.length === 0) {
             throw new Error('media-video requires image outputs from media-image');
         }
         if (!audioUrl) {
@@ -106,11 +111,7 @@ export const mediaVideoBlock: BlockExecutor = {
 
         try {
             const backgroundMusic = enableBackgroundMusic
-                ? selectBgmForShorts({
-                      metadata,
-                      scenes: rawScenes as Array<Record<string, unknown>>,
-                      requestText: typeof metadata?.requestText === 'string' ? metadata.requestText : undefined,
-                  })
+                ? selectBackgroundMusic(config, longformGateB, metadata, rawScenes as Array<Record<string, unknown>>)
                 : undefined;
 
             if (enableBackgroundMusic && env.shortsBgmRequired && !backgroundMusic) {
@@ -120,8 +121,9 @@ export const mediaVideoBlock: BlockExecutor = {
             }
 
             await recordVideoTrace('media-video: composing started', {
-                imageCount: images.length,
+                imageCount: useHyperframesRenderer ? motionScenes.length : images.length,
                 hasAudio: Boolean(audioUrl),
+                rendererRoute,
                 backgroundMusic: backgroundMusic
                     ? {
                           id: backgroundMusic.track.id,
@@ -140,19 +142,38 @@ export const mediaVideoBlock: BlockExecutor = {
             const outputSize = resolveVideoOutputSize(longformGateB, input, config);
             const result = await (async () => {
                 try {
+                    const backgroundMusicInput = backgroundMusic
+                        ? {
+                              path: backgroundMusic.track.filePath,
+                              volume: backgroundMusic.volume,
+                              title: backgroundMusic.track.title,
+                              artist: backgroundMusic.track.artist,
+                              license: backgroundMusic.track.license,
+                              attribution: backgroundMusic.track.attribution,
+                          }
+                        : false;
+
+                    if (useHyperframesRenderer) {
+                        return await hyperframesAdapter.renderLongform({
+                            scenes: motionScenes,
+                            subtitleCues,
+                            motionCues,
+                            audioUrl,
+                            audioDurationSec,
+                            backgroundMusic: backgroundMusicInput,
+                            outputWidth: outputSize.width,
+                            outputHeight: outputSize.height,
+                            signal: compositionSignal.signal,
+                            onProgress: async (progress, message) => {
+                                await context?.onProgress?.(progress, message);
+                            },
+                        });
+                    }
+
                     return await ffmpegAdapter.compose({
                         images,
                         audioUrl,
-                        backgroundMusic: backgroundMusic
-                            ? {
-                                  path: backgroundMusic.track.filePath,
-                                  volume: backgroundMusic.volume,
-                                  title: backgroundMusic.track.title,
-                                  artist: backgroundMusic.track.artist,
-                                  license: backgroundMusic.track.license,
-                                  attribution: backgroundMusic.track.attribution,
-                              }
-                            : false,
+                        backgroundMusic: backgroundMusicInput,
                         outputWidth: outputSize.width,
                         outputHeight: outputSize.height,
                         outputFormat: 'mp4',
@@ -211,7 +232,7 @@ export const mediaVideoBlock: BlockExecutor = {
                         backgroundMusic: backgroundMusicMetadata,
                         ...(longformGateB
                             ? {
-                                  rendererRoute: resolveRendererRoute(input, config),
+                                  rendererRoute,
                                   qa,
                                   longformProductionQa,
                                   previewUrl: publicUrl,
@@ -251,7 +272,7 @@ export const mediaVideoBlock: BlockExecutor = {
                     normalizedScenes: rawScenes,
                     ...(longformGateB
                         ? {
-                              rendererRoute: resolveRendererRoute(input, config),
+                              rendererRoute,
                               qa,
                               longformProductionQa,
                           }
@@ -749,6 +770,50 @@ function resolveRendererRoute(input: unknown, config?: Record<string, unknown>):
         (isRecord(input) ? (input['rendererRoute'] ?? input['renderer']) : undefined) ??
         'hyperframes';
     return typeof route === 'string' && route.trim() ? route.trim() : 'hyperframes';
+}
+
+function selectBackgroundMusic(
+    config: Record<string, unknown> | undefined,
+    longformGateB: boolean,
+    metadata: Record<string, unknown> | undefined,
+    scenes: Array<Record<string, unknown>>
+) {
+    const explicitPath =
+        longformGateB && typeof config?.['backgroundMusicPath'] === 'string'
+            ? config['backgroundMusicPath'].trim()
+            : '';
+    if (explicitPath) {
+        const title =
+            typeof config?.['backgroundMusicTitle'] === 'string' && config['backgroundMusicTitle'].trim()
+                ? config['backgroundMusicTitle'].trim()
+                : 'Longform default BGM';
+        const artist =
+            typeof config?.['backgroundMusicArtist'] === 'string' && config['backgroundMusicArtist'].trim()
+                ? config['backgroundMusicArtist'].trim()
+                : 'user-supplied';
+        return {
+            track: {
+                id: 'longform-default-bgm',
+                title,
+                artist,
+                filename: explicitPath.split('/').pop() ?? explicitPath,
+                filePath: explicitPath,
+                mood: 'longform-default',
+                tags: ['longform', 'default'],
+                source: 'longform render config',
+                license: 'User-supplied asset',
+                attribution: `${title} - ${artist}`,
+            },
+            volume: env.shortsBgmVolume,
+            reason: 'explicit longform backgroundMusicPath',
+        };
+    }
+
+    return selectBgmForShorts({
+        metadata,
+        scenes,
+        requestText: typeof metadata?.requestText === 'string' ? metadata.requestText : undefined,
+    });
 }
 
 function readFirstPositiveNumber(

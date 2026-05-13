@@ -1,7 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
     longformBriefBlock,
+    longformMotionComposeBlock,
+    longformQaBlock,
     longformReviewBlock,
     longformSceneJsonBlock,
     longformScriptBlock,
@@ -10,6 +12,14 @@ import {
     longformStoryboardBlock,
     longformTtsBlock,
 } from './longform-blocks';
+import { openaiAdapter } from '../../adapters/ai/openai-adapter';
+
+vi.mock('../../adapters/ai/openai-adapter', () => ({
+    openaiAdapter: {
+        chatJson: vi.fn(),
+        webSearchJson: vi.fn(),
+    },
+}));
 
 vi.mock('../../adapters/ai/tts-adapter', () => ({
     ttsAdapter: {
@@ -49,6 +59,59 @@ const sourceInput = {
 };
 
 describe('longform blocks', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        vi.unstubAllGlobals();
+        vi.mocked(openaiAdapter.chatJson).mockResolvedValue({
+            content: JSON.stringify({
+                sourceDigest: ['세계 최대 AI 칩 기업의 나스닥 상장 추진과 투자자 반응을 정리한다.'],
+                outline: [
+                    { title: '오프닝', summary: '왜 지금 이 이슈가 중요한지 짚는다.' },
+                    { title: '배경', summary: '기업과 시장 상황을 설명한다.' },
+                    { title: '핵심', summary: '투자자가 보는 성장성과 수익성 논점을 설명한다.' },
+                    { title: '리스크', summary: '아직 확인해야 할 조건을 분리한다.' },
+                    { title: '정리', summary: '시청자가 가져갈 관점을 제시한다.' },
+                ],
+                fullScriptDraft:
+                    '세계 최대 AI 칩 기업의 상장 추진은 단순한 기업 뉴스가 아닙니다.\n\n투자자들은 성장성과 수익성을 함께 보고 있습니다.\n\n그래서 이 이슈는 기술력보다 사업 모델의 지속 가능성이 핵심입니다.',
+                scenePlan: [
+                    { sceneNumber: 1, title: '상장 추진', visualPlan: '기사 원문과 기업 로고 카드', durationSec: 40 },
+                    { sceneNumber: 2, title: '투자 포인트', visualPlan: '성장성 vs 수익성 비교', durationSec: 40 },
+                    { sceneNumber: 3, title: '정리', visualPlan: '핵심 메시지 카드', durationSec: 40 },
+                ],
+                estimatedDurationSec: 300,
+                estimatedCost: { currency: 'USD', total: 0.2, notes: ['Planning only'] },
+                rendererRoute: 'hyperframes',
+                qaChecklist: ['출처 확인', '대본 검수', '씬 승인'],
+            }),
+            model: 'gpt-test',
+            inputTokens: 100,
+            outputTokens: 200,
+            latencyMs: 1,
+        });
+        vi.mocked(openaiAdapter.webSearchJson).mockResolvedValue({
+            content: JSON.stringify({
+                keywords: ['fallback'],
+                articles: [
+                    {
+                        title: '보조 검색 결과',
+                        url: 'https://news.example.com/fallback',
+                        source: 'Example News',
+                        publishedAt: null,
+                        sourceType: 'news',
+                        confidence: 0.7,
+                        summary: '원문을 직접 읽지 못한 보조 검색 결과입니다.',
+                    },
+                ],
+                trendScore: 50,
+            }),
+            model: 'gpt-search-test',
+            inputTokens: 10,
+            outputTokens: 20,
+            latencyMs: 1,
+        });
+    });
+
     it('normalizes source research without leaking raw XML or HTML dumps', async () => {
         const result = await longformSourceBlock.execute(sourceInput, { userRequest: '롱폼 만들어줘' });
 
@@ -57,6 +120,57 @@ describe('longform blocks', () => {
             expect.arrayContaining([expect.stringContaining('AI 칩 기업이 나스닥 상장을 추진')])
         );
         expect(JSON.stringify(result.output)).not.toContain('<html>');
+    });
+
+    it('collects primary URL text when the user request contains a URL but upstream articles are absent', async () => {
+        const fetchMock = vi.fn(async () => {
+            const html = `
+                <html>
+                  <head>
+                    <meta property="og:title" content="우로보로스 설명">
+                    <meta property="og:site_name" content="Example Blog">
+                  </head>
+                  <body>
+                    <article>
+                      <p>우로보로스는 꼬리를 문 뱀의 이미지로 순환 구조를 설명할 때 자주 쓰입니다.</p>
+                      <p>하네스 엔지니어링 맥락에서는 반복되는 제작과 검증 과정을 이해하는 비유로 볼 수 있습니다.</p>
+                    </article>
+                  </body>
+                </html>`;
+            return new Response(html, {
+                status: 200,
+                headers: { 'content-type': 'text/html; charset=utf-8' },
+            });
+        });
+        vi.stubGlobal('fetch', fetchMock);
+
+        const result = await longformSourceBlock.execute(undefined, {
+            userRequest: '롱폼 만들어줘. 이 링크 설명해줘 https://example.com/ouroboros',
+        });
+
+        expect(fetchMock).toHaveBeenCalledWith('https://example.com/ouroboros', expect.any(Object));
+        expect(result.output.primarySources).toEqual([
+            expect.objectContaining({
+                title: '우로보로스 설명',
+                url: 'https://example.com/ouroboros',
+                primarySource: true,
+            }),
+        ]);
+        expect(JSON.stringify(result.output)).toContain('우로보로스');
+        expect(JSON.stringify(result.output)).not.toContain('<article>');
+    });
+
+    it('fails URL-based longform collection instead of silently writing from fallback search when the primary URL is unreadable', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(async () => new Response('not found', { status: 404 }))
+        );
+
+        await expect(
+            longformSourceBlock.execute(undefined, {
+                userRequest: '롱폼 만들어줘. 이 링크 설명해줘 https://example.com/missing',
+            })
+        ).rejects.toThrow(/requires readable primary URL text/i);
     });
 
     it('builds a longform brief with duration and evidence plan', async () => {
@@ -75,9 +189,15 @@ describe('longform blocks', () => {
         const result = await longformScriptBlock.execute(brief);
 
         expect(result.output.fullScriptDraft).toContain('AI 칩');
+        expect(result.output.fullScriptDraft).toContain('투자자들은 성장성과 수익성');
         expect(result.output.sections).toHaveLength(5);
         expect(result.output.sourceMap).toEqual(
             expect.arrayContaining([expect.objectContaining({ sourceIds: ['source-1'] })])
+        );
+        expect(openaiAdapter.chatJson).toHaveBeenCalledWith(
+            expect.objectContaining({
+                userMessage: expect.stringContaining('투자자들은 성장성과 수익성'),
+            })
         );
     });
 
@@ -108,6 +228,24 @@ describe('longform blocks', () => {
         expect(result.output.scenes[0].perCueActivity.length).toBeGreaterThan(0);
     });
 
+    it('targets real scene object ids when composing longform motion cues', async () => {
+        const source = (await longformSourceBlock.execute(sourceInput)).output;
+        const brief = (await longformBriefBlock.execute(source, { targetDurationSec: 300 })).output;
+        const script = (await longformScriptBlock.execute(brief)).output;
+        const storyboard = (await longformStoryboardBlock.execute(script)).output;
+        const sceneContract = (await longformSceneJsonBlock.execute(storyboard)).output;
+        const result = await longformMotionComposeBlock.execute({
+            ...sceneContract,
+            subtitleCues: [{ sceneNumber: 1, text: '첫 자막입니다.', startSec: 0, endSec: 2 }],
+        });
+
+        const firstSceneObjectIds = sceneContract.scenes[0].objects.map((object: { id: string }) => object.id);
+        expect(result.output.motionCues[0].targetIds).toEqual(
+            expect.arrayContaining([expect.stringMatching(/^section-1-/)])
+        );
+        expect(firstSceneObjectIds).toEqual(expect.arrayContaining(result.output.motionCues[0].targetIds));
+    });
+
     it('creates a draft review artifact that blocks media execution by default', async () => {
         const result = await longformReviewBlock.execute({
             fullScriptDraft: '검수 대상 대본',
@@ -120,7 +258,7 @@ describe('longform blocks', () => {
         expect(result.output.gate).toBe('A');
     });
 
-    it('turns a saved longform review draft into an approved Gate A artifact', async () => {
+    it('keeps a saved longform review draft blocked until the user explicitly approves media execution', async () => {
         const reviewedOutput = {
             fullScriptDraft: '사용자가 확인한 최종 롱폼 대본입니다.',
             visualChapters: [{ chapterId: 'chapter-1', headline: '핵심 장면' }],
@@ -134,6 +272,45 @@ describe('longform blocks', () => {
             },
             {
                 reviewedOutput: JSON.stringify(reviewedOutput),
+            }
+        );
+
+        expect(result.output.reviewStatus).toBe('draft');
+        expect(result.output.mediaExecutionAllowed).toBe(false);
+        expect(result.output.gateBApproved).toBe(false);
+        expect(result.output.approvedGateAArtifact).toBeUndefined();
+    });
+
+    it('does not let upstream payload flags approve longform paid execution without review config approval', async () => {
+        const result = await longformReviewBlock.execute({
+            fullScriptDraft: '입력 payload에만 승인 플래그가 있는 대본입니다.',
+            scenePlan: [{ sceneNumber: 1, title: '입력 장면' }],
+            reviewStatus: 'approved',
+            mediaExecutionAllowed: true,
+            gateBApproved: true,
+        });
+
+        expect(result.output.reviewStatus).toBe('draft');
+        expect(result.output.mediaExecutionAllowed).toBe(false);
+        expect(result.output.gateBApproved).toBe(false);
+        expect(result.output.approvedGateAArtifact).toBeUndefined();
+    });
+
+    it('turns an explicitly approved longform review draft into a Gate A artifact', async () => {
+        const reviewedOutput = {
+            fullScriptDraft: '사용자가 확인한 최종 롱폼 대본입니다.',
+            visualChapters: [{ chapterId: 'chapter-1', headline: '핵심 장면' }],
+            scenes: [{ sceneId: 'scene-1', headline: '핵심 장면' }],
+        };
+
+        const result = await longformReviewBlock.execute(
+            {
+                fullScriptDraft: '초안',
+                visualChapters: [{ chapterId: 'chapter-0' }],
+            },
+            {
+                reviewedOutput: JSON.stringify(reviewedOutput),
+                reviewStatus: 'approved',
             }
         );
 
@@ -183,6 +360,36 @@ describe('longform blocks', () => {
         );
     });
 
+    it('uses approved longform narration instead of stale scene headlines for TTS', async () => {
+        const result = await longformTtsBlock.execute({
+            mode: 'longform-gate-a',
+            reviewStatus: 'approved',
+            mediaExecutionAllowed: true,
+            approvedGateAArtifact: {
+                gate: 'A',
+                mode: 'longform-gate-a',
+                reviewStatus: 'approved',
+                fullScriptDraft: '승인된 첫 문단입니다.\n\n승인된 두 번째 문단입니다.',
+                sections: [
+                    { sectionId: 'section-1', narration: '승인된 첫 문단입니다.' },
+                    { sectionId: 'section-2', narration: '승인된 두 번째 문단입니다.' },
+                ],
+                scenePlan: [{ sceneNumber: 1, title: '승인 장면' }],
+            },
+            scenes: [
+                { sceneNumber: 1, headline: '오래된 장면 제목' },
+                { sceneNumber: 2, headline: '읽으면 안 되는 헤드라인' },
+            ],
+        });
+
+        expect(result.output.normalizedScenes).toEqual([
+            expect.objectContaining({ sceneNumber: 1, narration: '승인된 첫 문단입니다.' }),
+            expect.objectContaining({ sceneNumber: 2, narration: '승인된 두 번째 문단입니다.' }),
+        ]);
+        expect(JSON.stringify(result.output.normalizedScenes)).not.toContain('오래된 장면 제목');
+        expect(JSON.stringify(result.output.normalizedScenes)).not.toContain('읽으면 안 되는 헤드라인');
+    });
+
     it('preserves TTS subtitle cue timing instead of inventing fixed-duration cues', async () => {
         const result = await longformSrtAlignBlock.execute({
             audio: { durationSec: 9.5, provider: 'elevenlabs' },
@@ -227,5 +434,33 @@ describe('longform blocks', () => {
                 transcriptText: '타이밍 없는 텍스트만 있으면 렌더 싱크를 보장할 수 없습니다.',
             })
         ).rejects.toThrow('longform-srt-align requires subtitle cues from ElevenLabs TTS output');
+    });
+
+    it('fails longform QA when ffprobe metadata is missing audio even if a 2K preview URL exists', async () => {
+        const result = await longformQaBlock.execute({
+            video: {
+                width: 2560,
+                height: 1440,
+                previewUrl: 'http://localhost:8800/_local-assets/video.mp4',
+            },
+            qa: {
+                hasVideo: true,
+                hasAudio: false,
+                width: 2560,
+                height: 1440,
+                durationSec: 120,
+            },
+        });
+
+        expect(result.output.qaReport).toEqual(
+            expect.objectContaining({
+                passed: false,
+                checks: expect.objectContaining({
+                    audioStream: false,
+                    videoStream: true,
+                    resolution2k: true,
+                }),
+            })
+        );
     });
 });

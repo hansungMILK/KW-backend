@@ -225,6 +225,7 @@ const OPENAI_BLOCK_PROVIDER_MAP: Record<string, ApiKeyProvider> = {
     'media-tts': 'elevenlabs',
     'media-video': 'openai',
     integration: 'openai',
+    'longform-script': 'openai',
     'longform-tts': 'elevenlabs',
 };
 

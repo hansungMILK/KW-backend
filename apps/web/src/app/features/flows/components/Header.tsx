@@ -129,6 +129,7 @@ const ToolbarButton: React.FC<{
                 <TooltipTrigger asChild>
                     <button
                         onClick={onClick}
+                        aria-label={tooltip}
                         className={cn(
                             'flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-150',
                             'hover:bg-accent/60',
@@ -320,6 +321,11 @@ export const Header: React.FC<HeaderProps> = ({
                             'shadow-sm'
                         )}
                     >
+                        <ToolbarButton
+                            onClick={fileActions.onNew}
+                            icon={<FileText className="w-4 h-4" />}
+                            tooltip={t('header.newFlow')}
+                        />
                         <ToolbarButton
                             onClick={editActions.onSave}
                             icon={<Save className="w-4 h-4" />}
