@@ -158,32 +158,100 @@ Frontend
 
 ---
 
-## 6. 로컬 실행 방법
+## 6. 팀원 로컬 테스트 실행 방법
+
+테스트 대상 브랜치:
+
+```bash
+codex/content-profile-longform-20260513
+```
+
+여러 명이 테스트할 때는 한 사람의 Mac에 접속하는 방식보다, 각자 자기 PC에서 같은 브랜치를 내려받아 `localhost`로 실행하는 방식을 권장합니다.
+
+### 프로젝트 받기
+
+처음 받는 경우:
+
+```bash
+git clone https://github.com/hansungMILK/KW-backend.git
+cd KW-backend
+git fetch origin
+git checkout codex/content-profile-longform-20260513
+yarn install
+```
+
+이미 프로젝트가 있는 경우:
+
+```bash
+cd KW-backend
+git fetch origin
+git checkout codex/content-profile-longform-20260513
+git pull --ff-only
+yarn install
+```
 
 ### 준비
+
+아래 파일이 이미 있으면 새로 만들 필요 없습니다.
+
+```bash
+apps/backend/.env
+apps/web/.env.local
+```
+
+없을 때만 생성합니다.
 
 **Mac / Linux**
 
 ```bash
-yarn install
-cp .env.example .env.local
+cp apps/backend/.env.example apps/backend/.env
+cp apps/web/.env.example apps/web/.env.local
 ```
 
-**Windows (PowerShell)**
+**Windows PowerShell**
 
 ```powershell
-yarn install
-Copy-Item .env.example .env.local
+Copy-Item apps/backend/.env.example apps/backend/.env
+Copy-Item apps/web/.env.example apps/web/.env.local
 ```
 
-**Windows (명령 프롬프트 / CMD)**
+**Windows CMD**
 
 ```cmd
-yarn install
-copy .env.example .env.local
+copy apps\backend\.env.example apps\backend\.env
+copy apps\web\.env.example apps\web\.env.local
 ```
 
-`.env.local`은 프론트가 백엔드 주소를 알기 위해 씁니다.
+### OpenAI 키 넣기
+
+`apps/backend/.env` 파일을 열고 아래 값을 확인하거나 수정합니다.
+
+```env
+APP_API_KEY=local-test
+ORCHESTRATOR_MODE=openai
+AI_PROVIDER=openai
+ALLOW_PAID_OPENAI=true
+MAX_RUN_ESTIMATED_COST_USD=2
+OPENAI_API_KEY=전달받은_OpenAI_API_Key
+```
+
+주의:
+
+- `OPENAI_API_KEY`는 GitHub에 커밋하면 안 됩니다.
+- 단톡방이나 README에 직접 올리지 말고, 개인 `apps/backend/.env`에만 넣습니다.
+- 실제 유료 호출이 나가므로 `MAX_RUN_ESTIMATED_COST_USD=2`는 유지합니다.
+
+### 프론트 설정 확인
+
+`apps/web/.env.local` 파일에 아래 값이 들어 있으면 됩니다.
+
+```env
+VITE_ENV=LOCAL
+VITE_PROJECT=FLOWS
+VITE_API_URL=http://localhost:8800
+VITE_WS_ENDPOINT=ws://localhost:8801
+VITE_LOCAL_APP_API_KEY=local-test
+```
 
 ### 백엔드 실행
 
@@ -222,21 +290,67 @@ yarn web:start:win
 
 - `http://localhost:3000`
 
-### 백엔드 환경변수
+### API Key 입력
 
-기본 local/mock 실행은 추가 설정 없이 가능합니다.
+브라우저에서 API Key 입력창이 뜨면 아래 값을 입력합니다.
 
-백엔드 환경변수 예시는 아래 파일을 참고합니다.
+```text
+local-test
+```
 
-- `apps/backend/.env.example`
+### 테스트 예시
 
-자주 쓰는 값:
+채팅창에 아래처럼 입력합니다.
 
-- `STAGE=local`
-- `ORCHESTRATOR_MODE=mock`
-- `DYNAMODB_ENDPOINT`
-- `S3_BUCKET`
-- `ANTHROPIC_API_KEY`
+```text
+쇼츠 만들어줘. 주제는 토트넘 강등 위기
+```
+
+링크 기반 테스트:
+
+```text
+쇼츠 만들어줘. 주제는 이 링크 내용을 정보전달 유튜버처럼 만들어줘.
+https://example.com/article
+```
+
+### 자주 나는 문제
+
+`현재 OpenAI 실제 호출이 꺼져 있습니다`
+
+- `apps/backend/.env`에서 `ALLOW_PAID_OPENAI=true`인지 확인합니다.
+- 수정 후 백엔드를 껐다가 다시 켜야 합니다.
+
+`Invalid API key`
+
+- 브라우저 입력값이 `local-test`인지 확인합니다.
+- `apps/backend/.env`에 `APP_API_KEY=local-test`가 있는지 확인합니다.
+- 수정 후 백엔드를 재시작합니다.
+
+예전 워크플로우가 계속 남아 있음
+
+백엔드를 끄고 로컬 DB를 지운 뒤 다시 실행합니다.
+
+```bash
+rm -rf apps/backend/.local-db
+```
+
+브라우저 상태도 초기화하려면 개발자도구 Console에서 실행합니다.
+
+```js
+localStorage.removeItem('flows-current-flow-id');
+localStorage.removeItem('x-api-key');
+location.reload();
+```
+
+요약:
+
+1. `codex/content-profile-longform-20260513` 브랜치로 이동
+2. `apps/backend/.env`에 OpenAI 키 입력
+3. `ALLOW_PAID_OPENAI=true` 확인
+4. 백엔드 실행: `yarn workspace @flows/backend start`
+5. 프론트 실행: `yarn web:start`
+6. 접속: `http://localhost:3000`
+7. API Key: `local-test`
 
 ---
 
