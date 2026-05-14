@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { type MessageProposal, approveProposal } from '@flows/flows';
+import { type MessageProposal, approveProposal, getFlowMessages } from '@flows/flows';
 
 import { FlowAgentPanel } from './FlowAgentPanel';
 
@@ -43,7 +43,8 @@ const proposal: MessageProposal = {
             ],
             profileOptions: [
                 { id: 'shorts.info.v1', label: '정보전달 쇼츠', description: '쇼츠' },
-                { id: 'longform.explainer.v1', label: '롱폼 해설', description: '롱폼' },
+                { id: 'shorts.story.v1', label: '이야기형 쇼츠', description: '쇼츠' },
+                { id: 'longform.explainer.v1', label: '롱폼 해설', description: '예전 metadata에 남은 롱폼 옵션' },
             ],
         },
     },
@@ -55,7 +56,7 @@ describe('FlowAgentPanel proposal content profile controls', () => {
         Element.prototype.scrollIntoView = vi.fn();
     });
 
-    it('lets the user choose script tone, intensity, review mode, and content profile before approval', async () => {
+    it('lets the user choose script tone, intensity, review mode, and same-family content profile before approval', async () => {
         render(
             <FlowAgentPanel
                 open
@@ -80,7 +81,8 @@ describe('FlowAgentPanel proposal content profile controls', () => {
         fireEvent.click(screen.getByRole('button', { name: '뉴스앵커형' }));
         fireEvent.click(screen.getByRole('button', { name: '강하게' }));
         fireEvent.click(screen.getByRole('button', { name: '대본 검수 후 실행' }));
-        fireEvent.click(screen.getByRole('button', { name: '롱폼 해설' }));
+        expect(screen.queryByRole('button', { name: '롱폼 해설' })).toBeNull();
+        fireEvent.click(screen.getByRole('button', { name: '이야기형 쇼츠' }));
         fireEvent.click(screen.getByRole('button', { name: '승인' }));
 
         await waitFor(() => {
@@ -90,7 +92,7 @@ describe('FlowAgentPanel proposal content profile controls', () => {
                     scriptToneId: 'news-anchor',
                     scriptToneIntensity: 'high',
                     reviewMode: 'script-first',
-                    contentProfileId: 'longform.explainer.v1',
+                    contentProfileId: 'shorts.story.v1',
                 })
             );
         });
@@ -153,5 +155,25 @@ describe('FlowAgentPanel proposal content profile controls', () => {
                 })
             );
         });
+    });
+
+    it('replaces chat history when the active flow changes', async () => {
+        vi.mocked(getFlowMessages).mockImplementation(async flowId => [
+            {
+                id: `${flowId}-message`,
+                role: 'agent',
+                content: flowId === 'flow-1' ? '첫 번째 플로우 기록' : '두 번째 플로우 기록',
+                timestamp: Date.now(),
+            },
+        ]);
+
+        const { rerender } = render(<FlowAgentPanel open onClose={() => undefined} flowId="flow-1" />);
+
+        expect(await screen.findByText('첫 번째 플로우 기록')).toBeTruthy();
+
+        rerender(<FlowAgentPanel open onClose={() => undefined} flowId="flow-2" />);
+
+        expect(await screen.findByText('두 번째 플로우 기록')).toBeTruthy();
+        expect(screen.queryByText('첫 번째 플로우 기록')).toBeNull();
     });
 });

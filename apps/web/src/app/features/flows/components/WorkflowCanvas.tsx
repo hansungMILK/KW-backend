@@ -82,6 +82,8 @@ interface WorkflowCanvasProps {
     onConnectionError?: (error: 'cycle' | 'invalid_type') => void;
     /** Called to show notification message (dev only, for touch debug) */
     onShowNotification?: (message: string, type: 'success' | 'error') => void;
+    /** Called after a longform Gate A script review is approved and persisted. */
+    onLongformReviewApproved?: () => Promise<void> | void;
 }
 
 const GRID_SIZE = 20;
@@ -197,7 +199,17 @@ const EmptyState: React.FC<EmptyStateProps> = ({ onOpenLibrary }) => {
 
 export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>(
     (
-        { readOnly, initialData, flowId, onNodeSelect, onChange, onOpenLibrary, onConnectionError, onShowNotification },
+        {
+            readOnly,
+            initialData,
+            flowId,
+            onNodeSelect,
+            onChange,
+            onOpenLibrary,
+            onConnectionError,
+            onShowNotification,
+            onLongformReviewApproved,
+        },
         ref
     ) => {
         const { t } = useTranslation(['flows', 'nodes']);
@@ -1585,6 +1597,24 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
             });
         };
 
+        const handleConfigPatch = async (nodeId: string, patch: Record<string, unknown>) => {
+            if (readOnly) return;
+            saveCheckpoint();
+
+            const nextNodes = nodesRef.current.map(n => {
+                if (n.id !== nodeId) return n;
+                return { ...n, config: { ...(n.config || {}), ...patch } };
+            });
+            const updatedNode = nextNodes.find(n => n.id === nodeId);
+            nodesRef.current = nextNodes;
+            setNodes(nextNodes);
+
+            if (updatedNode) {
+                syncNodeUpdate(nodeId, { config: updatedNode.config ?? {} });
+                await flushPendingUpdates();
+            }
+        };
+
         const handleLabelChange = (nodeId: string, label: string) => {
             if (readOnly) return;
             saveCheckpoint();
@@ -2680,12 +2710,14 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                                             }}
                                             configHandlers={{
                                                 onConfigChange: (k, v) => handleConfigChange(node.id, k, v),
+                                                onConfigPatch: patch => handleConfigPatch(node.id, patch),
                                                 onLabelChange: label => handleLabelChange(node.id, label),
                                                 onToggleAuto: () => handleToggleAuto(node.id),
                                             }}
                                             actions={{
                                                 onDelete: () => deleteNode(node.id),
                                                 onTrigger: () => executeNode(node.id),
+                                                onLongformReviewApproved,
                                                 onToggleDisabled: () => toggleNodeDisabled(node.id),
                                                 onDuplicate: () => duplicateNode(node.id),
                                                 onViewLogs: () => setLogViewerNodeId(node.id),

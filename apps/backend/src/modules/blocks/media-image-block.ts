@@ -704,6 +704,7 @@ function classifyImageError(err: unknown): string {
         if (/provider request budget exceeded/i.test(err.message)) return 'IMAGE_PROVIDER_REQUEST_BUDGET_EXCEEDED';
         const status = err.message.match(/OpenAI image API error (\d+)/)?.[1];
         if (status) return `IMAGE_PROVIDER_${status}`;
+        if (isTransientProviderTransportError(err)) return 'IMAGE_PROVIDER_TRANSPORT';
         if (/cancelled|aborted/i.test(err.message)) return 'RUN_CANCELLED';
     }
     return 'IMAGE_PROVIDER_ERROR';
@@ -712,12 +713,27 @@ function classifyImageError(err: unknown): string {
 function isRetryableSceneImageError(err: unknown): boolean {
     const errorCode = classifyImageError(err);
     if (errorCode === 'IMAGE_TIMEOUT') return true;
+    if (errorCode === 'IMAGE_PROVIDER_TRANSPORT') return true;
 
     const status = errorCode.match(/^IMAGE_PROVIDER_(\d+)$/)?.[1];
     if (!status) return false;
 
     const statusCode = Number(status);
     return statusCode === 408 || statusCode === 409 || statusCode === 429 || statusCode >= 500;
+}
+
+function isTransientProviderTransportError(err: Error): boolean {
+    const message = err.message;
+    const code =
+        typeof (err as Error & { code?: unknown }).code === 'string' ? (err as Error & { code: string }).code : '';
+    const causeCode =
+        err.cause && typeof err.cause === 'object' && typeof (err.cause as { code?: unknown }).code === 'string'
+            ? String((err.cause as { code: string }).code)
+            : '';
+
+    return /other side closed|socket hang up|connection closed|connection terminated|client network socket disconnected|ECONNRESET|EPIPE|UND_ERR_SOCKET|UND_ERR_REQ_CONTENT_LENGTH_MISMATCH/i.test(
+        [message, code, causeCode].filter(Boolean).join(' ')
+    );
 }
 
 function createLinkedAbortController(parentSignal?: AbortSignal): {

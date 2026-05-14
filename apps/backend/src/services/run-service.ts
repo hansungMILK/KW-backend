@@ -488,14 +488,12 @@ const hasApprovedLongformGateAArtifact = (node: Record<string, unknown>): boolea
 };
 
 const checkLongformGateBApproval = (nodes: Array<Record<string, unknown>>): RunServiceFailure | null => {
-    const hasApprovedReviewNode = nodes.some(
-        node => isLongformReviewNode(node) && hasApprovedLongformGateAArtifact(node)
-    );
+    const hasApprovedGateAArtifact = nodes.some(hasApprovedLongformGateAArtifact);
     const blockedNode = nodes.find(node => {
         const blockType = getBlockType(node);
         return (
             LONGFORM_GATE_B_BLOCK_TYPES.has(blockType) &&
-            !hasApprovedReviewNode &&
+            !hasApprovedGateAArtifact &&
             !hasApprovedLongformGateAArtifact(node)
         );
     });
@@ -519,8 +517,12 @@ const getPreflightNodesForRun = (
     nodes: Array<Record<string, unknown>>,
     executionMode: 'full' | 'step'
 ): Array<Record<string, unknown>> => {
+    const hasApprovedGateAArtifact = nodes.some(hasApprovedLongformGateAArtifact);
     const shouldStopForReview =
-        executionMode === 'step' && nodes.some(isLongformReviewNode) && nodes.some(isUnapprovedLongformGateBNode);
+        executionMode === 'step' &&
+        !hasApprovedGateAArtifact &&
+        nodes.some(isLongformReviewNode) &&
+        nodes.some(isUnapprovedLongformGateBNode);
 
     if (!shouldStopForReview) return nodes;
     return nodes.filter(node => !LONGFORM_GATE_B_BLOCK_TYPES.has(getBlockType(node)));
@@ -876,7 +878,15 @@ export const runService = {
         const longformCostLimitResult = checkLongformHtmlRenderCostLimit(retryScopeNodes);
         if (longformCostLimitResult) return longformCostLimitResult;
 
-        const longformApprovalResult = checkLongformGateBApproval(retryScopeNodes);
+        const approvalContextNodes = allNodes.map(runNode => ({
+            id: runNode.nodeId,
+            blockType: runNode.blockType,
+            data: {
+                ...(isRecord(runNode.inputPayload) ? runNode.inputPayload : {}),
+                ...(isRecord(runNode.outputPayload) ? runNode.outputPayload : {}),
+            },
+        }));
+        const longformApprovalResult = checkLongformGateBApproval([...retryScopeNodes, ...approvalContextNodes]);
         if (longformApprovalResult) return longformApprovalResult;
 
         // FAILED → PENDING (retryCount incremented inside updateRunNodeStatus)

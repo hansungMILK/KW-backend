@@ -343,7 +343,8 @@ test.describe('Eureka Flow UI inspection', () => {
         const flowId = await createFlowWithCanvas(page, { nodes: [], edges: [] });
         const createdAt = new Date().toISOString();
         const proposalId = 'proposal-longform-gate-a-e2e';
-        const runId = 'run-longform-gate-a-e2e';
+        const gateARunId = 'run-longform-gate-a-e2e';
+        const gateBRunId = 'run-longform-gate-b-e2e';
         const longformArtifact = {
             gate: 'A',
             mode: 'longform-review',
@@ -536,7 +537,7 @@ test.describe('Eureka Flow UI inspection', () => {
             },
         };
         let approveRequestBody: Record<string, unknown> | null = null;
-        let runRequestBody: Record<string, unknown> | null = null;
+        const runRequestBodies: Record<string, unknown>[] = [];
 
         await page.route(`**/_apis/flows/${flowId}/messages`, async route => {
             if (route.request().method() !== 'POST') {
@@ -618,7 +619,9 @@ test.describe('Eureka Flow UI inspection', () => {
                 return;
             }
 
-            runRequestBody = route.request().postDataJSON() as Record<string, unknown>;
+            const runRequestBody = route.request().postDataJSON() as Record<string, unknown>;
+            runRequestBodies.push(runRequestBody);
+            const runId = runRequestBodies.length === 1 ? gateARunId : gateBRunId;
             await route.fulfill({
                 status: 202,
                 contentType: 'application/json',
@@ -631,12 +634,12 @@ test.describe('Eureka Flow UI inspection', () => {
                 }),
             });
         });
-        await page.route(`**/_apis/runs/${runId}`, route =>
+        await page.route(`**/_apis/runs/${gateARunId}`, route =>
             route.fulfill({
                 status: 200,
                 contentType: 'application/json',
                 body: JSON.stringify({
-                    runId,
+                    runId: gateARunId,
                     flowId,
                     runType: 'FULL_FLOW',
                     status: 'COMPLETED',
@@ -651,14 +654,14 @@ test.describe('Eureka Flow UI inspection', () => {
                 }),
             })
         );
-        await page.route(`**/_apis/runs/${runId}/nodes`, route =>
+        await page.route(`**/_apis/runs/${gateARunId}/nodes`, route =>
             route.fulfill({
                 status: 200,
                 contentType: 'application/json',
                 body: JSON.stringify({
                     items: [
                         {
-                            runId,
+                            runId: gateARunId,
                             nodeId: 'node-longform-source',
                             blockType: 'longform-source',
                             label: '롱폼 자료 수집',
@@ -670,7 +673,7 @@ test.describe('Eureka Flow UI inspection', () => {
                             updatedAt: createdAt,
                         },
                         {
-                            runId,
+                            runId: gateARunId,
                             nodeId: 'node-longform-review',
                             blockType: 'longform-review',
                             label: '롱폼 사용자 검수',
@@ -679,6 +682,85 @@ test.describe('Eureka Flow UI inspection', () => {
                             retryCount: 0,
                             parentNodeIds: ['node-longform-scene-json'],
                             outputPayload: longformArtifact,
+                            updatedAt: createdAt,
+                        },
+                    ],
+                }),
+            })
+        );
+        await page.route(`**/_apis/runs/${gateBRunId}`, route =>
+            route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    runId: gateBRunId,
+                    flowId,
+                    runType: 'FULL_FLOW',
+                    status: 'COMPLETED',
+                    triggerSource: 'MANUAL',
+                    executionMode: 'full',
+                    flowSnapshot: { nodes: longformNodes, edges: longformEdges },
+                    createdAt,
+                }),
+            })
+        );
+        await page.route(`**/_apis/runs/${gateBRunId}/nodes`, route =>
+            route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    items: [
+                        {
+                            runId: gateBRunId,
+                            nodeId: 'node-longform-review',
+                            blockType: 'longform-review',
+                            label: '롱폼 사용자 검수',
+                            status: 'COMPLETED',
+                            progress: 100,
+                            retryCount: 0,
+                            parentNodeIds: ['node-longform-scene-json'],
+                            outputPayload: {
+                                ...longformArtifact,
+                                reviewStatus: 'approved',
+                                mediaExecutionAllowed: true,
+                            },
+                            updatedAt: createdAt,
+                        },
+                        {
+                            runId: gateBRunId,
+                            nodeId: 'node-longform-tts',
+                            blockType: 'longform-tts',
+                            label: '롱폼 음성 생성',
+                            status: 'COMPLETED',
+                            progress: 100,
+                            retryCount: 0,
+                            parentNodeIds: ['node-longform-review'],
+                            outputPayload: {
+                                audio: {
+                                    url: 'http://example.test/longform-narration.mp3',
+                                    provider: 'elevenlabs',
+                                    voiceId: 'pNInz6obpgDQGcFmaJgB',
+                                },
+                                subtitleCues: [{ startMs: 0, endMs: 2400, text: 'AI 에이전트의 미래입니다.' }],
+                            },
+                            updatedAt: createdAt,
+                        },
+                        {
+                            runId: gateBRunId,
+                            nodeId: 'node-longform-render',
+                            blockType: 'longform-render',
+                            label: '롱폼 2K 렌더',
+                            status: 'COMPLETED',
+                            progress: 100,
+                            retryCount: 0,
+                            parentNodeIds: ['node-longform-motion-compose'],
+                            outputPayload: {
+                                video: {
+                                    url: 'http://example.test/longform-final.mp4',
+                                    durationSec: 300,
+                                    resolution: '2560x1440',
+                                },
+                            },
                             updatedAt: createdAt,
                         },
                     ],
@@ -732,13 +814,21 @@ test.describe('Eureka Flow UI inspection', () => {
             reviewMode: 'script-first',
             scriptToneId: 'calm-explainer',
         });
-        expect(runRequestBody).toMatchObject({ executionMode: 'step' });
+        expect(runRequestBodies[0]).toMatchObject({ executionMode: 'step' });
+
+        await page.getByRole('button', { name: /승인하고 유료 제작 허용/ }).click();
+        await expect
+            .poll(() => runRequestBodies.length, { timeout: 10000, message: 'review approval should start Gate B run' })
+            .toBe(2);
+        expect(runRequestBodies[1]).toMatchObject({ executionMode: 'full' });
+        await expect(page.getByText('필수 입력값 누락: Approved Script')).toHaveCount(0);
+        await capture(page, '20-longform-review-approved-auto-run');
 
         writeProbeArtifacts(probe, {
             mode: 'longform-gate-a-no-paid',
             flowId,
             approveRequestBody,
-            runRequestBody,
+            runRequestBodies,
             mediaNodesVisible: {
                 image: (await page.getByText('이미지 생성', { exact: true }).count()) > 0,
                 tts: (await page.getByText('롱폼 음성 생성', { exact: true }).count()) > 0,

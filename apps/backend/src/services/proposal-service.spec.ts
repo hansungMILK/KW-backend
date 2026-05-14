@@ -372,6 +372,106 @@ describe('proposalService.approve image generation overrides', () => {
         );
     });
 
+    it('treats an approved longform direct-run proposal as Gate B approval for the generated Gate A artifact', async () => {
+        const proposal: Proposal = {
+            proposalId: 'proposal-longform-direct',
+            flowId: 'flow-longform-direct',
+            sourceMessageId: 'message-longform-direct',
+            status: 'PENDING',
+            proposedNodes: [
+                {
+                    id: 'node-script',
+                    blockType: 'longform-script',
+                    type: 'longform-script',
+                    config: {
+                        mode: 'longform-gate-a',
+                        mediaExecutionAllowed: false,
+                    },
+                },
+                {
+                    id: 'node-review',
+                    blockType: 'longform-review',
+                    type: 'longform-review',
+                    config: {
+                        mode: 'longform-gate-a',
+                        mediaExecutionAllowed: false,
+                    },
+                },
+                {
+                    id: 'node-render',
+                    blockType: 'longform-render',
+                    type: 'longform-render',
+                    config: {
+                        mode: 'longform-gate-b',
+                        mediaExecutionAllowed: false,
+                    },
+                },
+            ],
+            proposedEdges: [],
+            metadata: {
+                contentProfile: {
+                    contentProfileId: 'longform.explainer.v1',
+                    scriptToneId: 'calm-explainer',
+                    scriptToneIntensity: 'medium',
+                    reviewMode: 'direct-run',
+                },
+            },
+            approvalRequired: true,
+            createdAt: '2026-05-11T00:00:00.000Z',
+            updatedAt: '2026-05-11T00:00:00.000Z',
+        };
+
+        getProposal.mockResolvedValue(proposal);
+        getFlow.mockResolvedValue({
+            id: 'flow-longform-direct',
+            name: 'Flow',
+            state: 'DRAFT',
+            nodes: [],
+            edges: [],
+            createdAt: '2026-05-11T00:00:00.000Z',
+            updatedAt: '2026-05-11T00:00:00.000Z',
+        });
+
+        const result = await proposalService.approve('proposal-longform-direct', undefined, undefined, {
+            reviewMode: 'direct-run',
+        });
+
+        expect(result.ok).toBe(true);
+        const savedFlow = putFlow.mock.calls[0]?.[0];
+        expect(savedFlow?.nodes).toEqual([
+            expect.objectContaining({
+                id: 'node-script',
+                config: expect.objectContaining({
+                    reviewMode: 'direct-run',
+                    reviewStatus: 'approved',
+                    mediaExecutionAllowed: true,
+                    gateBApproved: true,
+                    approvedArtifactId: 'proposal-proposal-longform-direct-direct-run',
+                }),
+            }),
+            expect.objectContaining({
+                id: 'node-review',
+                config: expect.objectContaining({
+                    reviewMode: 'direct-run',
+                    reviewStatus: 'approved',
+                    mediaExecutionAllowed: true,
+                    gateBApproved: true,
+                    approvedArtifactId: 'proposal-proposal-longform-direct-direct-run',
+                }),
+            }),
+            expect.objectContaining({
+                id: 'node-render',
+                config: expect.objectContaining({
+                    reviewMode: 'direct-run',
+                    mediaExecutionAllowed: false,
+                }),
+            }),
+        ]);
+        expect((savedFlow?.nodes?.[2] as { config?: Record<string, unknown> } | undefined)?.config).not.toHaveProperty(
+            'gateBApproved'
+        );
+    });
+
     it('copies longform HTML render cost breakdown into the approved render node config', async () => {
         const proposal: Proposal = {
             proposalId: 'proposal-4',

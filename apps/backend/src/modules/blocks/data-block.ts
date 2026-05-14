@@ -124,6 +124,7 @@ function normalizeContent(input: unknown): BlockExecutorResult {
             rawScenes = obj['scenes'] as RawScene[];
         }
     }
+    const defaultSourceRefs = sourceIds(sources);
 
     const normalizedScenes = rawScenes.map((scene, idx) => {
         const sceneNumber = typeof scene.sceneNumber === 'number' ? scene.sceneNumber : idx + 1;
@@ -147,15 +148,22 @@ function normalizeContent(input: unknown): BlockExecutorResult {
                   : caption.length > 0
                     ? caption
                     : undefined;
-        const sourceRefs = Array.isArray(scene.sourceRefs) ? scene.sourceRefs : [];
+        const explicitSourceRefs = Array.isArray(scene.sourceRefs) ? scene.sourceRefs : [];
+        const shouldBackfillSourceRefs =
+            explicitSourceRefs.length === 0 &&
+            defaultSourceRefs.length > 0 &&
+            (scene.claimType === 'fact' || hasConcreteClaim(scene));
+        const sourceRefs = shouldBackfillSourceRefs ? defaultSourceRefs : explicitSourceRefs;
         const claimType =
             scene.claimType === 'fact' &&
             sourceRefs.length === 0 &&
             isQuestionOnlyScene({ ...scene, caption, narration })
                 ? 'opinion'
-                : isClaimType(scene.claimType)
-                  ? scene.claimType
-                  : inferClaimType(scene, sourceRefs);
+                : scene.claimType === 'fact' && sourceRefs.length === 0 && !hasConcreteClaim(scene)
+                  ? 'opinion'
+                  : isClaimType(scene.claimType)
+                    ? scene.claimType
+                    : inferClaimType(scene, sourceRefs);
         const durationSec = typeof scene.durationSec === 'number' ? scene.durationSec : 5;
 
         // Derive per-scene keywords: prefer upstream list sliced per scene,
@@ -246,10 +254,11 @@ function isClaimType(input: unknown): input is 'fact' | 'hypothetical' | 'opinio
 
 function inferClaimType(scene: RawScene, sourceRefs: unknown[]): 'fact' | 'opinion' {
     if (sourceRefs.length > 0) return 'fact';
+    if (scene.claimType === 'fact' && !hasConcreteClaim(scene)) return 'opinion';
     const text = [scene.caption, scene.visualText, scene.narration]
         .filter((value): value is string => typeof value === 'string')
         .join(' ');
-    if (/\d{4}|\d+월|\d+일|\d+%|\d+등급|\d+점/.test(text)) return 'fact';
+    if (hasConcreteClaim({ caption: text })) return 'fact';
     return 'opinion';
 }
 
@@ -267,6 +276,23 @@ function stripMarkdown(value: string): string {
         .replace(/__/g, '')
         .replace(/[`*_~]/g, '')
         .trim();
+}
+
+function sourceIds(sources: unknown[]): string[] {
+    return sources
+        .map(source => {
+            if (!isRecord(source)) return undefined;
+            const id = source['id'];
+            return typeof id === 'string' && id.trim() ? id.trim() : undefined;
+        })
+        .filter((id): id is string => Boolean(id));
+}
+
+function hasConcreteClaim(scene: RawScene): boolean {
+    const text = [scene.caption, scene.visualText, scene.narration]
+        .filter((value): value is string => typeof value === 'string')
+        .join(' ');
+    return /\d{4}|\d+월|\d+일|\d+%|\d+등급|\d+점/.test(text);
 }
 
 function isLongformGateAInput(input: unknown, config?: Record<string, unknown>): boolean {

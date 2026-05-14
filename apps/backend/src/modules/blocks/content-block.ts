@@ -19,6 +19,7 @@ Given keywords and/or article summaries, generate a complete 10–15 scene, one-
 Requirements:
 - If the user message contains "PRIMARY SOURCE", treat that source as the main brief. Supporting sources may verify or add caveats, but must not replace the primary source's angle.
 - Preserve concrete numbers, conditions, warnings, and key claims from the PRIMARY SOURCE in factual scenes.
+- If no source ids are available, do not mark scenes as claimType "fact"; use opinion or hypothetical unless the scene cites a real sourceRef.
 - For URL/article requests, build the script from the article's factual spine: who/what/when, the triggering claim, the disputed action, the response/apology, and what viewers should take away.
 - Do not replace a provided URL's specific story with generic background. If the article mentions names, dates, product names, amounts, or direct allegations, use those exact facts in the narration.
 - title: a short high-impact Korean title that can stay at the top of every frame
@@ -122,6 +123,20 @@ Respond with JSON only — no markdown fences, no extra text:
   "rendererRoute": "hyperframes",
   "qaChecklist": ["source check", "script review", "scene approval"]
 }`;
+
+const buildShortsSystemPrompt = (sceneCount?: number): string => {
+    if (!sceneCount) return CONTENT_SYSTEM_PROMPT;
+    return CONTENT_SYSTEM_PROMPT.replace(
+        'generate a complete 10–15 scene, one-minute vertical Shorts plan',
+        `generate a complete exactly ${sceneCount} scenes, one-minute vertical Shorts plan`
+    )
+        .replace('- scenes: 10–15 scenes, each with:', `- scenes: exactly ${sceneCount} scenes, each with:`)
+        .replace(
+            'imageSlot: "[Image #1]" through "[Image #12]" or "[Image #15]"',
+            `imageSlot: "[Image #1]" through "[Image #${sceneCount}]"`
+        )
+        .replace('"sceneCount": 12', `"sceneCount": ${sceneCount}`);
+};
 
 // ── Dummy (mock mode) ─────────────────────────────────────────────────────────
 
@@ -289,6 +304,8 @@ export const contentBlock: BlockExecutor = {
 
         const singleImageMode = isSingleImageMode(input, config);
         const genericTextMode = isGenericTextMode(input, config);
+        const requestedShortsSceneCount =
+            !longformGateAMode && !singleImageMode && !genericTextMode ? resolveShortsSceneCount(config) : undefined;
 
         log.info('[content-block] Starting AI script generation', {
             messageLength: userMessage.length,
@@ -313,7 +330,11 @@ export const contentBlock: BlockExecutor = {
                   ? `${SINGLE_IMAGE_SYSTEM_PROMPT}\n\n${contentPreferencePrompt}\n\n${directorPrompt}\n\n${rulepack.imagePrompt}`
                   : genericTextMode
                     ? `${GENERIC_TEXT_SYSTEM_PROMPT}\n\n${contentPreferencePrompt}`
-                    : `${CONTENT_SYSTEM_PROMPT}\n\n${buildCombinedPrompt(rulepack, 'contentPrompt')}\n\n${scriptTonePrompt}\n\n${directorPrompt}\n\n${rulepack.sourcePolicy}`,
+                    : `${buildShortsSystemPrompt(requestedShortsSceneCount)}\n\n${
+                          requestedShortsSceneCount
+                              ? `HARD SCENE COUNT: produce exactly ${requestedShortsSceneCount} scenes. Ignore any generic 10-15 scene defaults from reusable rulepacks.`
+                              : ''
+                      }\n\n${buildCombinedPrompt(rulepack, 'contentPrompt')}\n\n${scriptTonePrompt}\n\n${directorPrompt}\n\n${rulepack.sourcePolicy}`,
             userMessage,
             maxTokens: 4096,
         });
@@ -356,7 +377,17 @@ export const contentBlock: BlockExecutor = {
             );
         }
 
-        if (!singleImageMode && (validated.data.scenes.length < 10 || validated.data.scenes.length > 15)) {
+        if (requestedShortsSceneCount && validated.data.scenes.length !== requestedShortsSceneCount) {
+            throw new Error(
+                `[content-block] Expected exactly ${requestedShortsSceneCount} scenes, got ${validated.data.scenes.length}`
+            );
+        }
+
+        if (
+            !requestedShortsSceneCount &&
+            !singleImageMode &&
+            (validated.data.scenes.length < 10 || validated.data.scenes.length > 15)
+        ) {
             throw new Error(`[content-block] Expected 10-15 scenes, got ${validated.data.scenes.length}`);
         }
 
@@ -424,6 +455,15 @@ function isGenericTextMode(input: unknown, config?: Record<string, unknown>): bo
     return ['text', 'summary', 'summarize', 'explain', 'write', 'rewrite', 'translate'].some(mode =>
         modeText.includes(mode)
     );
+}
+
+function resolveShortsSceneCount(config?: Record<string, unknown>): number | undefined {
+    const values: unknown[] = [config?.['count'], config?.['scenes'], config?.['sceneCount'], config?.['frameCount']];
+    for (const value of values) {
+        const count = readPositiveInteger(value);
+        if (count && count > 1 && count <= 24) return count;
+    }
+    return undefined;
 }
 
 function isLongformGateAMode(input: unknown, config?: Record<string, unknown>): boolean {
@@ -526,7 +566,9 @@ function buildSourceDigest(input: unknown): string[] {
 function normalizeContentOutput(parsed: unknown, input: unknown, presetId: string): unknown {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return parsed;
     const obj = parsed as Record<string, unknown>;
-    const sources = extractSources(input);
+    const sources = normalizeSources(extractSources(input));
+    const parsedSources = Array.isArray(obj['sources']) ? normalizeSources(obj['sources']) : [];
+    const defaultSourceRefs = sourceIds(parsedSources.length > 0 ? parsedSources : sources);
     const script = isRecord(obj['script']) ? obj['script'] : {};
     const title = typeof obj['title'] === 'string' ? obj['title'] : '쇼츠 핵심 정리';
     const hook =
@@ -539,7 +581,7 @@ function normalizeContentOutput(parsed: unknown, input: unknown, presetId: strin
               : '저장하고 다음에 다시 확인하세요.';
     const scenes = Array.isArray(obj['scenes'])
         ? (obj['scenes'] as Record<string, unknown>[]).map((scene, index) => ({
-              ...normalizeScene(scene, index, title),
+              ...normalizeScene(scene, index, title, defaultSourceRefs),
           }))
         : obj['scenes'];
 
@@ -555,12 +597,17 @@ function normalizeContentOutput(parsed: unknown, input: unknown, presetId: strin
         style: normalizeStyle(obj['style'], Array.isArray(scenes) ? scenes.length : undefined),
         scenes,
         cta: compactSpokenLine(cta, 32),
-        sources: Array.isArray(obj['sources']) && obj['sources'].length > 0 ? obj['sources'] : sources,
+        sources: parsedSources.length > 0 ? parsedSources : sources,
         presetId,
     };
 }
 
-function normalizeScene(scene: Record<string, unknown>, index: number, title: string): Record<string, unknown> {
+function normalizeScene(
+    scene: Record<string, unknown>,
+    index: number,
+    title: string,
+    defaultSourceRefs: string[] = []
+): Record<string, unknown> {
     const sceneNumber = typeof scene['sceneNumber'] === 'number' ? scene['sceneNumber'] : index + 1;
     const imageSlot = typeof scene['imageSlot'] === 'string' ? scene['imageSlot'] : `[Image #${sceneNumber}]`;
     const caption = typeof scene['caption'] === 'string' ? compactPromptText(stripMarkdown(scene['caption']), 22) : '';
@@ -577,7 +624,12 @@ function normalizeScene(scene: Record<string, unknown>, index: number, title: st
             : typeof scene['visualText'] === 'string'
               ? compactPromptText(stripMarkdown(scene['visualText']), 18)
               : compactPromptText(caption, 18);
-    const sourceRefs = Array.isArray(scene['sourceRefs']) ? scene['sourceRefs'] : [];
+    const explicitSourceRefs = Array.isArray(scene['sourceRefs']) ? normalizeSceneSourceRefs(scene['sourceRefs']) : [];
+    const shouldBackfillSourceRefs =
+        explicitSourceRefs.length === 0 &&
+        defaultSourceRefs.length > 0 &&
+        (scene['claimType'] === 'fact' || hasConcreteClaim(scene));
+    const sourceRefs = shouldBackfillSourceRefs ? defaultSourceRefs : explicitSourceRefs;
     const claimType = normalizeClaimType(scene['claimType'], scene, sourceRefs);
 
     return {
@@ -620,13 +672,14 @@ function storyBeatForIndex(index: number): string {
 
 function normalizeClaimType(input: unknown, scene: Record<string, unknown>, sourceRefs: unknown[]): string {
     if (input === 'fact' && sourceRefs.length === 0 && isQuestionOnlyScene(scene)) return 'opinion';
+    if (input === 'fact' && sourceRefs.length === 0 && !hasConcreteClaim(scene)) return 'opinion';
     if (input === 'fact' || input === 'hypothetical' || input === 'opinion' || input === 'joke') return input;
     if (sourceRefs.length > 0) return 'fact';
 
     const text = [scene['caption'], scene['visualText'], scene['narration']]
         .filter((value): value is string => typeof value === 'string')
         .join(' ');
-    if (/\d{4}|\d+월|\d+일|\d+%|\d+등급|\d+점/.test(text)) return 'fact';
+    if (hasConcreteClaim({ caption: text })) return 'fact';
     return 'opinion';
 }
 
@@ -664,12 +717,75 @@ function readPositiveNumber(input: unknown): number | undefined {
     return Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
+function readPositiveInteger(input: unknown): number | undefined {
+    const value = readPositiveNumber(input);
+    if (!value || !Number.isInteger(value)) return undefined;
+    return value;
+}
+
 function stripMarkdown(value: string): string {
     return value
         .replace(/\*\*/g, '')
         .replace(/__/g, '')
         .replace(/[`*_~]/g, '')
         .trim();
+}
+
+function normalizeSceneSourceRefs(sourceRefs: unknown[]): unknown[] {
+    return sourceRefs
+        .map(sourceRef => {
+            if (typeof sourceRef === 'string') return sourceRef;
+            if (isRecord(sourceRef)) return normalizeSource(sourceRef, 0);
+            return undefined;
+        })
+        .filter((sourceRef): sourceRef is string | Record<string, unknown> => Boolean(sourceRef));
+}
+
+function sourceIds(sources: Array<Record<string, unknown>>): string[] {
+    return sources.map(source => optionalString(source['id'])).filter((id): id is string => Boolean(id));
+}
+
+function hasConcreteClaim(scene: Record<string, unknown>): boolean {
+    const text = [scene['caption'], scene['visualText'], scene['narration']]
+        .filter((value): value is string => typeof value === 'string')
+        .join(' ');
+    return /\d{4}|\d+월|\d+일|\d+%|\d+등급|\d+점/.test(text);
+}
+
+function normalizeSources(sources: unknown[]): Array<Record<string, unknown>> {
+    return sources
+        .map((source, index) => (isRecord(source) ? normalizeSource(source, index) : undefined))
+        .filter((source): source is Record<string, unknown> => Boolean(source));
+}
+
+function normalizeSource(source: Record<string, unknown>, index: number): Record<string, unknown> {
+    return {
+        id: optionalString(source['id']) ?? `source-${index + 1}`,
+        title: optionalString(source['title']),
+        url: optionalString(source['url']),
+        source: optionalString(source['source']),
+        publishedAt: source['publishedAt'] === null ? null : optionalString(source['publishedAt']),
+        sourceType: normalizeSourceType(source['sourceType']),
+        confidence: normalizeConfidence(source['confidence']),
+        summary: optionalString(source['summary']),
+        fullText: optionalString(source['fullText']),
+        keyClaims: Array.isArray(source['keyClaims']) ? source['keyClaims'].map(String) : undefined,
+        primarySource: typeof source['primarySource'] === 'boolean' ? source['primarySource'] : undefined,
+        sourcePriority: typeof source['sourcePriority'] === 'number' ? source['sourcePriority'] : undefined,
+    };
+}
+
+function optionalString(value: unknown): string | undefined {
+    return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+function normalizeSourceType(value: unknown): 'official' | 'news' | 'blog' | 'other' | undefined {
+    if (value === 'official' || value === 'news' || value === 'blog' || value === 'other') return value;
+    return undefined;
+}
+
+function normalizeConfidence(value: unknown): number | undefined {
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1 ? value : undefined;
 }
 
 function extractSources(input: unknown): Array<Record<string, unknown>> {

@@ -58,12 +58,79 @@ const sourceInput = {
     ],
 };
 
+function openaiResponse(content: Record<string, unknown>) {
+    return {
+        content: JSON.stringify(content),
+        model: 'gpt-test',
+        inputTokens: 100,
+        outputTokens: 200,
+        latencyMs: 1,
+    };
+}
+
 describe('longform blocks', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         vi.unstubAllGlobals();
-        vi.mocked(openaiAdapter.chatJson).mockResolvedValue({
-            content: JSON.stringify({
+        vi.mocked(openaiAdapter.chatJson).mockImplementation(async request => {
+            const systemPrompt = request.systemPrompt;
+            if (systemPrompt.includes('longform source researcher')) {
+                return openaiResponse({
+                    sourceDigest: ['AI 칩 기업이 나스닥 상장을 추진하고 투자자들이 성장성과 수익성을 함께 본다.'],
+                    factualSpine: {
+                        what: 'AI 칩 기업의 나스닥 상장 추진',
+                        whyItMatters: 'AI 인프라 투자 흐름을 보여준다.',
+                        caveats: ['수익성은 추가 확인이 필요하다.'],
+                    },
+                    keywords: ['AI 칩', '상장', '세레브라스'],
+                    confidence: 0.91,
+                });
+            }
+            if (systemPrompt.includes('longform angle strategist')) {
+                return openaiResponse({
+                    titleCandidates: ['AI 칩 상장, 왜 중요한가', '세레브라스 상장 핵심 정리'],
+                    viewerPromise: 'AI 칩 상장 이슈의 핵심과 본질을 이해할 수 있다.',
+                    targetViewer: 'AI 인프라와 시장 흐름을 알고 싶은 시청자',
+                    angle: '기술력보다 상장 이후 지속 가능한 사업성이 핵심이다.',
+                    structure: 'explainer',
+                    evidencePlan: [{ sourceId: 'source-1', useAt: 'context', visualUse: 'source-proof' }],
+                });
+            }
+            if (systemPrompt.includes('longform visual storyboard director')) {
+                return openaiResponse({
+                    visualChapters: Array.from({ length: 5 }, (_, index) => ({
+                        chapterId: `chapter-${index + 1}`,
+                        sectionId: `section-${index + 1}`,
+                        headline: index === 0 ? '상장 추진' : `챕터 ${index + 1}`,
+                        visualArchetype: index === 0 ? 'source-proof' : 'comparison',
+                        viewerPurpose: '뉴스의 출처와 핵심을 확인시킨다.',
+                        objects: [
+                            {
+                                id: `section-${index + 1}-headline`,
+                                type: 'headline',
+                                text: index === 0 ? '상장 추진' : `챕터 ${index + 1}`,
+                            },
+                        ],
+                        motionPlan: '기사 카드가 확대되고 핵심 문장에 밑줄이 그어진다.',
+                    })),
+                });
+            }
+            if (systemPrompt.includes('longform motion graphics director')) {
+                return openaiResponse({
+                    motionStyle: 'premium Korean explainer motion graphics',
+                    sceneDirectives: [
+                        {
+                            sceneId: 'scene-1',
+                            targetIds: ['section-1-headline'],
+                            cueTypes: ['source-card-zoom', 'underline', 'camera-push'],
+                            pacing: 'steady',
+                            description: '헤드라인 카드 확대와 밑줄 강조',
+                        },
+                    ],
+                    compositionNotes: ['자막과 내레이션의 타이밍을 기준으로 모션을 맞춘다.'],
+                });
+            }
+            return openaiResponse({
                 sourceDigest: ['세계 최대 AI 칩 기업의 나스닥 상장 추진과 투자자 반응을 정리한다.'],
                 outline: [
                     { title: '오프닝', summary: '왜 지금 이 이슈가 중요한지 짚는다.' },
@@ -83,11 +150,7 @@ describe('longform blocks', () => {
                 estimatedCost: { currency: 'USD', total: 0.2, notes: ['Planning only'] },
                 rendererRoute: 'hyperframes',
                 qaChecklist: ['출처 확인', '대본 검수', '씬 승인'],
-            }),
-            model: 'gpt-test',
-            inputTokens: 100,
-            outputTokens: 200,
-            latencyMs: 1,
+            });
         });
         vi.mocked(openaiAdapter.webSearchJson).mockResolvedValue({
             content: JSON.stringify({
@@ -117,9 +180,15 @@ describe('longform blocks', () => {
 
         expect(result.output.primarySources).toHaveLength(1);
         expect(result.output.sourceDigest).toEqual(
-            expect.arrayContaining([expect.stringContaining('AI 칩 기업이 나스닥 상장을 추진')])
+            expect.arrayContaining([expect.stringContaining('투자자들이 성장성과 수익성')])
         );
         expect(JSON.stringify(result.output)).not.toContain('<html>');
+        expect(openaiAdapter.chatJson).toHaveBeenCalledWith(
+            expect.objectContaining({
+                systemPrompt: expect.stringContaining('longform source researcher'),
+                userMessage: expect.stringContaining('AI 칩 기업이 나스닥 상장을 추진한다'),
+            })
+        );
     });
 
     it('collects primary URL text when the user request contains a URL but upstream articles are absent', async () => {
@@ -181,6 +250,12 @@ describe('longform blocks', () => {
         expect(result.output.structure).toBe('explainer');
         expect(result.output.estimatedDurationSec).toBe(300);
         expect(result.output.evidencePlan).toHaveLength(1);
+        expect(openaiAdapter.chatJson).toHaveBeenCalledWith(
+            expect.objectContaining({
+                systemPrompt: expect.stringContaining('longform angle strategist'),
+                userMessage: expect.stringContaining('AI 칩'),
+            })
+        );
     });
 
     it('creates script sections and source map from the brief', async () => {
@@ -214,6 +289,12 @@ describe('longform blocks', () => {
                 objects: expect.any(Array),
             })
         );
+        expect(openaiAdapter.chatJson).toHaveBeenCalledWith(
+            expect.objectContaining({
+                systemPrompt: expect.stringContaining('longform visual storyboard director'),
+                userMessage: expect.stringContaining('투자자들은 성장성과 수익성'),
+            })
+        );
     });
 
     it('builds a HyperFrames scene JSON contract with per-cue activity', async () => {
@@ -244,6 +325,17 @@ describe('longform blocks', () => {
             expect.arrayContaining([expect.stringMatching(/^section-1-/)])
         );
         expect(firstSceneObjectIds).toEqual(expect.arrayContaining(result.output.motionCues[0].targetIds));
+        expect(openaiAdapter.chatJson).toHaveBeenCalledWith(
+            expect.objectContaining({
+                systemPrompt: expect.stringContaining('longform motion graphics director'),
+                userMessage: expect.stringContaining('첫 자막입니다.'),
+            })
+        );
+        const motionRequest = vi
+            .mocked(openaiAdapter.chatJson)
+            .mock.calls.find(call => call[0].systemPrompt.includes('longform motion graphics director'))?.[0];
+        expect(motionRequest?.userMessage).toContain('"subtitleTiming"');
+        expect(motionRequest?.userMessage).not.toContain('"subtitleCues"');
     });
 
     it('creates a draft review artifact that blocks media execution by default', async () => {
@@ -294,6 +386,43 @@ describe('longform blocks', () => {
         expect(result.output.mediaExecutionAllowed).toBe(false);
         expect(result.output.gateBApproved).toBe(false);
         expect(result.output.approvedGateAArtifact).toBeUndefined();
+    });
+
+    it('lets an explicitly approved script carry a Gate A artifact into the review node', async () => {
+        const script = await longformScriptBlock.execute(
+            {
+                mode: 'longform-gate-a',
+                topic: '테스트 롱폼',
+                primarySources: [{ id: 'source-1', title: '원문', summary: '핵심 요약' }],
+                sections: [{ sectionId: 'section-1', title: '핵심', narration: '승인된 대본입니다.' }],
+            },
+            {
+                reviewStatus: 'approved',
+                approvedArtifactId: 'script-approved-artifact',
+            }
+        );
+
+        expect(script.output.reviewStatus).toBe('approved');
+        expect(script.output.mediaExecutionAllowed).toBe(true);
+        expect(script.output.gateBApproved).toBe(true);
+        expect(script.output.approvedGateAArtifact).toEqual(
+            expect.objectContaining({
+                mode: 'longform-gate-a',
+                reviewStatus: 'approved',
+                approvedArtifactId: 'script-approved-artifact',
+            })
+        );
+
+        const review = await longformReviewBlock.execute(script.output);
+
+        expect(review.output.reviewStatus).toBe('approved');
+        expect(review.output.mediaExecutionAllowed).toBe(true);
+        expect(review.output.gateBApproved).toBe(true);
+        expect(review.output.approvedGateAArtifact).toEqual(
+            expect.objectContaining({
+                approvedArtifactId: 'script-approved-artifact',
+            })
+        );
     });
 
     it('turns an explicitly approved longform review draft into a Gate A artifact', async () => {

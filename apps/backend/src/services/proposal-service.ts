@@ -97,7 +97,7 @@ export const proposalService = {
         // 'vertical' or default: use existing positions (y-spaced by orchestrator)
 
         const overriddenNodes = applyApprovalRenderCostBreakdown(
-            applyApprovalOverrides(layoutNodes, overrides, proposal.metadata),
+            applyApprovalOverrides(layoutNodes, overrides, proposal.metadata, proposal.proposalId),
             proposal.estimatedCost
         );
         const updatedMetadata = applyApprovalMetadataOverrides(proposal.metadata, overriddenNodes, overrides);
@@ -190,7 +190,8 @@ export const proposalService = {
 function applyApprovalOverrides(
     nodes: Array<Record<string, unknown>>,
     overrides: ApprovalOverrides | undefined,
-    metadata: Record<string, unknown> | undefined
+    metadata: Record<string, unknown> | undefined,
+    proposalId?: string
 ): Array<Record<string, unknown>> {
     const imageStyleId = normalizeImageStyleId(overrides?.imageStyleId);
     const imageQuality = overrides?.imageQuality ? normalizeImageQuality(overrides.imageQuality) : undefined;
@@ -214,6 +215,7 @@ function applyApprovalOverrides(
             ...(blockType === 'media-image' && imageStyleId ? { imageStyleId, imageStyleLabel: preset?.label } : {}),
             ...(blockType === 'media-image' && imageQuality ? { imageQuality } : {}),
             ...(sceneCount ? (blockType === 'media-image' ? { count: sceneCount } : { scenes: sceneCount }) : {}),
+            ...longformDirectRunApprovalConfig(contentProfile, blockType, proposalId),
         };
 
         return {
@@ -223,6 +225,30 @@ function applyApprovalOverrides(
                 : overriddenConfig,
         };
     });
+}
+
+const LONGFORM_GATE_A_APPROVAL_BLOCKS = new Set([
+    'longform-script',
+    'longform-storyboard',
+    'longform-scene-json',
+    'longform-review',
+]);
+
+function longformDirectRunApprovalConfig(
+    contentProfile: ContentProfilePreferences | undefined,
+    blockType: string,
+    proposalId: string | undefined
+): Record<string, unknown> {
+    if (!contentProfile?.contentProfileId.startsWith('longform.')) return {};
+    if (contentProfile.reviewMode !== 'direct-run') return {};
+    if (!LONGFORM_GATE_A_APPROVAL_BLOCKS.has(blockType)) return {};
+
+    return {
+        reviewStatus: 'approved',
+        mediaExecutionAllowed: true,
+        gateBApproved: true,
+        approvedArtifactId: `proposal-${proposalId ?? 'approved'}-direct-run`,
+    };
 }
 
 type ProposalCost = Proposal['estimatedCost'];

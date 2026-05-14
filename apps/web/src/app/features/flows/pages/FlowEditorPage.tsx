@@ -18,7 +18,7 @@ import { ApiKeyDialog } from '@flows/shared';
 import { useInitFlowSocket } from '@flows/socket';
 import { useWebCoreStore } from '@flows/web-core';
 
-import { getWorkflowRunMode } from './run-mode';
+import { getWorkflowRunMode, isWorkflowRunButtonDisabled } from './run-mode';
 import { FlowAgentPanel } from '../components/FlowAgentPanel';
 import { Header } from '../components/Header';
 import { HelpDialog } from '../components/HelpDialog';
@@ -952,7 +952,7 @@ export const FlowEditorPage = () => {
     }, []);
 
     const handleRunWorkflow = async () => {
-        if (!canvasRef.current || isWorkflowRunning) return;
+        if (!canvasRef.current || isWorkflowRunButtonDisabled({ isWorkflowRunning, isLoading, runStatus })) return;
 
         setIsWorkflowRunning(true);
         try {
@@ -1003,6 +1003,8 @@ export const FlowEditorPage = () => {
             setIsWorkflowRunning(false);
         }
     };
+
+    const runButtonDisabled = isWorkflowRunButtonDisabled({ isWorkflowRunning, isLoading, runStatus });
 
     const handleApproveProposal = useCallback(
         async (nodes: unknown[], edges: unknown[]) => {
@@ -1211,6 +1213,7 @@ export const FlowEditorPage = () => {
                     onOpenLibrary={handleOpenLibrary}
                     onConnectionError={handleConnectionError}
                     onShowNotification={showNotification}
+                    onLongformReviewApproved={handleRunWorkflow}
                 />
             </div>
 
@@ -1291,12 +1294,18 @@ export const FlowEditorPage = () => {
             <button
                 type="button"
                 onClick={() => void handleRunWorkflow()}
-                disabled={isWorkflowRunning || isLoading}
+                disabled={runButtonDisabled}
                 className="absolute bottom-20 left-1/2 -translate-x-1/2 z-30 inline-flex items-center gap-2 rounded-xl border border-primary/40 bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-floating transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
                 title="전체 워크플로우 실행"
             >
                 {isWorkflowRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                <span>{isWorkflowRunning ? '실행 요청 중' : '워크플로우 실행'}</span>
+                <span>
+                    {isWorkflowRunning
+                        ? '실행 요청 중'
+                        : runStatus === 'running'
+                          ? '워크플로우 실행 중'
+                          : '워크플로우 실행'}
+                </span>
             </button>
 
             {/* Flow Agent Button */}

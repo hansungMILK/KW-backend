@@ -5,6 +5,14 @@ type WorkflowRunMode = {
     scriptReviewFirst: boolean;
 };
 
+export type WorkflowRunStatus = 'running' | 'completed' | 'failed' | null;
+
+export const isWorkflowRunButtonDisabled = (state: {
+    isWorkflowRunning: boolean;
+    isLoading: boolean;
+    runStatus: WorkflowRunStatus;
+}): boolean => state.isWorkflowRunning || state.isLoading || state.runStatus === 'running';
+
 const getWorkflowNodeType = (node: NodeData): string | undefined =>
     node.type ?? ((node as NodeData & { blockType?: string }).blockType as string | undefined);
 
@@ -27,16 +35,29 @@ const hasApprovedLongformReview = (node: NodeData | undefined): boolean => {
     );
 };
 
-const needsScriptReview = (node: NodeData): boolean =>
-    (getWorkflowNodeType(node) === 'content' &&
-        node.config?.['reviewMode'] === 'script-first' &&
-        !hasReviewedScriptOutput(node)) ||
-    (getWorkflowNodeType(node) === 'longform-review' &&
-        node.config?.['reviewMode'] === 'script-first' &&
-        !hasApprovedLongformReview(node));
+const isLongformGateANode = (node: NodeData): boolean => {
+    const type = getWorkflowNodeType(node);
+    return (
+        type === 'longform-script' ||
+        type === 'longform-storyboard' ||
+        type === 'longform-scene-json' ||
+        type === 'longform-review'
+    );
+};
 
 export const getWorkflowRunMode = (nodes: NodeData[] | undefined): WorkflowRunMode => {
-    const shouldStopForScriptReview = nodes?.some(needsScriptReview) ?? false;
+    const longformGateAApproved = nodes?.some(node => isLongformGateANode(node) && hasApprovedLongformReview(node));
+    const shouldStopForScriptReview =
+        nodes?.some(node => {
+            const type = getWorkflowNodeType(node);
+            if (type === 'content') {
+                return node.config?.['reviewMode'] === 'script-first' && !hasReviewedScriptOutput(node);
+            }
+            if (type === 'longform-review') {
+                return node.config?.['reviewMode'] === 'script-first' && !longformGateAApproved;
+            }
+            return false;
+        }) ?? false;
 
     return {
         executionMode: shouldStopForScriptReview ? 'step' : 'full',

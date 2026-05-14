@@ -46,7 +46,7 @@ import { arePortTypesCompatible, getVisiblePorts, tryParseJson } from '../utils'
 import type { ConnectionDraftInfo } from '../utils';
 import type { BlockDefinitionWithFrontend, DataPacket, NodeData, NodeState, PortDefinition } from '@flows/flows';
 
-type ConfigValue = string | number | boolean | string[] | null;
+export type ConfigValue = string | number | boolean | string[] | null;
 
 export interface NodePortHandlers {
     onPortMouseDown: (
@@ -68,6 +68,7 @@ export interface NodePortHandlers {
 
 export interface NodeConfigHandlers {
     onConfigChange: (key: string, value: ConfigValue) => void;
+    onConfigPatch?: (patch: Record<string, ConfigValue>) => Promise<void> | void;
     onLabelChange: (label: string) => void;
     onToggleAuto: () => void;
 }
@@ -75,6 +76,7 @@ export interface NodeConfigHandlers {
 export interface NodeActions {
     onDelete: () => void;
     onTrigger: () => Promise<void> | void;
+    onLongformReviewApproved?: () => Promise<void> | void;
     onToggleDisabled?: () => void;
     onDuplicate?: () => void;
     onViewLogs: () => void;
@@ -937,7 +939,7 @@ const FriendlyOutputPreview: React.FC<{
     reviewEnabled?: boolean;
     reviewedOutputSaved?: boolean;
     onReviewedOutputSave?: (value: Record<string, unknown>) => void;
-    onLongformReviewApprove?: (value: Record<string, unknown>) => void;
+    onLongformReviewApprove?: (value: Record<string, unknown>) => Promise<void> | void;
 }> = ({
     value,
     maxHeight,
@@ -954,6 +956,7 @@ const FriendlyOutputPreview: React.FC<{
             : buildScriptDraft(scenes) || firstStringValue(recordValue.fullScriptDraft) || ''
         : '';
     const [draft, setDraft] = useState(initialDraft);
+    const [isApproving, setIsApproving] = useState(false);
 
     useEffect(() => {
         setDraft(initialDraft);
@@ -1152,13 +1155,19 @@ const FriendlyOutputPreview: React.FC<{
                         </button>
                         <button
                             type="button"
-                            className="w-full rounded bg-primary px-2 py-1.5 text-[10px] font-semibold text-primary-foreground hover:bg-primary/90"
-                            onClick={event => {
+                            className="w-full rounded bg-primary px-2 py-1.5 text-[10px] font-semibold text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                            disabled={isApproving}
+                            onClick={async event => {
                                 event.stopPropagation();
-                                onLongformReviewApprove?.(applyLongformDraft(recordValue, draft));
+                                setIsApproving(true);
+                                try {
+                                    await onLongformReviewApprove?.(applyLongformDraft(recordValue, draft));
+                                } finally {
+                                    setIsApproving(false);
+                                }
                             }}
                         >
-                            승인하고 유료 제작 허용
+                            {isApproving ? '승인 저장 후 제작 시작 중...' : '승인하고 유료 제작 허용'}
                         </button>
                     </div>
                 )}
@@ -1315,12 +1324,13 @@ const FriendlyOutputPreview: React.FC<{
     return null;
 };
 
-const OutputPreview: React.FC<VisualizationProps & { onConfigChange?: (key: string, value: ConfigValue) => void }> = ({
-    node,
-    definition,
-    contentHeight,
-    onConfigChange,
-}) => {
+const OutputPreview: React.FC<
+    VisualizationProps & {
+        onConfigChange?: (key: string, value: ConfigValue) => void;
+        onConfigPatch?: (patch: Record<string, ConfigValue>) => Promise<void> | void;
+        onLongformReviewApproved?: () => Promise<void> | void;
+    }
+> = ({ node, definition, contentHeight, onConfigChange, onConfigPatch, onLongformReviewApproved }) => {
     const { t } = useTranslation(['nodes']);
     const packet = getFirstOutputData(node, definition);
 
@@ -1379,12 +1389,22 @@ const OutputPreview: React.FC<VisualizationProps & { onConfigChange?: (key: stri
                         typeof node.config?.reviewedOutput === 'string' && node.config.reviewedOutput.length > 0
                     }
                     onReviewedOutputSave={updated => onConfigChange?.('reviewedOutput', JSON.stringify(updated))}
-                    onLongformReviewApprove={updated => {
-                        onConfigChange?.('reviewedOutput', JSON.stringify(updated));
-                        onConfigChange?.('reviewStatus', 'approved');
-                        onConfigChange?.('mediaExecutionAllowed', true);
-                        onConfigChange?.('gateBApproved', true);
-                        onConfigChange?.('approvedArtifactId', `longform-review-${Date.now()}`);
+                    onLongformReviewApprove={async updated => {
+                        const approvalPatch = {
+                            reviewedOutput: JSON.stringify(updated),
+                            reviewStatus: 'approved',
+                            mediaExecutionAllowed: true,
+                            gateBApproved: true,
+                            approvedArtifactId: `longform-review-${Date.now()}`,
+                        };
+                        if (onConfigPatch) {
+                            await onConfigPatch(approvalPatch);
+                        } else {
+                            for (const [key, value] of Object.entries(approvalPatch)) {
+                                onConfigChange?.(key, value);
+                            }
+                        }
+                        await onLongformReviewApproved?.();
                     }}
                 />
             );
@@ -1462,8 +1482,17 @@ export const NodeBlock: React.FC<NodeBlockProps> = ({
         connectionDraft,
     } = highlightState;
     const { onPortMouseDown, onPortMouseUp, onPortTouchStart } = portHandlers;
-    const { onConfigChange, onLabelChange } = configHandlers;
-    const { onDelete, onTrigger, onToggleDisabled, onDuplicate, onViewLogs, onResize, onResizing } = actions;
+    const { onConfigChange, onConfigPatch, onLabelChange } = configHandlers;
+    const {
+        onDelete,
+        onTrigger,
+        onLongformReviewApproved,
+        onToggleDisabled,
+        onDuplicate,
+        onViewLogs,
+        onResize,
+        onResizing,
+    } = actions;
 
     // Memoize visible ports to avoid recalculating on every render
     const visibleInputPorts = useMemo(
@@ -2006,6 +2035,8 @@ export const NodeBlock: React.FC<NodeBlockProps> = ({
                         definition={definition}
                         contentHeight={contentAreaHeight}
                         onConfigChange={onConfigChange}
+                        onConfigPatch={onConfigPatch}
+                        onLongformReviewApproved={onLongformReviewApproved}
                     />
                 </div>
 

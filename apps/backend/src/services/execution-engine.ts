@@ -54,6 +54,29 @@ function isStepReviewStopNode(blockType: string): boolean {
     return blockType === 'content' || blockType === 'longform-review';
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isApprovedLongformReviewOutput(value: unknown): boolean {
+    if (!isRecord(value)) return false;
+    const approvedArtifactId = value['approvedArtifactId'];
+    return (
+        value['mediaExecutionAllowed'] === true ||
+        value['gateBApproved'] === true ||
+        value['reviewStatus'] === 'approved' ||
+        (typeof approvedArtifactId === 'string' && approvedArtifactId.trim().length > 0)
+    );
+}
+
+function shouldStopAtStepReviewNode(node: { blockType: string; status: string; outputPayload?: unknown }): boolean {
+    if (node.status !== 'COMPLETED' || !isStepReviewStopNode(node.blockType)) return false;
+    if (node.blockType === 'longform-review') {
+        return !isApprovedLongformReviewOutput(node.outputPayload);
+    }
+    return true;
+}
+
 function createTimeoutWatchdog(
     blockType: string,
     timeoutMs: number,
@@ -201,14 +224,24 @@ async function resolveNodeInput(
 ): Promise<Record<string, unknown> | null> {
     const merged: Record<string, unknown> = {};
 
-    if (node.inputPayload && typeof node.inputPayload === 'object') {
-        Object.assign(merged, node.inputPayload);
-    }
-
     for (const parentId of node.parentNodeIds) {
         const parent = await runRepo.getRunNode(runId, parentId);
         if (parent?.outputPayload && typeof parent.outputPayload === 'object') {
             Object.assign(merged, parent.outputPayload);
+        }
+    }
+
+    if (node.inputPayload && typeof node.inputPayload === 'object') {
+        for (const [key, value] of Object.entries(node.inputPayload)) {
+            const current = merged[key];
+            const currentIsStructured = Array.isArray(current) || (current != null && typeof current === 'object');
+            const nextIsScalar = value == null || typeof value !== 'object';
+
+            if (key in merged && currentIsStructured && nextIsScalar) {
+                continue;
+            }
+
+            merged[key] = value;
         }
     }
 
@@ -307,11 +340,7 @@ export const executionEngine = {
             }
 
             const reviewNode = waveResults.find(
-                nodeAfter =>
-                    run.executionMode === 'step' &&
-                    nodeAfter !== null &&
-                    isStepReviewStopNode(nodeAfter.blockType) &&
-                    nodeAfter.status === 'COMPLETED'
+                nodeAfter => run.executionMode === 'step' && nodeAfter !== null && shouldStopAtStepReviewNode(nodeAfter)
             );
             if (reviewNode) {
                 await skipPendingNodes(runId);

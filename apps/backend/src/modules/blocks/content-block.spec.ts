@@ -91,6 +91,198 @@ describe('contentBlock', () => {
         expect(result.output['scenes']).toBeUndefined();
     });
 
+    it('honors the requested shorts scene count instead of the legacy 10-15 range', async () => {
+        vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
+            content: JSON.stringify({
+                title: '8장 쇼츠',
+                hook: '8장으로 갑니다',
+                script: {
+                    hook: '8장으로 갑니다',
+                    angle: '사용자가 선택한 장면 수를 따른다',
+                    cta: '선택한 장수로 끝냅니다',
+                },
+                style: { format: 'vertical-shorts', aspectRatio: '9:16', sceneCount: 8 },
+                scenes: Array.from({ length: 8 }, (_, index) => ({
+                    sceneNumber: index + 1,
+                    imageSlot: `[Image #${index + 1}]`,
+                    storyBeat: index === 0 ? 'hook' : 'setup',
+                    topTitle: '8장 쇼츠',
+                    caption: `장면 ${index + 1}`,
+                    narration: `사용자가 고른 여덟 장 쇼츠의 ${index + 1}번째 장면입니다.`,
+                    imagePrompt: `shorts scene ${index + 1}`,
+                    visualText: `장면 ${index + 1}`,
+                    visual: { topTitle: '8장 쇼츠', mainCaption: `장면 ${index + 1}` },
+                    claimType: 'fact',
+                    sourceRefs: ['source-1'],
+                    durationSec: 5,
+                })),
+                cta: '선택한 장수로 끝냅니다',
+                totalDurationSec: 40,
+                sources: [{ id: 'source-1', title: '원문', url: 'https://example.com', source: 'Example' }],
+            }),
+            model: 'gpt-test',
+            inputTokens: 1,
+            outputTokens: 1,
+            latencyMs: 1,
+        });
+
+        const result = await contentBlock.execute(
+            {
+                format: 'shorts',
+                keywords: ['테스트'],
+                articles: [{ id: 'source-1', title: '원문', url: 'https://example.com', source: 'Example' }],
+            },
+            { scenes: 8 }
+        );
+
+        const request = vi.mocked(openaiAdapter.chatJson).mock.calls[0]?.[0];
+        expect(request?.systemPrompt).toContain('exactly 8 scenes');
+        expect(request?.systemPrompt).not.toContain('10–15 scene');
+        expect((result.output['scenes'] as unknown[]).length).toBe(8);
+        expect(result.output['style']).toMatchObject({ sceneCount: 8 });
+    });
+
+    it('normalizes nullable source URLs from AI shorts output instead of failing generic topic runs', async () => {
+        vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
+            content: JSON.stringify({
+                title: '편입 정보',
+                hook: '편입 준비, 뭐부터?',
+                script: {
+                    hook: '편입 준비, 뭐부터?',
+                    angle: '편입 준비의 기본 흐름을 설명',
+                    cta: '모집요강을 확인하세요',
+                },
+                scenes: Array.from({ length: 10 }, (_, index) => ({
+                    sceneNumber: index + 1,
+                    imageSlot: `[Image #${index + 1}]`,
+                    storyBeat: index === 0 ? 'hook' : 'setup',
+                    topTitle: '편입 정보',
+                    caption: '핵심 정리',
+                    narration: '편입 준비는 모집요강 확인부터 시작합니다.',
+                    imagePrompt: 'student checking university transfer admission guide at desk',
+                    visualText: '핵심 정리',
+                    visual: { topTitle: '편입 정보', mainCaption: '핵심 정리' },
+                    claimType: 'fact',
+                    sourceRefs: [{ id: 'source-1', title: '일반 편입 정보', url: null }],
+                    durationSec: 5,
+                })),
+                cta: '모집요강을 확인하세요',
+                totalDurationSec: 50,
+                sources: [{ id: 'source-1', title: '일반 편입 정보', url: null, source: 'AI generated context' }],
+            }),
+            model: 'gpt-test',
+            inputTokens: 1,
+            outputTokens: 1,
+            latencyMs: 1,
+        });
+
+        const result = await contentBlock.execute(
+            {
+                format: 'shorts',
+                topic: '편입정보',
+                durationSec: 60,
+                scenes: 8,
+            },
+            { contentProfileId: 'shorts.info.v1' }
+        );
+
+        expect(result.output['sources']).toEqual([
+            expect.objectContaining({ id: 'source-1', title: '일반 편입 정보' }),
+        ]);
+        expect((result.output['sources'] as Array<Record<string, unknown>>)[0]?.['url']).toBeUndefined();
+        expect((result.output['scenes'] as Array<Record<string, unknown>>)[0]?.['sourceRefs']).toEqual([
+            expect.objectContaining({ id: 'source-1', title: '일반 편입 정보' }),
+        ]);
+    });
+
+    it('backfills sourceRefs for sourced fact scenes when the model omits them', async () => {
+        vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
+            content: JSON.stringify({
+                title: '원문 기반 쇼츠',
+                hook: '핵심만 보겠습니다',
+                script: {
+                    hook: '핵심만 보겠습니다',
+                    angle: '원문 기반 설명',
+                    cta: '원문도 확인하세요',
+                },
+                scenes: Array.from({ length: 10 }, (_, index) => ({
+                    sceneNumber: index + 1,
+                    imageSlot: `[Image #${index + 1}]`,
+                    storyBeat: index === 0 ? 'hook' : 'setup',
+                    topTitle: '원문 기반 쇼츠',
+                    caption: '핵심 정리',
+                    narration: '원문에서 확인한 핵심 내용을 짧게 설명합니다.',
+                    imagePrompt: 'A Korean viewer reading an article on a phone',
+                    visualText: '핵심 정리',
+                    visual: { topTitle: '원문 기반 쇼츠', mainCaption: '핵심 정리' },
+                    claimType: 'fact',
+                    sourceRefs: [],
+                    durationSec: 5,
+                })),
+                cta: '원문도 확인하세요',
+                totalDurationSec: 50,
+            }),
+            model: 'gpt-test',
+            inputTokens: 1,
+            outputTokens: 1,
+            latencyMs: 1,
+        });
+
+        const result = await contentBlock.execute({
+            articles: [{ id: 'source-1', title: '원문 기사', url: 'https://example.com', source: 'Example' }],
+        });
+
+        const firstScene = (result.output['scenes'] as Array<Record<string, unknown>>)[0];
+        expect(firstScene).toMatchObject({
+            claimType: 'fact',
+            sourceRefs: ['source-1'],
+        });
+    });
+
+    it('downgrades unsourced non-concrete fact labels instead of sending them to analysis as sourced facts', async () => {
+        vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
+            content: JSON.stringify({
+                title: '생활 습관 쇼츠',
+                hook: '천천히 바꿔보세요',
+                script: {
+                    hook: '천천히 바꿔보세요',
+                    angle: '일반 생활 조언',
+                    cta: '무리하지 마세요',
+                },
+                scenes: Array.from({ length: 10 }, (_, index) => ({
+                    sceneNumber: index + 1,
+                    imageSlot: `[Image #${index + 1}]`,
+                    storyBeat: index === 0 ? 'hook' : 'setup',
+                    topTitle: '생활 습관 쇼츠',
+                    caption: '습관 조정',
+                    narration: '식사와 활동 습관을 천천히 바꾸는 접근이 좋습니다.',
+                    imagePrompt: 'A calm everyday lifestyle scene',
+                    visualText: '습관 조정',
+                    visual: { topTitle: '생활 습관 쇼츠', mainCaption: '습관 조정' },
+                    claimType: 'fact',
+                    sourceRefs: [],
+                    durationSec: 5,
+                })),
+                cta: '무리하지 마세요',
+                totalDurationSec: 50,
+            }),
+            model: 'gpt-test',
+            inputTokens: 1,
+            outputTokens: 1,
+            latencyMs: 1,
+        });
+
+        const result = await contentBlock.execute({
+            topic: '생활 습관 조언',
+        });
+
+        const firstScene = (result.output['scenes'] as Array<Record<string, unknown>>)[0];
+        expect(firstScene).toMatchObject({
+            claimType: 'opinion',
+            sourceRefs: [],
+        });
+    });
+
     it('passes primary URL full text to the script writer when available', async () => {
         vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
             content: JSON.stringify({

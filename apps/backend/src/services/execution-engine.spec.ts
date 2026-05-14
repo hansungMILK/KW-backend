@@ -163,6 +163,95 @@ describe('executionEngine asset publication', () => {
         vi.useRealTimers();
     });
 
+    it('lets node input config override stale parent payload flags', async () => {
+        const parentNode = {
+            ...node,
+            nodeId: 'node-parent',
+            outputPayload: {
+                mode: 'longform-gate-a',
+                mediaExecutionAllowed: false,
+                gateBApproved: false,
+                reviewStatus: 'draft',
+                approvedArtifactId: 'approved-from-user-click',
+            },
+        } as RunNode;
+        node = {
+            ...node,
+            blockType: 'longform-script',
+            parentNodeIds: ['node-parent'],
+            inputPayload: {
+                mediaExecutionAllowed: true,
+                gateBApproved: true,
+                reviewStatus: 'approved',
+                approvedArtifactId: 'approved-from-user-click',
+            },
+        } as RunNode;
+        getRunNode.mockImplementation(async (_runId, nodeId) => (nodeId === 'node-parent' ? parentNode : node));
+        executeBlock.mockResolvedValueOnce({
+            output: { ok: true },
+            durationMs: 1,
+        });
+
+        await executionEngine.handleNodeExecution(run.runId, node.nodeId, 'exec-config-override');
+
+        expect(executeBlock).toHaveBeenCalledWith(
+            'longform-script',
+            expect.objectContaining({
+                mediaExecutionAllowed: true,
+                gateBApproved: true,
+                reviewStatus: 'approved',
+                approvedArtifactId: 'approved-from-user-click',
+            }),
+            expect.anything(),
+            expect.anything()
+        );
+    });
+
+    it('keeps upstream scene arrays when child config also contains a numeric scene count', async () => {
+        const parentScenes = [
+            { sceneNumber: 1, narration: '첫 장면입니다.' },
+            { sceneNumber: 2, narration: '두 번째 장면입니다.' },
+        ];
+        const parentNode = {
+            ...node,
+            nodeId: 'node-content',
+            outputPayload: {
+                title: '테스트 쇼츠',
+                scenes: parentScenes,
+            },
+        } as RunNode;
+        node = {
+            ...node,
+            nodeId: 'node-data',
+            blockType: 'data',
+            parentNodeIds: ['node-content'],
+            inputPayload: {
+                schema: 'shorts_2_scene',
+                scenes: 2,
+            },
+        } as RunNode;
+        getRunNode.mockImplementation(async (_runId, nodeId) => (nodeId === 'node-content' ? parentNode : node));
+        executeBlock.mockResolvedValueOnce({
+            output: { normalizedScenes: parentScenes },
+            durationMs: 1,
+        });
+
+        await executionEngine.handleNodeExecution(run.runId, node.nodeId, 'exec-scene-collision');
+
+        expect(executeBlock).toHaveBeenCalledWith(
+            'data',
+            expect.objectContaining({
+                title: '테스트 쇼츠',
+                scenes: parentScenes,
+                schema: 'shorts_2_scene',
+            }),
+            expect.objectContaining({
+                scenes: 2,
+            }),
+            expect.anything()
+        );
+    });
+
     it('broadcasts asset.created only after the node is completed', async () => {
         executeBlock.mockResolvedValueOnce({
             output: { images: [{ sceneNumber: 1 }, { sceneNumber: 2 }] },
@@ -661,6 +750,77 @@ describe('executionEngine asset publication', () => {
         });
         expect(runNodes.find(item => item.nodeId === 'node-tts')?.status).toBe('SKIPPED');
         expect(runNodes.find(item => item.nodeId === 'node-render')?.status).toBe('SKIPPED');
+    });
+
+    it('continues past longform-review in a step run when the review output is explicitly approved', async () => {
+        run = {
+            runId: 'run-longform-approved-review',
+            flowId: 'flow-longform-approved-review',
+            runType: 'FULL_FLOW',
+            status: 'QUEUED',
+            triggerSource: 'MANUAL',
+            executionMode: 'step',
+            flowSnapshot: {
+                nodes: [],
+                edges: [
+                    { sourceNodeId: 'node-source', targetNodeId: 'node-review' },
+                    { sourceNodeId: 'node-review', targetNodeId: 'node-tts' },
+                ],
+            },
+            createdAt: new Date().toISOString(),
+        } as Run;
+
+        const runNodes: RunNode[] = [
+            makeRunNode('node-source', 'longform-source', []),
+            makeRunNode('node-review', 'longform-review', ['node-source']),
+            makeRunNode('node-tts', 'longform-tts', ['node-review']),
+        ];
+
+        getRun.mockImplementation(async () => run);
+        listRunNodes.mockImplementation(async () => runNodes);
+        getRunNode.mockImplementation(async (_runId, nodeId) => runNodes.find(item => item.nodeId === nodeId) ?? null);
+        putRunNode.mockImplementation(async updatedNode => {
+            const index = runNodes.findIndex(item => item.nodeId === updatedNode.nodeId);
+            if (index >= 0) runNodes[index] = updatedNode;
+        });
+        updateRunStatus.mockImplementation(async (_runId, status, extra) => {
+            run = { ...run, ...extra, status } as Run;
+            return { ok: true, run };
+        });
+        updateRunNodeStatus.mockImplementation(async (_runId, nodeId, status, extra) => {
+            const index = runNodes.findIndex(item => item.nodeId === nodeId);
+            if (index < 0) return { ok: false, error: 'missing node' };
+            runNodes[index] = {
+                ...runNodes[index],
+                ...extra,
+                status,
+            } as RunNode;
+            sequence.push(`node.status:${nodeId}:${status}`);
+            return { ok: true, node: runNodes[index] };
+        });
+        executeBlock.mockImplementation(async blockType => ({
+            output:
+                blockType === 'longform-review'
+                    ? {
+                          gate: 'A',
+                          mode: 'longform-gate-a',
+                          reviewStatus: 'approved',
+                          mediaExecutionAllowed: true,
+                          gateBApproved: true,
+                      }
+                    : { ok: true },
+            durationMs: 1,
+        }));
+
+        await executionEngine.handleRunExecution(run.runId, 'exec-longform-approved-review');
+
+        expect(executeBlock.mock.calls.map(call => call[0])).toEqual([
+            'longform-source',
+            'longform-review',
+            'longform-tts',
+        ]);
+        expect(run.status).toBe('COMPLETED');
+        expect(run.finalOutputSummary).not.toMatchObject({ stoppedForReview: true });
     });
 });
 

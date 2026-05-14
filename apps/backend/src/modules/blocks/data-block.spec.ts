@@ -57,6 +57,53 @@ describe('dataBlock', () => {
         });
     });
 
+    it('backfills fact scene sourceRefs from upstream source metadata', async () => {
+        const result = await dataBlock.execute({
+            title: '원문 기반 쇼츠',
+            scenes: [
+                {
+                    sceneNumber: 1,
+                    caption: '핵심 주장',
+                    narration: '원문에서 확인한 핵심 주장을 짧게 설명합니다.',
+                    imagePrompt: 'A person reviewing a source article.',
+                    claimType: 'fact',
+                    sourceRefs: [],
+                    durationSec: 5,
+                },
+            ],
+            sources: [{ id: 'source-1', title: '원문 기사' }],
+        });
+
+        const output = result.output as { normalizedScenes: Array<Record<string, unknown>> };
+        expect(output.normalizedScenes[0]).toMatchObject({
+            claimType: 'fact',
+            sourceRefs: ['source-1'],
+        });
+    });
+
+    it('downgrades unsourced non-concrete fact labels to opinion', async () => {
+        const result = await dataBlock.execute({
+            title: '일반 조언',
+            scenes: [
+                {
+                    sceneNumber: 1,
+                    caption: '생활 습관',
+                    narration: '생활 습관을 천천히 바꾸는 접근이 좋습니다.',
+                    imagePrompt: 'A calm lifestyle explainer scene.',
+                    claimType: 'fact',
+                    sourceRefs: [],
+                    durationSec: 5,
+                },
+            ],
+        });
+
+        const output = result.output as { normalizedScenes: Array<Record<string, unknown>> };
+        expect(output.normalizedScenes[0]).toMatchObject({
+            claimType: 'opinion',
+            sourceRefs: [],
+        });
+    });
+
     it('normalizes longform Gate A artifacts without requiring Shorts scenes', async () => {
         const result = await dataBlock.execute(
             {

@@ -16,8 +16,9 @@ import {
     roundUsd,
 } from '../image-generation/image-style';
 
-import type { AllowedBlockType } from './response-parser';
+import type { AllowedBlockType, ClaudeProposalOutput } from './response-parser';
 import type { Orchestrator, ProposalResult } from './types';
+import type { ContentProfilePreferences } from '../content-profile/content-profile';
 
 const COST_ESTIMATES: Record<AllowedBlockType, number> = {
     'input-text': 0,
@@ -47,6 +48,32 @@ const COST_ESTIMATES: Record<AllowedBlockType, number> = {
     'longform-package': 0.01,
 };
 
+const LONGFORM_ORCHESTRATOR_DECISION_SYSTEM_PROMPT = `You are an AI longform workflow planner for a node-based automation product.
+Decide the production intent for a Korean longform video request before the system compiles it into safe executable nodes.
+
+Do not return executable workflow nodes. The backend compiler owns node IDs, graph shape, paid execution guards, and renderer safety.
+Return compact JSON only:
+{
+  "plan": {
+    "goal": "user-facing goal",
+    "outputType": "video",
+    "planType": "interactive",
+    "strategy": "how the workflow should approach this topic"
+  },
+  "contentJudgment": {
+    "primaryTask": "explain|analyze|compare|tutorial|other",
+    "sourcePolicy": "url-primary|web-research|mixed",
+    "scriptToneId": "informative-reframe|news-anchor|conversation-story|mz-shortform",
+    "whyThisTone": "short reason"
+  },
+  "productionJudgment": {
+    "rendererRoute": "hyperframes",
+    "requiresUserReview": true,
+    "paidMediaAfterReview": true
+  },
+  "assumptions": ["short assumption"]
+}`;
+
 export const openaiOrchestrator: Orchestrator = {
     async generateProposal(
         flowId: string,
@@ -56,6 +83,47 @@ export const openaiOrchestrator: Orchestrator = {
         const startMs = Date.now();
 
         try {
+            const deterministicContentProfile = enforceLongformGateAProfile(
+                buildContentProfilePreferences({
+                    userMessage,
+                    outputType: 'video',
+                    hasMediaVideo: true,
+                })
+            );
+            if (isLongformContentProfile(deterministicContentProfile.contentProfileId)) {
+                const aiDecisionResponse = await openaiAdapter.chatJson({
+                    model: env.openaiOrchestratorModel,
+                    systemPrompt: LONGFORM_ORCHESTRATOR_DECISION_SYSTEM_PROMPT,
+                    userMessage: buildLongformDecisionPrompt(userMessage, currentContext, deterministicContentProfile),
+                    maxTokens: 1200,
+                });
+                const aiOrchestratorDecision = parseJsonObject(aiDecisionResponse.content);
+                const aiContentProfile = buildAiLongformContentProfile(
+                    userMessage,
+                    deterministicContentProfile,
+                    aiOrchestratorDecision
+                );
+                const data = buildLongformGateAWorkflow(userMessage, aiContentProfile);
+                applyAiLongformDecisionToWorkflow(data, aiOrchestratorDecision);
+                const proposal = buildProposalResult(data, userMessage, aiContentProfile, {
+                    aiOrchestratorDecision,
+                });
+                await traceService.record(flowId, null, 'TOOL_RESULT', 'AI longform workflow judgment generated', {
+                    promptVersion: PROMPT_VERSION,
+                    blockCount: proposal.proposedNodes.length,
+                    edgeCount: proposal.proposedEdges.length,
+                    estimatedCost: proposal.estimatedCost.total,
+                    contentProfileId: deterministicContentProfile.contentProfileId,
+                    scriptToneId: aiContentProfile.scriptToneId,
+                    reviewMode: aiContentProfile.reviewMode,
+                    aiDecisionModel: aiDecisionResponse.model,
+                    aiDecisionLatencyMs: aiDecisionResponse.latencyMs,
+                    plan: data.plan,
+                    latencyMs: Date.now() - startMs,
+                });
+                return proposal;
+            }
+
             const response = await openaiAdapter.chatJson({
                 model: env.openaiOrchestratorModel,
                 systemPrompt: ORCHESTRATOR_SYSTEM_PROMPT,
@@ -108,60 +176,13 @@ export const openaiOrchestrator: Orchestrator = {
                 }
                 data = seedRootBlockInputs(compileResult.data, userMessage);
             }
-            const mediaImageBlock = data.blocks.find(block => block.type === 'media-image');
-            const sceneCount = resolveProposalSceneCount(userMessage, data);
-            const textAndOtherEstimatedCostUsd = estimateNonImageCostUsd(data.blocks);
-            const imageGeneration = mediaImageBlock
-                ? buildImageGenerationPreferences({
-                      userMessage,
-                      sceneCount,
-                      imageQuality: mediaImageBlock.config?.['imageQuality'] ?? env.openaiImageQuality,
-                      imageStyleId: mediaImageBlock.config?.['imageStyleId'] ?? mediaImageBlock.config?.['style'],
-                      textAndOtherEstimatedCostUsd,
-                  })
-                : undefined;
-
-            const nodes = data.blocks.map((block, i) => {
-                const config =
-                    block.type === 'media-image' && imageGeneration
-                        ? enrichImageNodeConfig(block.config, imageGeneration)
-                        : block.config;
-                return {
-                    id: generateNumericId(),
-                    blockId: `blk-${block.type}`,
-                    name: block.label,
-                    blockType: block.type,
-                    type: block.type,
-                    position: { x: 300, y: 100 + i * 120 },
-                    state: 'IDLE',
-                    config: enrichContentProfileNodeConfig(config, contentProfile, block.type),
-                };
-            });
-
-            const edges = data.edges
-                .map(edge => ({
-                    id: generateNumericId(),
-                    sourceNodeId: nodes[edge.from]?.id,
-                    sourcePortId: 'out',
-                    targetNodeId: nodes[edge.to]?.id,
-                    targetPortId: 'in',
-                }))
-                .filter(e => e.sourceNodeId && e.targetNodeId);
-
-            const breakdown = data.blocks.map(b => ({
-                blockType: b.type,
-                amount:
-                    b.type === 'media-image'
-                        ? estimateGptImage2CostUsd(sceneCount, imageGeneration?.imageQuality)
-                        : (COST_ESTIMATES[b.type] ?? 0.01),
-            }));
-            const total = imageGeneration?.estimatedTotalCostUsd || data.estimatedCostUsd || sumBreakdown(breakdown);
+            const proposal = buildProposalResult(data, userMessage, contentProfile);
 
             await traceService.record(flowId, null, 'TOOL_RESULT', 'OpenAI proposal generated', {
                 promptVersion: PROMPT_VERSION,
-                blockCount: nodes.length,
-                edgeCount: edges.length,
-                estimatedCost: total,
+                blockCount: proposal.proposedNodes.length,
+                edgeCount: proposal.proposedEdges.length,
+                estimatedCost: proposal.estimatedCost.total,
                 contentProfileId: contentProfile.contentProfileId,
                 scriptToneId: contentProfile.scriptToneId,
                 reviewMode: contentProfile.reviewMode,
@@ -169,23 +190,7 @@ export const openaiOrchestrator: Orchestrator = {
                 latencyMs: Date.now() - startMs,
             });
 
-            return {
-                proposedNodes: nodes,
-                proposedEdges: edges,
-                estimatedCost: {
-                    currency: 'USD',
-                    total: roundUsd(total),
-                    breakdown,
-                },
-                metadata: {
-                    ...(imageGeneration ? { imageGeneration } : {}),
-                    contentProfile,
-                },
-                approvalRequired: true,
-                assistantMessage:
-                    data.summary ||
-                    `${nodes.length}개 블록이 필요합니다. 예상 비용: $${total.toFixed(2)}. 승인하시겠습니까?`,
-            };
+            return proposal;
         } catch (err) {
             const latencyMs = Date.now() - startMs;
             log.error('OpenAI orchestrator failed', err);
@@ -208,6 +213,173 @@ function buildFallbackProposal(errorMessage: string): ProposalResult {
         approvalRequired: false,
         assistantMessage: errorMessage,
     };
+}
+
+function buildAiLongformContentProfile(
+    userMessage: string,
+    base: ContentProfilePreferences,
+    aiOrchestratorDecision: Record<string, unknown>
+): ContentProfilePreferences {
+    return enforceLongformGateAProfile(
+        buildContentProfilePreferences({
+            userMessage,
+            outputType: 'video',
+            hasMediaVideo: true,
+            contentProfileId: base.contentProfileId,
+            scriptToneId:
+                readNestedString(aiOrchestratorDecision, ['contentJudgment', 'scriptToneId']) ?? base.scriptToneId,
+            scriptToneIntensity: base.scriptToneIntensity,
+            reviewMode: base.reviewMode,
+        })
+    );
+}
+
+function applyAiLongformDecisionToWorkflow(
+    data: ClaudeProposalOutput,
+    aiOrchestratorDecision: Record<string, unknown>
+): void {
+    const aiGoal = readNestedString(aiOrchestratorDecision, ['plan', 'goal']);
+    const aiStrategy = readNestedString(aiOrchestratorDecision, ['plan', 'strategy']);
+    const sourcePolicy = readNestedString(aiOrchestratorDecision, ['contentJudgment', 'sourcePolicy']);
+    const primaryTask = readNestedString(aiOrchestratorDecision, ['contentJudgment', 'primaryTask']);
+    const whyThisTone = readNestedString(aiOrchestratorDecision, ['contentJudgment', 'whyThisTone']);
+    const assumptions = readNestedStringArray(aiOrchestratorDecision, ['assumptions']);
+
+    if (aiGoal) data.plan.goal = aiGoal;
+    if (assumptions.length > 0) data.plan.assumptions = assumptions;
+
+    for (const block of data.blocks) {
+        if (!block.type.startsWith('longform-')) continue;
+        block.config = {
+            ...block.config,
+            ...(aiStrategy ? { orchestratorStrategy: aiStrategy } : {}),
+            ...(sourcePolicy ? { orchestratorSourcePolicy: sourcePolicy } : {}),
+            ...(primaryTask ? { orchestratorPrimaryTask: primaryTask } : {}),
+            ...(whyThisTone ? { orchestratorToneReason: whyThisTone } : {}),
+        };
+    }
+}
+
+function buildProposalResult(
+    data: ClaudeProposalOutput,
+    userMessage: string,
+    contentProfile: ContentProfilePreferences,
+    extraMetadata: Record<string, unknown> = {}
+): ProposalResult {
+    const mediaImageBlock = data.blocks.find(block => block.type === 'media-image');
+    const sceneCount = resolveProposalSceneCount(userMessage, data);
+    const textAndOtherEstimatedCostUsd = estimateNonImageCostUsd(data.blocks);
+    const imageGeneration = mediaImageBlock
+        ? buildImageGenerationPreferences({
+              userMessage,
+              sceneCount,
+              imageQuality: mediaImageBlock.config?.['imageQuality'] ?? env.openaiImageQuality,
+              imageStyleId: mediaImageBlock.config?.['imageStyleId'] ?? mediaImageBlock.config?.['style'],
+              textAndOtherEstimatedCostUsd,
+          })
+        : undefined;
+
+    const nodes = data.blocks.map((block, i) => {
+        const config =
+            block.type === 'media-image' && imageGeneration
+                ? enrichImageNodeConfig(block.config, imageGeneration)
+                : block.config;
+        return {
+            id: generateNumericId(),
+            blockId: `blk-${block.type}`,
+            name: block.label,
+            blockType: block.type,
+            type: block.type,
+            position: { x: 300, y: 100 + i * 120 },
+            state: 'IDLE',
+            config: enrichContentProfileNodeConfig(config, contentProfile, block.type),
+        };
+    });
+
+    const edges = data.edges
+        .map(edge => ({
+            id: generateNumericId(),
+            sourceNodeId: nodes[edge.from]?.id,
+            sourcePortId: 'out',
+            targetNodeId: nodes[edge.to]?.id,
+            targetPortId: 'in',
+        }))
+        .filter(e => e.sourceNodeId && e.targetNodeId);
+
+    const breakdown = data.blocks.map(b => ({
+        blockType: b.type,
+        amount:
+            b.type === 'media-image'
+                ? estimateGptImage2CostUsd(sceneCount, imageGeneration?.imageQuality)
+                : (COST_ESTIMATES[b.type] ?? 0.01),
+    }));
+    const total = imageGeneration?.estimatedTotalCostUsd || data.estimatedCostUsd || sumBreakdown(breakdown);
+
+    return {
+        proposedNodes: nodes,
+        proposedEdges: edges,
+        estimatedCost: {
+            currency: 'USD',
+            total: roundUsd(total),
+            breakdown,
+        },
+        metadata: {
+            ...extraMetadata,
+            ...(imageGeneration ? { imageGeneration } : {}),
+            contentProfile,
+        },
+        approvalRequired: true,
+        assistantMessage:
+            data.summary || `${nodes.length}개 블록이 필요합니다. 예상 비용: $${total.toFixed(2)}. 승인하시겠습니까?`,
+    };
+}
+
+function buildLongformDecisionPrompt(
+    userMessage: string,
+    currentContext: Record<string, unknown> | undefined,
+    contentProfile: ContentProfilePreferences
+): string {
+    return [
+        `USER_REQUEST:\n${userMessage}`,
+        `DETECTED_CONTENT_PROFILE:\n${JSON.stringify(contentProfile, null, 2)}`,
+        currentContext ? `CURRENT_CONTEXT:\n${JSON.stringify(currentContext, null, 2)}` : undefined,
+    ]
+        .filter(Boolean)
+        .join('\n\n');
+}
+
+function parseJsonObject(content: string): Record<string, unknown> {
+    const trimmed = content.trim();
+    const start = trimmed.indexOf('{');
+    const end = trimmed.lastIndexOf('}');
+    const json = start >= 0 && end > start ? trimmed.slice(start, end + 1) : trimmed;
+    const parsed = JSON.parse(json) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('OpenAI longform planner returned a non-object JSON payload');
+    }
+    return parsed as Record<string, unknown>;
+}
+
+function readNestedString(record: Record<string, unknown>, path: string[]): string | undefined {
+    let current: unknown = record;
+    for (const segment of path) {
+        if (!current || typeof current !== 'object' || Array.isArray(current)) return undefined;
+        current = (current as Record<string, unknown>)[segment];
+    }
+    return typeof current === 'string' && current.trim() ? current.trim() : undefined;
+}
+
+function readNestedStringArray(record: Record<string, unknown>, path: string[]): string[] {
+    let current: unknown = record;
+    for (const segment of path) {
+        if (!current || typeof current !== 'object' || Array.isArray(current)) return [];
+        current = (current as Record<string, unknown>)[segment];
+    }
+    if (!Array.isArray(current)) return [];
+    return current
+        .map(String)
+        .map(value => value.trim())
+        .filter(Boolean);
 }
 
 function resolveProposalSceneCount(

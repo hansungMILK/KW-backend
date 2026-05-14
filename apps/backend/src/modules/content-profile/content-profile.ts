@@ -95,6 +95,13 @@ export const CONTENT_PROFILE_OPTIONS: ContentProfilePreferences['profileOptions'
 const SCRIPT_TONE_IDS = new Set<ScriptToneId>(ScriptToneIdSchema.options);
 const CONTENT_PROFILE_IDS = new Set<ContentProfileId>(ContentProfileIdSchema.options);
 
+const contentProfileFamily = (id: ContentProfileId): string => id.split('.')[0] ?? id;
+
+const profileOptionsFor = (contentProfileId: ContentProfileId): ContentProfilePreferences['profileOptions'] => {
+    const family = contentProfileFamily(contentProfileId);
+    return CONTENT_PROFILE_OPTIONS.filter(option => contentProfileFamily(option.id) === family);
+};
+
 export const normalizeScriptToneId = (value: unknown): ScriptToneId => {
     if (typeof value !== 'string') return 'informative-reframe';
     const normalized = value.trim().toLowerCase();
@@ -173,7 +180,7 @@ export const buildContentProfilePreferences = (params: {
         toneOptions: SCRIPT_TONE_OPTIONS,
         intensityOptions: SCRIPT_TONE_INTENSITY_OPTIONS,
         reviewModeOptions: REVIEW_MODE_OPTIONS,
-        profileOptions: CONTENT_PROFILE_OPTIONS,
+        profileOptions: profileOptionsFor(contentProfileId),
     };
 };
 

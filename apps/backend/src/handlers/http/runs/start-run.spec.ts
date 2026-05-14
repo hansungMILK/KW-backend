@@ -46,4 +46,28 @@ describe('start run handler', () => {
             })
         );
     });
+
+    it('returns conflict when longform Gate B execution has not been approved', async () => {
+        createRun.mockResolvedValueOnce({
+            ok: false,
+            error: 'LONGFORM_GATE_B_APPROVAL_REQUIRED',
+            status: 409,
+        });
+
+        const response = await main({
+            httpMethod: 'POST',
+            path: '/flows/flow-1/runs',
+            headers: {},
+            pathParameters: { flowId: 'flow-1' },
+            body: JSON.stringify({ triggerSource: 'MANUAL', executionMode: 'full' }),
+        } as APIGatewayProxyEvent);
+
+        expect(response.statusCode).toBe(409);
+        expect(JSON.parse(response.body)).toEqual(
+            expect.objectContaining({
+                error: 'CONFLICT',
+                message: 'LONGFORM_GATE_B_APPROVAL_REQUIRED',
+            })
+        );
+    });
 });

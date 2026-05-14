@@ -1,7 +1,12 @@
+import { createHash } from 'crypto';
+import { readFileSync } from 'fs';
+
 import { describe, expect, it } from 'vitest';
 
 import { SHORTS_BGM_CATALOG } from './bgm-catalog';
 import { selectBgmForShorts } from './bgm-selector';
+
+const CANONICAL_DEFAULT_BGM_SHA256 = '37f55c71ef0aea6312efb8c735ecbf028b06219b42cc265bddc482d7b4adc2e9';
 
 describe('selectBgmForShorts', () => {
     it('keeps only the default Shorts BGM in the catalog', () => {
@@ -29,5 +34,15 @@ describe('selectBgmForShorts', () => {
 
         expect(selection?.track.id).toBe('default-bgm');
         expect(horrorSelection?.track.id).toBe('default-bgm');
+    });
+
+    it('uses the canonical user-supplied default BGM file, not a renamed placeholder', () => {
+        const selection = selectBgmForShorts({ requestText: '롱폼 배경음악 검증' });
+        expect(selection?.track.filePath).toBeTruthy();
+        if (!selection?.track.filePath) throw new Error('Expected default BGM file path');
+
+        const hash = createHash('sha256').update(readFileSync(selection.track.filePath)).digest('hex');
+
+        expect(hash).toBe(CANONICAL_DEFAULT_BGM_SHA256);
     });
 });

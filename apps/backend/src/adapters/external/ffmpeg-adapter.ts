@@ -42,12 +42,8 @@ export interface VideoProbeResult {
     durationSec?: number;
 }
 
-const FFMPEG_PATH = process.env.FFMPEG_PATH || '/opt/bin/ffmpeg';
-const FFPROBE_PATH =
-    process.env.FFPROBE_PATH ||
-    (process.env.FFMPEG_PATH && process.env.FFMPEG_PATH.endsWith('ffmpeg')
-        ? process.env.FFMPEG_PATH.replace(/ffmpeg$/, 'ffprobe')
-        : 'ffprobe');
+const FFMPEG_PATH = resolveFfmpegPath();
+const FFPROBE_PATH = resolveFfprobePath(process.env, FFMPEG_PATH);
 const FFMPEG_TIMEOUT_MS = Number(process.env.FFMPEG_TIMEOUT_MS || 840000);
 const FFMPEG_OVERLAY_MODE = process.env.SHORTS_FFMPEG_OVERLAY || 'all';
 const LOCAL_ASSET_BASE_URL = process.env.LOCAL_ASSET_BASE_URL || 'http://localhost:8800/_local-assets';
@@ -163,6 +159,11 @@ export const ffmpegAdapter = {
                 { encoding: 'utf8', timeout: 10000 }
             );
             if (result.error || result.status !== 0) {
+                console.warn(
+                    `[ffmpeg-adapter] ffprobe failed via ${FFPROBE_PATH}: ${
+                        result.error?.message || result.stderr || `status ${result.status}`
+                    }`
+                );
                 return { hasVideo: false, hasAudio: false };
             }
 
@@ -188,6 +189,44 @@ export const ffmpegAdapter = {
         }
     },
 };
+
+export function resolveFfmpegPath(baseEnv: NodeJS.ProcessEnv = process.env): string {
+    const configured = resolveConfiguredBinary(baseEnv.FFMPEG_PATH);
+    if (configured) return configured;
+
+    return (
+        ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', '/usr/bin/ffmpeg'].find(candidate =>
+            existsSync(candidate)
+        ) ?? 'ffmpeg'
+    );
+}
+
+export function resolveFfprobePath(
+    baseEnv: NodeJS.ProcessEnv = process.env,
+    ffmpegPath = resolveFfmpegPath(baseEnv)
+): string {
+    const configured = resolveConfiguredBinary(baseEnv.FFPROBE_PATH);
+    if (configured) return configured;
+
+    const sibling =
+        ffmpegPath.endsWith('ffmpeg') && !['ffmpeg', '/opt/bin/ffmpeg'].includes(ffmpegPath)
+            ? ffmpegPath.replace(/ffmpeg$/, 'ffprobe')
+            : undefined;
+    if (sibling && existsSync(sibling)) return sibling;
+
+    return (
+        [sibling, '/opt/homebrew/bin/ffprobe', '/usr/local/bin/ffprobe', '/usr/bin/ffprobe'].find(
+            (candidate): candidate is string => Boolean(candidate && existsSync(candidate))
+        ) ?? 'ffprobe'
+    );
+}
+
+function resolveConfiguredBinary(value: string | undefined): string | undefined {
+    const configured = value?.trim();
+    if (!configured) return undefined;
+    if (!configured.includes('/')) return configured;
+    return existsSync(configured) ? configured : undefined;
+}
 
 function buildArgs(
     imageFiles: Array<{

@@ -235,7 +235,7 @@ export const mockOrchestrator: Orchestrator = {
             approvalRequired: true,
             assistantMessage:
                 summary ??
-                `10~15장 이미지 기반 1분 쇼츠 파이프라인 8개 블록이 필요합니다. 예상 비용: $${total.toFixed(2)}. 승인하시겠습니까?`,
+                `기본 12장 이미지 기반 1분 쇼츠 파이프라인 8개 블록이 필요합니다. 예상 비용: $${total.toFixed(2)}. 승인하시겠습니까?`,
         };
     },
 };

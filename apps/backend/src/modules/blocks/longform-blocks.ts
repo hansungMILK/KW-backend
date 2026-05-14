@@ -2,6 +2,7 @@ import { contentBlock } from './content-block';
 import { mediaTtsBlock } from './media-tts-block';
 import { mediaVideoBlock } from './media-video-block';
 import { searchBlock } from './search-block';
+import { openaiAdapter } from '../../adapters/ai/openai-adapter';
 import { env } from '../../config/env';
 
 import type { BlockExecutor, BlockExecutorResult } from './types';
@@ -10,6 +11,82 @@ type RecordValue = Record<string, unknown>;
 
 const DEFAULT_DURATION_SEC = 300;
 const DEFAULT_SECTION_COUNT = 5;
+
+const LONGFORM_SOURCE_RESEARCH_SYSTEM_PROMPT = `You are an AI longform source researcher.
+Read the collected primary source text and produce a factual research brief for a Korean longform video.
+
+Rules:
+- The provided URL text is the primary source. Do not replace it with generic web background.
+- Extract concrete claims, entities, dates, numbers, caveats, and what the viewer should understand.
+- Do not include raw HTML, XML, script dumps, CSS, or boilerplate.
+- Return JSON only:
+{
+  "sourceDigest": ["compact factual takeaway"],
+  "factualSpine": { "what": "...", "whyItMatters": "...", "caveats": ["..."] },
+  "keywords": ["..."],
+  "confidence": 0.9
+}`;
+
+const LONGFORM_BRIEF_SYSTEM_PROMPT = `You are an AI longform angle strategist.
+Convert researched source material into a viewer-facing longform brief.
+
+Rules:
+- Choose the strongest explanatory angle for the user's request.
+- Keep the primary source as the factual anchor.
+- Do not start paid media work.
+- Return JSON only:
+{
+  "titleCandidates": ["..."],
+  "viewerPromise": "...",
+  "targetViewer": "...",
+  "angle": "...",
+  "structure": "explainer|analysis|tutorial|comparison|story",
+  "evidencePlan": [{ "sourceId": "source-1", "useAt": "context|proof|caveat", "visualUse": "source-proof|quote-card|timeline|comparison" }]
+}`;
+
+const LONGFORM_STORYBOARD_SYSTEM_PROMPT = `You are an AI longform visual storyboard director.
+Turn a Korean longform script into Hyperframes-ready visual chapters.
+
+Rules:
+- Design chapter-level motion-graphics scenes, not one static text card per paragraph.
+- Use source-proof cards, timelines, comparisons, metric reveals, diagram boards, and conclusion cards when useful.
+- Every object id must be stable and derived from the section id.
+- Return JSON only:
+{
+  "visualChapters": [
+    {
+      "chapterId": "chapter-1",
+      "sectionId": "section-1",
+      "headline": "...",
+      "visualArchetype": "source-proof|timeline|comparison|metric-reveal|chapter-board",
+      "viewerPurpose": "...",
+      "objects": [{ "id": "section-1-headline", "type": "headline|quote|metric|diagram|caption", "text": "..." }],
+      "motionPlan": "..."
+    }
+  ]
+}`;
+
+const LONGFORM_MOTION_SYSTEM_PROMPT = `You are an AI longform motion graphics director.
+Create a compact Hyperframes motion direction blueprint from scene objects and ElevenLabs subtitle timing.
+
+Rules:
+- Do not emit one cue per subtitle. Keep the output compact.
+- Target only object ids that exist in the provided scenes.
+- Prefer meaningful motion: reveal, source-card zoom, underline, connector draw, comparison slide, metric count-up, camera push.
+- Return JSON only:
+{
+  "motionStyle": "short style label",
+  "sceneDirectives": [
+    {
+      "sceneId": "scene-1",
+      "targetIds": ["section-1-headline"],
+      "cueTypes": ["reveal", "underline", "camera-push"],
+      "pacing": "fast|steady|dramatic",
+      "description": "..."
+    }
+  ],
+  "compositionNotes": ["..."]
+}`;
 
 export const longformSourceBlock: BlockExecutor = {
     blockType: 'longform-source',
@@ -39,6 +116,7 @@ export const longformSourceBlock: BlockExecutor = {
                           '사용자 요청을 바탕으로 롱폼 자료를 정리한다.'
                   ),
               ];
+        const aiResearch = await generateAiSourceResearch(requestText, effectivePrimarySources, supportingSources);
 
         return {
             output: {
@@ -46,11 +124,22 @@ export const longformSourceBlock: BlockExecutor = {
                 mode: 'longform-gate-a',
                 primarySources: effectivePrimarySources,
                 supportingSources,
-                sourceDigest,
+                sourceDigest: requireStringArray(aiResearch.output.sourceDigest, 'sourceDigest'),
                 factualSpine: {
-                    what: sourceDigest[0] ?? '롱폼 주제의 핵심 사실을 정리한다.',
-                    whyItMatters: '시청자가 이 이슈의 배경과 의미를 이해할 수 있게 만든다.',
-                    caveats: supportingSources.length > 0 ? ['보조 출처는 원문을 대체하지 않는다.'] : [],
+                    what:
+                        firstString(toRecord(aiResearch.output.factualSpine).what) ??
+                        sourceDigest[0] ??
+                        '롱폼 주제의 핵심 사실을 정리한다.',
+                    whyItMatters:
+                        firstString(toRecord(aiResearch.output.factualSpine).whyItMatters) ??
+                        '시청자가 이 이슈의 배경과 의미를 이해할 수 있게 만든다.',
+                    caveats: stringArray(toRecord(aiResearch.output.factualSpine).caveats),
+                },
+                aiResearch: {
+                    provider: 'openai',
+                    model: aiResearch.model,
+                    latencyMs: aiResearch.latencyMs,
+                    confidence: positiveNumber(aiResearch.output.confidence),
                 },
                 requestText: firstString(config?.userRequest, config?.query, collectedInput, input) ?? requestText,
             },
@@ -70,21 +159,38 @@ export const longformBriefBlock: BlockExecutor = {
         const title = firstString(firstSource?.title, source.requestText, sourceDigest[0]) ?? '롱폼 해설';
         const estimatedDurationSec =
             positiveNumber(config?.targetDurationSec, source.estimatedDurationSec) ?? DEFAULT_DURATION_SEC;
+        const aiBrief = await generateAiBrief(source, estimatedDurationSec);
+        const evidencePlan = arrayOfRecords(aiBrief.output.evidencePlan);
 
         return {
             output: {
                 ...source,
-                titleCandidates: [title, `${title} 핵심 정리`, `${title} 제대로 이해하기`],
-                viewerPromise: '핵심 근거와 흐름을 따라가면 이 이슈의 본질을 이해할 수 있다.',
-                targetViewer: '이슈를 깊게 이해하고 싶은 일반 시청자',
-                angle: firstString(source.factualSpine && toRecord(source.factualSpine).what, title) ?? title,
-                structure: 'explainer',
+                titleCandidates: stringArray(aiBrief.output.titleCandidates).length
+                    ? stringArray(aiBrief.output.titleCandidates)
+                    : [title, `${title} 핵심 정리`, `${title} 제대로 이해하기`],
+                viewerPromise:
+                    firstString(aiBrief.output.viewerPromise) ??
+                    '핵심 근거와 흐름을 따라가면 이 이슈의 본질을 이해할 수 있다.',
+                targetViewer: firstString(aiBrief.output.targetViewer) ?? '이슈를 깊게 이해하고 싶은 일반 시청자',
+                angle:
+                    firstString(
+                        aiBrief.output.angle,
+                        source.factualSpine && toRecord(source.factualSpine).what,
+                        title
+                    ) ?? title,
+                structure: firstString(aiBrief.output.structure) ?? 'explainer',
                 estimatedDurationSec,
                 evidencePlan: primarySources.slice(0, 3).map((sourceRef, index) => ({
                     sourceId: firstString(sourceRef.id) ?? `source-${index + 1}`,
                     useAt: index === 0 ? 'context' : 'proof',
                     visualUse: index === 0 ? 'source-proof' : 'quote-card',
                 })),
+                ...(evidencePlan.length > 0 ? { evidencePlan } : {}),
+                aiBrief: {
+                    provider: 'openai',
+                    model: aiBrief.model,
+                    latencyMs: aiBrief.latencyMs,
+                },
             },
             durationMs: Date.now() - start,
         };
@@ -110,21 +216,37 @@ export const longformScriptBlock: BlockExecutor = {
         const generated = toRecord(result.output);
         const sourceIds = extractSourceIds(generated, writerInput, brief);
         const sections = buildSectionsFromGenerated(generated, writerInput);
+        const scriptOutput = {
+            ...brief,
+            ...generated,
+            fullScriptDraft:
+                firstString(generated.fullScriptDraft) ??
+                sections
+                    .map(section => firstString(section.narration, section.summary, section.title) ?? '')
+                    .join('\n\n'),
+            sections,
+            sourceMap: sections.map(section => ({
+                sectionId: firstString(section.sectionId) ?? `section-${sections.indexOf(section) + 1}`,
+                sourceIds: sourceIds.length > 0 ? sourceIds : ['source-1'],
+            })),
+        };
+        const approvedGateAArtifact = hasExplicitLongformApproval(config)
+            ? buildApprovedGateAArtifact(scriptOutput, config)
+            : undefined;
 
         return {
             output: {
-                ...brief,
-                ...generated,
-                fullScriptDraft:
-                    firstString(generated.fullScriptDraft) ??
-                    sections
-                        .map(section => firstString(section.narration, section.summary, section.title) ?? '')
-                        .join('\n\n'),
-                sections,
-                sourceMap: sections.map(section => ({
-                    sectionId: firstString(section.sectionId) ?? `section-${sections.indexOf(section) + 1}`,
-                    sourceIds: sourceIds.length > 0 ? sourceIds : ['source-1'],
-                })),
+                ...scriptOutput,
+                ...(approvedGateAArtifact
+                    ? {
+                          reviewStatus: 'approved',
+                          mediaExecutionAllowed: true,
+                          gateBApproved: true,
+                          approvedArtifactId:
+                              firstString(config?.approvedArtifactId) ?? 'longform-review-approved-artifact',
+                          approvedGateAArtifact,
+                      }
+                    : {}),
             },
             durationMs: Date.now() - start,
         };
@@ -137,33 +259,21 @@ export const longformStoryboardBlock: BlockExecutor = {
         const start = Date.now();
         const script = toRecord(input);
         const sections = arrayOfRecords(script.sections);
-        const visualChapters = sections.map((section, index) => {
-            const sectionId = firstString(section.sectionId) ?? `section-${index + 1}`;
-            const archetype = pickArchetype(index);
-            return {
-                chapterId: `chapter-${index + 1}`,
-                sectionId,
-                headline: firstString(section.title) ?? `챕터 ${index + 1}`,
-                visualArchetype: archetype,
-                viewerPurpose: '지금 듣는 내용을 화면 구조로 즉시 이해하게 만든다.',
-                objects: [
-                    {
-                        id: `${sectionId}-headline`,
-                        type: 'headline',
-                        text: firstString(section.title) ?? `챕터 ${index + 1}`,
-                    },
-                    {
-                        id: `${sectionId}-proof`,
-                        type: archetype,
-                        text: trimText(firstString(section.narration) ?? '', 120),
-                    },
-                ],
-                motionPlan: 'stable chapter canvas with cue-driven focus, highlight, reveal, and connector motion',
-                evidenceRefs: sourceIdsForSection(script.sourceMap, sectionId),
-            };
-        });
+        const aiStoryboard = await generateAiStoryboard(script);
+        const visualChapters = normalizeVisualChapters(aiStoryboard.output.visualChapters, sections, script);
 
-        return { output: { ...script, visualChapters }, durationMs: Date.now() - start };
+        return {
+            output: {
+                ...script,
+                visualChapters,
+                aiStoryboard: {
+                    provider: 'openai',
+                    model: aiStoryboard.model,
+                    latencyMs: aiStoryboard.latencyMs,
+                },
+            },
+            durationMs: Date.now() - start,
+        };
     },
 };
 
@@ -211,9 +321,15 @@ export const longformReviewBlock: BlockExecutor = {
         const start = Date.now();
         const base = toRecord(input);
         const reviewed = parseRecord(config?.reviewedOutput);
-        const approved = hasExplicitLongformApproval(config);
+        const existingApprovedArtifact = isApprovedGateAArtifact(base.approvedGateAArtifact)
+            ? toRecord(base.approvedGateAArtifact)
+            : undefined;
+        const approvedByConfig = hasExplicitLongformApproval(config);
+        const approved = approvedByConfig || !!existingApprovedArtifact;
         const reviewInput = reviewed ? { ...base, ...reviewed } : base;
-        const approvedGateAArtifact = approved ? buildApprovedGateAArtifact(reviewInput, config) : undefined;
+        const approvedGateAArtifact = approvedByConfig
+            ? buildApprovedGateAArtifact(reviewInput, config)
+            : existingApprovedArtifact;
 
         return {
             output: {
@@ -226,7 +342,11 @@ export const longformReviewBlock: BlockExecutor = {
                 ...(approvedGateAArtifact
                     ? {
                           approvedArtifactId:
-                              firstString(config?.approvedArtifactId) ?? 'longform-review-approved-artifact',
+                              firstString(
+                                  config?.approvedArtifactId,
+                                  approvedGateAArtifact.approvedArtifactId,
+                                  base.approvedArtifactId
+                              ) ?? 'longform-review-approved-artifact',
                           approvedGateAArtifact,
                       }
                     : {}),
@@ -292,22 +412,20 @@ export const longformMotionComposeBlock: BlockExecutor = {
         const record = toRecord(input);
         const scenes = arrayOfRecords(record.scenes);
         const subtitleCues = arrayOfRecords(record.subtitleCues);
-        const motionCues = subtitleCues.map((cue, index) => {
-            const sceneId = firstString(scenes[Math.min(index, Math.max(0, scenes.length - 1))]?.sceneId) ?? 'scene-1';
-            return {
-                sceneId,
-                cueIndex: positiveNumber(cue.cueIndex) ?? index,
-                type: pickEmphasis(index),
-                targetIds: resolveMotionTargetIds(scenes, sceneId, index),
-                startSec: positiveNumber(cue.startSec) ?? index * 4,
-                endSec: positiveNumber(cue.endSec) ?? index * 4 + 4,
-            };
-        });
+        const aiMotion = await generateAiMotion(record, scenes, subtitleCues);
+        const motionCues = buildMotionCuesFromAiMotion(aiMotion.output, scenes, subtitleCues);
         return {
             output: {
                 ...record,
                 compositionProjectPath: firstString(record.compositionProjectPath),
                 motionCues,
+                motionStyle: firstString(aiMotion.output.motionStyle),
+                compositionNotes: stringArray(aiMotion.output.compositionNotes),
+                aiMotion: {
+                    provider: 'openai',
+                    model: aiMotion.model,
+                    latencyMs: aiMotion.latencyMs,
+                },
                 estimatedComposeCostUsd: positiveNumber(record.estimatedComposeCostUsd) ?? 0.5,
             },
             durationMs: Date.now() - start,
@@ -381,6 +499,322 @@ export const longformPackageBlock: BlockExecutor = {
         };
     },
 };
+
+async function generateAiSourceResearch(
+    requestText: string,
+    primarySources: RecordValue[],
+    supportingSources: RecordValue[]
+): Promise<{ output: RecordValue; model: string; latencyMs: number }> {
+    const response = await openaiAdapter.chatJson({
+        model: env.openaiModel,
+        systemPrompt: LONGFORM_SOURCE_RESEARCH_SYSTEM_PROMPT,
+        userMessage: JSON.stringify(
+            {
+                requestText,
+                primarySources: primarySources.map(compactSourceForAi),
+                supportingSources: supportingSources.slice(0, 3).map(compactSourceForAi),
+            },
+            null,
+            2
+        ),
+        maxTokens: 1800,
+        timeoutMs: env.openaiTextTimeoutMs,
+    });
+    return {
+        output: parseAiJsonObject(response.content, 'longform source researcher'),
+        model: response.model,
+        latencyMs: response.latencyMs,
+    };
+}
+
+async function generateAiBrief(
+    source: RecordValue,
+    estimatedDurationSec: number
+): Promise<{ output: RecordValue; model: string; latencyMs: number }> {
+    const response = await openaiAdapter.chatJson({
+        model: env.openaiModel,
+        systemPrompt: LONGFORM_BRIEF_SYSTEM_PROMPT,
+        userMessage: JSON.stringify(
+            {
+                estimatedDurationSec,
+                requestText: source.requestText,
+                sourceDigest: source.sourceDigest,
+                factualSpine: source.factualSpine,
+                primarySources: arrayOfRecords(source.primarySources).map(compactSourceForAi),
+                supportingSources: arrayOfRecords(source.supportingSources).slice(0, 3).map(compactSourceForAi),
+            },
+            null,
+            2
+        ),
+        maxTokens: 1600,
+        timeoutMs: env.openaiTextTimeoutMs,
+    });
+    return {
+        output: parseAiJsonObject(response.content, 'longform angle strategist'),
+        model: response.model,
+        latencyMs: response.latencyMs,
+    };
+}
+
+async function generateAiStoryboard(
+    script: RecordValue
+): Promise<{ output: RecordValue; model: string; latencyMs: number }> {
+    const response = await openaiAdapter.chatJson({
+        model: env.openaiModel,
+        systemPrompt: LONGFORM_STORYBOARD_SYSTEM_PROMPT,
+        userMessage: JSON.stringify(
+            {
+                titleCandidates: script.titleCandidates,
+                angle: script.angle,
+                fullScriptDraft: script.fullScriptDraft,
+                sections: arrayOfRecords(script.sections),
+                sourceMap: script.sourceMap,
+                evidencePlan: script.evidencePlan,
+            },
+            null,
+            2
+        ),
+        maxTokens: 2400,
+        timeoutMs: env.openaiTextTimeoutMs,
+    });
+    return {
+        output: parseAiJsonObject(response.content, 'longform visual storyboard director'),
+        model: response.model,
+        latencyMs: response.latencyMs,
+    };
+}
+
+async function generateAiMotion(
+    record: RecordValue,
+    scenes: RecordValue[],
+    subtitleCues: RecordValue[]
+): Promise<{ output: RecordValue; model: string; latencyMs: number }> {
+    const response = await openaiAdapter.chatJson({
+        model: env.openaiModel,
+        systemPrompt: LONGFORM_MOTION_SYSTEM_PROMPT,
+        userMessage: JSON.stringify(
+            {
+                renderer: firstString(record.renderer) ?? 'hyperframes',
+                resolution: firstString(record.resolution) ?? '2560x1440',
+                scenes: scenes.map(scene => ({
+                    sceneId: firstString(scene.sceneId),
+                    headline: firstString(scene.headline),
+                    layout: firstString(scene.layout),
+                    objects: arrayOfRecords(scene.objects).map(object => ({
+                        id: firstString(object.id),
+                        type: firstString(object.type),
+                        text: trimText(firstString(object.text) ?? '', 160),
+                    })),
+                })),
+                subtitleTiming: summarizeSubtitleTimingForAi(subtitleCues),
+            },
+            null,
+            2
+        ),
+        maxTokens: 1400,
+        timeoutMs: env.openaiTextTimeoutMs,
+    });
+    return {
+        output: parseAiJsonObject(response.content, 'longform motion graphics director'),
+        model: response.model,
+        latencyMs: response.latencyMs,
+    };
+}
+
+function parseAiJsonObject(content: string, label: string): RecordValue {
+    const trimmed = content.trim();
+    const start = trimmed.indexOf('{');
+    const end = trimmed.lastIndexOf('}');
+    const json = start >= 0 && end > start ? trimmed.slice(start, end + 1) : trimmed;
+    const parsed = JSON.parse(json) as unknown;
+    if (!isRecordValue(parsed)) throw new Error(`${label} returned non-object JSON`);
+    return parsed;
+}
+
+function compactSourceForAi(source: RecordValue): RecordValue {
+    return {
+        id: firstString(source.id),
+        title: firstString(source.title),
+        url: firstString(source.url),
+        source: firstString(source.source),
+        publishedAt: firstString(source.publishedAt),
+        sourceType: firstString(source.sourceType),
+        confidence: positiveNumber(source.confidence),
+        summary: trimText(firstString(source.summary) ?? '', 800),
+        fullText: trimText(firstString(source.fullText, source.summary) ?? '', 3500),
+        keyClaims: stringArray(source.keyClaims),
+        primarySource: source.primarySource === true,
+        sourcePriority: positiveNumber(source.sourcePriority),
+    };
+}
+
+function requireStringArray(value: unknown, fieldName: string): string[] {
+    const values = stringArray(value);
+    if (values.length === 0) throw new Error(`AI longform output requires non-empty ${fieldName}`);
+    return values;
+}
+
+function normalizeVisualChapters(value: unknown, sections: RecordValue[], script: RecordValue): RecordValue[] {
+    const chapters = arrayOfRecords(value).map((chapter, index) =>
+        normalizeVisualChapter(chapter, sections, script, index)
+    );
+    if (chapters.length === 0) throw new Error('AI storyboard output requires at least one visual chapter');
+    return chapters;
+}
+
+function normalizeVisualChapter(
+    chapter: RecordValue,
+    sections: RecordValue[],
+    script: RecordValue,
+    index: number
+): RecordValue {
+    const section = sections[index] ?? {};
+    const sectionId = firstString(chapter.sectionId, section.sectionId) ?? `section-${index + 1}`;
+    const headline = firstString(chapter.headline, section.title) ?? `챕터 ${index + 1}`;
+    const visualArchetype = firstString(chapter.visualArchetype) ?? pickArchetype(index);
+    const objects = arrayOfRecords(chapter.objects).map((object, objectIndex) => ({
+        id: firstString(object.id) ?? `${sectionId}-object-${objectIndex + 1}`,
+        type: firstString(object.type) ?? (objectIndex === 0 ? 'headline' : visualArchetype),
+        text: firstString(object.text) ?? headline,
+    }));
+    if (!objects.some(object => firstString(object.id) === `${sectionId}-headline`)) {
+        objects.unshift({ id: `${sectionId}-headline`, type: 'headline', text: headline });
+    }
+    return {
+        chapterId: firstString(chapter.chapterId) ?? `chapter-${index + 1}`,
+        sectionId,
+        headline,
+        visualArchetype,
+        viewerPurpose: firstString(chapter.viewerPurpose) ?? '지금 듣는 내용을 화면 구조로 즉시 이해하게 만든다.',
+        objects,
+        motionPlan:
+            firstString(chapter.motionPlan) ??
+            'stable chapter canvas with cue-driven focus, highlight, reveal, and connector motion',
+        evidenceRefs: stringArray(chapter.evidenceRefs).length
+            ? stringArray(chapter.evidenceRefs)
+            : sourceIdsForSection(script.sourceMap, sectionId),
+    };
+}
+
+function normalizeMotionCues(value: unknown, scenes: RecordValue[], subtitleCues: RecordValue[]): RecordValue[] {
+    const aiCues = arrayOfRecords(value);
+    if (aiCues.length === 0) throw new Error('AI motion output requires at least one motion cue');
+    return aiCues.map((cue, index) => normalizeMotionCue(cue, scenes, subtitleCues, index));
+}
+
+function buildMotionCuesFromAiMotion(
+    aiMotion: RecordValue,
+    scenes: RecordValue[],
+    subtitleCues: RecordValue[]
+): RecordValue[] {
+    const directCues = arrayOfRecords(aiMotion.motionCues);
+    if (directCues.length > 0) return normalizeMotionCues(directCues, scenes, subtitleCues);
+
+    const directives = arrayOfRecords(aiMotion.sceneDirectives);
+    if (directives.length === 0) throw new Error('AI motion output requires sceneDirectives or motionCues');
+
+    return subtitleCues.map((cue, index) => {
+        const sceneId = resolveSceneIdForCue(cue, scenes, index);
+        const directive =
+            directives.find(item => firstString(item.sceneId) === sceneId) ??
+            directives[Math.min(index, Math.max(0, directives.length - 1))] ??
+            {};
+        const cueTypes = stringArray(directive.cueTypes);
+        const targetIds = resolveDirectiveTargetIds(directive, scenes, sceneId, index);
+
+        return {
+            sceneId,
+            cueIndex: nonNegativeNumber(cue.cueIndex) ?? index,
+            type: cueTypes[index % Math.max(1, cueTypes.length)] ?? pickEmphasis(index),
+            targetIds,
+            startSec: nonNegativeNumber(cue.startSec) ?? index * 4,
+            endSec: nonNegativeNumber(cue.endSec) ?? index * 4 + 4,
+            easing: pickDirectiveEasing(directive, index),
+            description: firstString(directive.description),
+        };
+    });
+}
+
+function normalizeMotionCue(
+    cue: RecordValue,
+    scenes: RecordValue[],
+    subtitleCues: RecordValue[],
+    index: number
+): RecordValue {
+    const subtitleCue = subtitleCues[index] ?? {};
+    const sceneId =
+        firstString(cue.sceneId) ??
+        firstString(scenes[Math.min(index, Math.max(0, scenes.length - 1))]?.sceneId) ??
+        'scene-1';
+    const validTargetIds = new Set(
+        scenes
+            .flatMap(scene => arrayOfRecords(scene.objects))
+            .map(object => firstString(object.id))
+            .filter((id): id is string => Boolean(id))
+    );
+    const requestedTargetIds = stringArray(cue.targetIds).filter(id => validTargetIds.has(id));
+    const targetIds = requestedTargetIds.length ? requestedTargetIds : resolveMotionTargetIds(scenes, sceneId, index);
+    return {
+        sceneId,
+        cueIndex: nonNegativeNumber(cue.cueIndex, subtitleCue.cueIndex) ?? index,
+        type: firstString(cue.type) ?? pickEmphasis(index),
+        targetIds,
+        startSec: nonNegativeNumber(cue.startSec, subtitleCue.startSec) ?? index * 4,
+        endSec: nonNegativeNumber(cue.endSec, subtitleCue.endSec) ?? index * 4 + 4,
+        easing: firstString(cue.easing) ?? 'power2.out',
+        description: firstString(cue.description),
+    };
+}
+
+function summarizeSubtitleTimingForAi(subtitleCues: RecordValue[]): RecordValue[] {
+    const groups = new Map<string, RecordValue[]>();
+    subtitleCues.forEach((cue, index) => {
+        const sceneNumber = positiveNumber(cue.sceneNumber);
+        const key = sceneNumber !== undefined ? `scene-${sceneNumber}` : `scene-${Math.floor(index / 4) + 1}`;
+        groups.set(key, [...(groups.get(key) ?? []), cue]);
+    });
+
+    return Array.from(groups.entries()).map(([sceneId, cues]) => ({
+        sceneId,
+        cueCount: cues.length,
+        startSec: nonNegativeNumber(cues[0]?.startSec) ?? 0,
+        endSec: nonNegativeNumber(cues[cues.length - 1]?.endSec) ?? 0,
+        sampleTexts: cues.slice(0, 2).map(cue => trimText(firstString(cue.text) ?? '', 120)),
+    }));
+}
+
+function resolveSceneIdForCue(cue: RecordValue, scenes: RecordValue[], index: number): string {
+    const sceneNumber = positiveNumber(cue.sceneNumber);
+    const bySceneNumber = sceneNumber !== undefined ? `scene-${sceneNumber}` : undefined;
+    const requested = firstString(cue.sceneId, bySceneNumber);
+    if (requested && scenes.some(scene => firstString(scene.sceneId) === requested)) return requested;
+    return firstString(scenes[Math.min(index, Math.max(0, scenes.length - 1))]?.sceneId) ?? 'scene-1';
+}
+
+function resolveDirectiveTargetIds(
+    directive: RecordValue,
+    scenes: RecordValue[],
+    sceneId: string,
+    index: number
+): string[] {
+    const validTargetIds = new Set(
+        scenes
+            .flatMap(scene => arrayOfRecords(scene.objects))
+            .map(object => firstString(object.id))
+            .filter((id): id is string => Boolean(id))
+    );
+    const requestedTargetIds = stringArray(directive.targetIds).filter(id => validTargetIds.has(id));
+    return requestedTargetIds.length ? requestedTargetIds : resolveMotionTargetIds(scenes, sceneId, index);
+}
+
+function pickDirectiveEasing(directive: RecordValue, index: number): string {
+    const explicit = firstString(directive.easing);
+    if (explicit) return explicit;
+    const pacing = firstString(directive.pacing);
+    if (pacing === 'fast') return 'power3.out';
+    if (pacing === 'dramatic') return 'expo.out';
+    return index % 2 === 0 ? 'power2.out' : 'sine.inOut';
+}
 
 function extractArticles(input: unknown): RecordValue[] {
     const record = toRecord(input);
@@ -550,6 +984,18 @@ function hasExplicitLongformApproval(config: RecordValue | undefined): boolean {
         config?.mediaExecutionAllowed === true ||
         config?.gateBApproved === true ||
         config?.reviewDecision === 'approved'
+    );
+}
+
+function isApprovedGateAArtifact(value: unknown): boolean {
+    if (!isRecordValue(value)) return false;
+    return (
+        (value.mode === 'longform-gate-a' || value.gate === 'A') &&
+        (value.reviewStatus === 'approved' || value.mediaExecutionAllowed === true || value.gateBApproved === true) &&
+        (typeof value.fullScriptDraft === 'string' ||
+            Array.isArray(value.sections) ||
+            Array.isArray(value.scenePlan) ||
+            Array.isArray(value.visualChapters))
     );
 }
 

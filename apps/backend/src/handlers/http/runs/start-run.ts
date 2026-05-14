@@ -3,7 +3,7 @@ import { RunCreateParamsSchema, RunCreateRequestSchema } from '@flows/contracts'
 import { PAID_OPENAI_DISABLED } from '../../../adapters/ai/paid-openai-guard';
 import { runService } from '../../../services/run-service';
 import { getBody, getPathParam, withMiddleware } from '../../../utils/middleware';
-import { accepted, badRequest, notFound, unprocessableJson } from '../../../utils/response';
+import { accepted, badRequest, conflict, notFound, unprocessableJson } from '../../../utils/response';
 
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 
@@ -31,6 +31,7 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
 
     if (!result.ok) {
         if (result.status === 404) return notFound(result.error);
+        if (result.status === 409) return conflict(result.error);
         if (result.status === 422) {
             if (result.error === PAID_OPENAI_DISABLED) {
                 return unprocessableJson({

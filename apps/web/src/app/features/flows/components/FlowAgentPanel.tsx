@@ -136,8 +136,22 @@ const formatUsd = (value: unknown): string | undefined => {
     return `$${value.toFixed(value >= 1 ? 2 : 3)}`;
 };
 
-const isLongformContentProfileId = (value: unknown): boolean =>
-    typeof value === 'string' && value.startsWith('longform.');
+const contentProfileFamily = (value: unknown): string | undefined => {
+    if (typeof value !== 'string') return undefined;
+    const [family] = value.split('.');
+    return family || undefined;
+};
+
+const isLongformContentProfileId = (value: unknown): boolean => contentProfileFamily(value) === 'longform';
+
+const filterProfileOptionsByFamily = (
+    options: ContentProfileOption<ContentProfileId>[] | undefined,
+    selectedContentProfileId: ContentProfileId
+): ContentProfileOption<ContentProfileId>[] => {
+    const selectedFamily = contentProfileFamily(selectedContentProfileId);
+    if (!selectedFamily) return options ?? [];
+    return (options ?? []).filter(option => contentProfileFamily(option.id) === selectedFamily);
+};
 
 const toUserVisibleAgentError = (error: unknown): string => {
     const message = extractErrorMessage(error);
@@ -200,34 +214,28 @@ export const FlowAgentPanel = ({
         if (loadedFlowIdRef.current === flowId) return;
 
         loadedFlowIdRef.current = flowId;
+        setMessages([]);
         let cancelled = false;
 
         const loadHistory = async () => {
             try {
                 const history = await getFlowMessages(flowId);
                 if (cancelled) return;
-                setMessages(prev =>
-                    prev.length > 0
-                        ? prev
-                        : history.map(message => ({
-                              id: message.id,
-                              role: message.role,
-                              text: message.content,
-                          }))
-                );
+                const historyMessages = history.map(message => ({
+                    id: message.id,
+                    role: message.role,
+                    text: message.content,
+                }));
+                setMessages(prev => (historyMessages.length === 0 ? prev : historyMessages));
             } catch (error) {
                 if (cancelled) return;
-                setMessages(prev =>
-                    prev.length > 0
-                        ? prev
-                        : [
-                              {
-                                  id: crypto.randomUUID(),
-                                  role: 'agent',
-                                  text: toUserVisibleAgentError(error),
-                              },
-                          ]
-                );
+                setMessages([
+                    {
+                        id: crypto.randomUUID(),
+                        role: 'agent',
+                        text: toUserVisibleAgentError(error),
+                    },
+                ]);
             }
         };
 
@@ -471,6 +479,10 @@ export const FlowAgentPanel = ({
                             proposalContentProfiles[proposal.id] ??
                             contentProfile?.contentProfileId ??
                             'shorts.info.v1';
+                        const visibleProfileOptions = filterProfileOptionsByFamily(
+                            contentProfile?.profileOptions,
+                            selectedContentProfileId
+                        );
                         const isLongformProposal = isLongformContentProfileId(selectedContentProfileId);
                         const selectedStyleId =
                             proposalImageStyles[proposal.id] ??
@@ -522,13 +534,13 @@ export const FlowAgentPanel = ({
                                             <div className="text-[11px] font-semibold text-foreground">
                                                 대본/콘텐츠 설정
                                             </div>
-                                            {contentProfile.profileOptions?.length ? (
+                                            {visibleProfileOptions.length ? (
                                                 <div className="space-y-1">
                                                     <div className="text-[10px] font-medium text-muted-foreground">
                                                         콘텐츠 종류
                                                     </div>
                                                     <div className="flex flex-wrap gap-1">
-                                                        {contentProfile.profileOptions.map(option => (
+                                                        {visibleProfileOptions.map(option => (
                                                             <button
                                                                 key={option.id}
                                                                 type="button"

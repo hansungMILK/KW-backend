@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { getWorkflowRunMode } from './run-mode';
+import { getWorkflowRunMode, isWorkflowRunButtonDisabled } from './run-mode';
 
 import type { NodeData } from '@flows/flows';
 
@@ -18,7 +18,24 @@ const longformReviewNode = (config: Record<string, unknown>): NodeData => ({
     config,
 });
 
+const longformScriptNode = (config: Record<string, unknown>): NodeData => ({
+    id: 'node-longform-script',
+    type: 'longform-script',
+    name: 'Longform script',
+    config,
+});
+
 describe('workflow run mode', () => {
+    it('keeps the run button disabled while a workflow is still running', () => {
+        expect(
+            isWorkflowRunButtonDisabled({
+                isWorkflowRunning: false,
+                isLoading: false,
+                runStatus: 'running',
+            })
+        ).toBe(true);
+    });
+
     it('runs in step mode when the approved content node requests script-first review', () => {
         expect(getWorkflowRunMode([contentNode({ reviewMode: 'script-first' })])).toEqual({
             executionMode: 'step',
@@ -101,6 +118,27 @@ describe('workflow run mode', () => {
                     reviewMode: 'script-first',
                     reviewStatus: 'approved',
                     approvedArtifactId: 'longform-review-1',
+                }),
+            ])
+        ).toEqual({
+            executionMode: 'full',
+            scriptReviewFirst: false,
+        });
+    });
+
+    it('runs full longform production when paid approval was saved from an upstream script preview', () => {
+        expect(
+            getWorkflowRunMode([
+                longformScriptNode({
+                    reviewMode: 'script-first',
+                    reviewStatus: 'approved',
+                    approvedArtifactId: 'longform-review-from-script',
+                    mediaExecutionAllowed: true,
+                }),
+                longformReviewNode({
+                    reviewMode: 'script-first',
+                    reviewStatus: 'draft',
+                    mediaExecutionAllowed: false,
                 }),
             ])
         ).toEqual({

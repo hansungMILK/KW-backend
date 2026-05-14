@@ -216,6 +216,59 @@ describe('runService cost guards', () => {
         expect(sendQueueMessage).toHaveBeenCalled();
     });
 
+    it('treats approval saved on an upstream longform script node as Gate B approval', async () => {
+        getFlow.mockResolvedValueOnce({
+            id: 'flow-longform-script-approved',
+            name: 'Longform script approved flow',
+            state: 'READY',
+            nodes: [
+                {
+                    id: 'node-script',
+                    blockType: 'longform-script',
+                    label: 'Longform script',
+                    config: {
+                        reviewMode: 'script-first',
+                        reviewStatus: 'approved',
+                        approvedArtifactId: 'longform-review-from-script',
+                        mediaExecutionAllowed: true,
+                    },
+                },
+                {
+                    id: 'node-review',
+                    blockType: 'longform-review',
+                    label: 'Longform review',
+                    config: { reviewMode: 'script-first', reviewStatus: 'draft', mediaExecutionAllowed: false },
+                },
+                {
+                    id: 'node-tts',
+                    blockType: 'longform-tts',
+                    label: 'Longform narration',
+                    config: { mode: 'longform-gate-b', mediaExecutionAllowed: false },
+                },
+            ],
+            edges: [
+                { source: 'node-script', target: 'node-review' },
+                { source: 'node-review', target: 'node-tts' },
+            ],
+            createdAt: '2026-05-13T00:00:00.000Z',
+            updatedAt: '2026-05-13T00:00:00.000Z',
+        });
+        getKeyForProviderAsync.mockResolvedValue({ provider: 'elevenlabs', apiKey: 'test-key' } as never);
+        putRun.mockResolvedValue(undefined);
+        putRunNode.mockResolvedValue(undefined);
+        sendQueueMessage.mockResolvedValue(undefined);
+
+        const result = await runService.createRun('flow-longform-script-approved', 'MANUAL', {
+            executionMode: 'step',
+        });
+
+        expect(result).toEqual(expect.objectContaining({ ok: true }));
+        expect(getKeyForProviderAsync).toHaveBeenCalledWith('openai');
+        expect(getKeyForProviderAsync).toHaveBeenCalledWith('elevenlabs');
+        expect(putRunNode).toHaveBeenCalledTimes(3);
+        expect(sendQueueMessage).toHaveBeenCalled();
+    });
+
     it('requires provider keys for longform OpenAI planning and Gate B execution before queueing', async () => {
         getFlow.mockResolvedValueOnce({
             id: 'flow-longform-providers',
@@ -642,5 +695,117 @@ describe('runService cost guards', () => {
         expect(updateRunNodeStatus).not.toHaveBeenCalled();
         expect(updateRunStatus).not.toHaveBeenCalled();
         expect(sendQueueMessage).not.toHaveBeenCalled();
+    });
+
+    it('allows retrying a failed longform Gate B node when an earlier review node output already approved Gate A', async () => {
+        getRunNode.mockResolvedValueOnce({
+            runId: 'run-retry-approved',
+            nodeId: 'node-motion',
+            blockType: 'longform-motion-compose',
+            label: 'Motion',
+            status: 'FAILED',
+            progress: 25,
+            retryCount: 0,
+            parentNodeIds: ['node-review'],
+            inputPayload: {
+                mediaExecutionAllowed: false,
+            },
+            updatedAt: '2026-05-13T00:00:00.000Z',
+        });
+        getRun.mockResolvedValueOnce({
+            runId: 'run-retry-approved',
+            flowId: 'flow-retry-approved',
+            runType: 'FULL_FLOW',
+            status: 'FAILED',
+            triggerSource: 'MANUAL',
+            flowSnapshot: {
+                nodes: [
+                    {
+                        id: 'node-review',
+                        blockType: 'longform-review',
+                        config: {},
+                    },
+                    {
+                        id: 'node-motion',
+                        blockType: 'longform-motion-compose',
+                        config: {
+                            mediaExecutionAllowed: false,
+                        },
+                    },
+                    {
+                        id: 'node-render',
+                        blockType: 'longform-render',
+                        config: {
+                            renderer: 'hyperframes',
+                            longformHtmlRenderEstimatedCostUsd: 1,
+                            mediaExecutionAllowed: false,
+                        },
+                    },
+                ],
+                edges: [
+                    { source: 'node-review', target: 'node-motion' },
+                    { source: 'node-motion', target: 'node-render' },
+                ],
+            },
+            createdAt: '2026-05-13T00:00:00.000Z',
+        });
+        listRunNodes.mockResolvedValueOnce([
+            {
+                runId: 'run-retry-approved',
+                nodeId: 'node-review',
+                blockType: 'longform-review',
+                label: 'Review',
+                status: 'COMPLETED',
+                progress: 100,
+                retryCount: 0,
+                parentNodeIds: [],
+                outputPayload: {
+                    approvedArtifactId: 'approved-1',
+                    reviewStatus: 'approved',
+                    mediaExecutionAllowed: true,
+                },
+                updatedAt: '2026-05-13T00:00:00.000Z',
+            },
+            {
+                runId: 'run-retry-approved',
+                nodeId: 'node-motion',
+                blockType: 'longform-motion-compose',
+                label: 'Motion',
+                status: 'FAILED',
+                progress: 25,
+                retryCount: 0,
+                parentNodeIds: ['node-review'],
+                inputPayload: {
+                    mediaExecutionAllowed: false,
+                },
+                updatedAt: '2026-05-13T00:00:00.000Z',
+            },
+            {
+                runId: 'run-retry-approved',
+                nodeId: 'node-render',
+                blockType: 'longform-render',
+                label: 'Render',
+                status: 'SKIPPED',
+                progress: 0,
+                retryCount: 0,
+                parentNodeIds: ['node-motion'],
+                updatedAt: '2026-05-13T00:00:00.000Z',
+            },
+        ]);
+        updateRunNodeStatus.mockResolvedValue({ ok: true });
+        updateRunStatus.mockResolvedValue({ ok: true });
+        sendQueueMessage.mockResolvedValue(undefined);
+
+        const result = await runService.retryNode('run-retry-approved', 'node-motion');
+
+        expect(result).toEqual({ ok: true });
+        expect(updateRunNodeStatus).toHaveBeenCalledWith('run-retry-approved', 'node-motion', 'PENDING');
+        expect(updateRunNodeStatus).toHaveBeenCalledWith('run-retry-approved', 'node-render', 'PENDING');
+        expect(updateRunStatus).toHaveBeenCalledWith(
+            'run-retry-approved',
+            'RUNNING',
+            expect.objectContaining({ completedAt: null, finalOutputSummary: null })
+        );
+        expect(sendQueueMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'EXECUTE_RUN' }));
     });
 });

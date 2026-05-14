@@ -2,7 +2,7 @@ import { spawn } from 'child_process';
 import { existsSync } from 'fs';
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
-import { basename, extname, join, resolve } from 'path';
+import { basename, delimiter, dirname, extname, join, resolve } from 'path';
 
 import { getLocalAssetPath } from '../aws/s3';
 
@@ -104,7 +104,7 @@ export const hyperframesAdapter = {
     },
 };
 
-function buildLongformHyperframesHtml(
+export function buildLongformHyperframesHtml(
     request: HyperframesRenderRequest,
     media: { narrationSrc: string; backgroundMusicSrc?: string; gsapSrc: string }
 ): string {
@@ -233,14 +233,7 @@ function buildLongformHyperframesHtml(
     <script>
       window.__timelines = window.__timelines || {};
       const tl = gsap.timeline({ paused: true });
-      ${scenes
-          .map(
-              scene => `
-      tl.fromTo("#${scene.id}", { autoAlpha: 0, y: 70, scale: 0.985 }, { autoAlpha: 1, y: 0, scale: 1, duration: 0.55, ease: "power3.out" }, ${scene.startSec});
-      tl.to("#${scene.id} .visual", { scale: 1.035, duration: ${Math.max(0.6, scene.durationSec - 0.4)}, ease: "none" }, ${scene.startSec});
-      tl.to("#${scene.id}", { autoAlpha: 0, y: -48, duration: 0.35, ease: "power2.in" }, ${Math.max(scene.startSec, scene.endSec - 0.35)});`
-          )
-          .join('\n')}
+      ${scenes.map(renderSceneTimeline).join('\n')}
       tl.fromTo("#progress-fill", { scaleX: 0 }, { scaleX: 1, duration: ${durationSec}, ease: "none" }, 0);
       window.__timelines["main"] = tl;
     </script>
@@ -249,7 +242,7 @@ function buildLongformHyperframesHtml(
 }
 
 function renderScene(scene: ReturnType<typeof buildSceneTimeline>[number]): string {
-    return `<section id="${scene.id}" class="scene" data-start="${scene.startSec}" data-duration="${scene.durationSec}" data-track-index="${scene.trackIndex}">
+    return `<section id="${scene.id}" class="scene" data-start="${scene.startSec}" data-duration="${scene.durationSec}" data-track-index="${scene.trackIndex}" data-motion="${escapeHtml(scene.motionTypes.join(' '))}">
         <div>
           <div class="eyebrow">${escapeHtml(scene.kicker)}</div>
           <div class="headline">${escapeHtml(scene.title)}</div>
@@ -259,6 +252,23 @@ function renderScene(scene: ReturnType<typeof buildSceneTimeline>[number]): stri
           <div class="visual-label">${escapeHtml(scene.visualText)}</div>
         </div>
       </section>`;
+}
+
+function renderSceneTimeline(scene: ReturnType<typeof buildSceneTimeline>[number]): string {
+    const enterY = scene.primaryMotion === 'comparison-slide' ? 0 : 70;
+    const enterX = scene.primaryMotion === 'comparison-slide' ? -90 : 0;
+    const visualScale =
+        scene.primaryMotion === 'camera-push' || scene.primaryMotion === 'source-card-zoom' ? 1.07 : 1.035;
+    const visualRotate = scene.primaryMotion === 'comparison-slide' ? 0.45 : 0;
+    const headlineScale = scene.primaryMotion === 'metric-count-up' ? 1.055 : 1;
+    const labelY = scene.primaryMotion === 'connector-draw' || scene.primaryMotion === 'underline' ? -12 : 0;
+
+    return `
+      tl.fromTo("#${scene.id}", { autoAlpha: 0, x: ${enterX}, y: ${enterY}, scale: 0.985 }, { autoAlpha: 1, x: 0, y: 0, scale: 1, duration: 0.55, ease: "${scene.easing}" }, ${scene.startSec});
+      tl.to("#${scene.id} .headline", { scale: ${headlineScale}, duration: ${Math.min(1.2, Math.max(0.4, scene.durationSec * 0.24))}, ease: "${scene.easing}", transformOrigin: "left center" }, ${scene.startSec + 0.2});
+      tl.to("#${scene.id} .visual", { scale: ${visualScale}, rotate: ${visualRotate}, duration: ${Math.max(0.6, scene.durationSec - 0.4)}, ease: "none" }, ${scene.startSec});
+      tl.to("#${scene.id} .visual-label", { y: ${labelY}, color: "${scene.primaryMotion === 'underline' ? '#fff200' : '#ffffff'}", duration: 0.45, ease: "${scene.easing}" }, ${scene.startSec + 0.35});
+      tl.to("#${scene.id}", { autoAlpha: 0, y: -48, duration: 0.35, ease: "power2.in" }, ${Math.max(scene.startSec, scene.endSec - 0.35)});`;
 }
 
 function buildSceneTimeline(request: HyperframesRenderRequest, durationSec: number) {
@@ -272,6 +282,7 @@ function buildSceneTimeline(request: HyperframesRenderRequest, durationSec: numb
             positiveNumber(cue?.endSec) ??
             Math.min(durationSec, startSec + (positiveNumber(scene.durationSec) ?? fallbackDuration));
         const sceneDurationSec = Math.max(0.5, endSec - startSec);
+        const motionTypes = motionTypesForScene(request.motionCues, scene, index);
         cursor = endSec;
         return {
             id: htmlId(scene.sceneId ?? `scene-${index + 1}`),
@@ -286,8 +297,46 @@ function buildSceneTimeline(request: HyperframesRenderRequest, durationSec: numb
             visualText:
                 normalizeText(scene.visualText ?? scene.layout ?? scene.objects?.[0]?.text) ||
                 '자료, 비교, 타임라인을 한 화면에서 이해하게 구성합니다.',
+            motionTypes,
+            primaryMotion: primaryMotionType(motionTypes),
+            easing: easingForMotion(motionTypes),
         };
     });
+}
+
+function motionTypesForScene(motionCues: HyperframesMotionCue[], scene: HyperframesScene, index: number): string[] {
+    const sceneNumber = normalizeSceneNumber(scene.sceneNumber, index + 1);
+    const sceneId = scene.sceneId ?? `scene-${index + 1}`;
+    const types = motionCues
+        .filter(
+            cue => normalizeSceneNumber(cue.sceneNumber, sceneNumber) === sceneNumber || cue.sceneNumber === undefined
+        )
+        .filter((cue, cueIndex) => cue.sceneNumber !== undefined || cueIndex === index)
+        .map(cue => normalizeText(cue.type))
+        .filter(Boolean);
+    const bySceneId = motionCues
+        .filter(cue => normalizeText((cue as { sceneId?: string }).sceneId) === sceneId)
+        .map(cue => normalizeText(cue.type))
+        .filter(Boolean);
+    return [...new Set([...bySceneId, ...types])].slice(0, 4);
+}
+
+function primaryMotionType(types: string[]): string {
+    const joined = types.join(' ').toLowerCase();
+    if (/comparison|slide/.test(joined)) return 'comparison-slide';
+    if (/metric|count/.test(joined)) return 'metric-count-up';
+    if (/source|zoom/.test(joined)) return 'source-card-zoom';
+    if (/connector|draw/.test(joined)) return 'connector-draw';
+    if (/underline/.test(joined)) return 'underline';
+    if (/push|camera/.test(joined)) return 'camera-push';
+    return 'reveal';
+}
+
+function easingForMotion(types: string[]): string {
+    const joined = types.join(' ').toLowerCase();
+    if (/dramatic|zoom|push/.test(joined)) return 'expo.out';
+    if (/fast|reveal|slide/.test(joined)) return 'power3.out';
+    return 'power2.out';
 }
 
 async function prepareBackgroundMusic(
@@ -363,7 +412,10 @@ function runHyperframesRender(
             return;
         }
 
-        const child = spawn(command.bin, [...command.prefixArgs, ...baseArgs], { stdio: ['ignore', 'ignore', 'pipe'] });
+        const child = spawn(command.bin, [...command.prefixArgs, ...baseArgs], {
+            env: buildHyperframesChildEnv(),
+            stdio: ['ignore', 'ignore', 'pipe'],
+        });
         let stderr = '';
         const onAbort = () => {
             child.kill('SIGTERM');
@@ -389,17 +441,17 @@ function runHyperframesRender(
     });
 }
 
-function resolveHyperframesCommand(): { bin: string; prefixArgs: string[] } {
+export function resolveHyperframesCommand(): { bin: string; prefixArgs: string[] } {
     const configured = process.env.HYPERFRAMES_CLI_BIN?.trim();
     if (configured) return { bin: configured, prefixArgs: [] };
 
     const candidates = [
-        resolve(process.cwd(), 'node_modules/.bin/hyperframes'),
         resolve(process.cwd(), 'node_modules/hyperframes/dist/cli.js'),
-        resolve(process.cwd(), '../../node_modules/.bin/hyperframes'),
         resolve(process.cwd(), '../../node_modules/hyperframes/dist/cli.js'),
-        resolve(__dirname, '../../node_modules/.bin/hyperframes'),
         resolve(__dirname, '../../node_modules/hyperframes/dist/cli.js'),
+        resolve(process.cwd(), 'node_modules/.bin/hyperframes'),
+        resolve(process.cwd(), '../../node_modules/.bin/hyperframes'),
+        resolve(__dirname, '../../node_modules/.bin/hyperframes'),
     ];
     const found = candidates.find(candidate => existsSync(candidate));
     if (found) {
@@ -409,6 +461,44 @@ function resolveHyperframesCommand(): { bin: string; prefixArgs: string[] } {
     }
 
     return { bin: 'hyperframes', prefixArgs: [] };
+}
+
+export function buildHyperframesChildEnv(baseEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+    const ffmpegPath = resolveFfmpegPath(baseEnv);
+    const pathDirs = [
+        dirname(process.execPath),
+        ffmpegPath ? dirname(ffmpegPath) : undefined,
+        '/opt/homebrew/bin',
+        '/usr/local/bin',
+        '/usr/bin',
+        '/bin',
+        '/usr/sbin',
+        '/sbin',
+    ].filter((value): value is string => Boolean(value));
+
+    return {
+        ...baseEnv,
+        ...(ffmpegPath ? { FFMPEG_PATH: ffmpegPath } : {}),
+        PATH: buildToolPath(baseEnv.PATH, pathDirs),
+    };
+}
+
+function resolveFfmpegPath(baseEnv: NodeJS.ProcessEnv): string | undefined {
+    const configured = baseEnv.FFMPEG_PATH?.trim();
+    if (configured) return configured;
+
+    return ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', '/usr/bin/ffmpeg'].find(candidate =>
+        existsSync(candidate)
+    );
+}
+
+function buildToolPath(existingPath: string | undefined, preferredDirs: string[]): string {
+    const parts: string[] = [];
+    for (const item of [...preferredDirs, ...(existingPath?.split(delimiter) ?? [])]) {
+        const normalized = item.trim();
+        if (normalized && !parts.includes(normalized)) parts.push(normalized);
+    }
+    return parts.join(delimiter);
 }
 
 function getCompositionDurationSec(request: HyperframesRenderRequest): number {

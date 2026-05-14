@@ -31,6 +31,7 @@ const paidVideoPlan = {
         goal: 'AI 에이전트의 미래 롱폼 영상을 만든다',
         outputType: 'video',
         planType: 'pipeline',
+        strategy: '공식 자료와 업계 맥락을 분리해 설명한다',
         requiredCapabilities: [
             'source.collect',
             'text.generate',
@@ -53,6 +54,18 @@ const paidVideoPlan = {
         rejectedBlocks: [],
         assumptions: [],
     },
+    contentJudgment: {
+        primaryTask: 'explain',
+        sourcePolicy: 'url-primary',
+        scriptToneId: 'news-anchor',
+        whyThisTone: '확인된 사실과 전망을 분리해야 하는 주제다',
+    },
+    productionJudgment: {
+        rendererRoute: 'hyperframes',
+        requiresUserReview: true,
+        paidMediaAfterReview: true,
+    },
+    assumptions: ['AI가 고른 전략을 노드 config에 보존한다'],
     blocks: [
         { type: 'search', label: '자료 수집', config: {} },
         { type: 'content', label: '대본 작성', config: { scenes: 8 } },
@@ -117,7 +130,18 @@ describe('openaiOrchestrator longform Gate A', () => {
         expect(proposal.metadata?.['contentProfile']).toEqual(
             expect.objectContaining({
                 contentProfileId: 'longform.explainer.v1',
+                scriptToneId: 'news-anchor',
                 reviewMode: 'script-first',
+            })
+        );
+        expect(proposal.proposedNodes).toContainEqual(
+            expect.objectContaining({
+                blockType: 'longform-source',
+                config: expect.objectContaining({
+                    orchestratorSourcePolicy: 'url-primary',
+                    orchestratorPrimaryTask: 'explain',
+                    orchestratorStrategy: '공식 자료와 업계 맥락을 분리해 설명한다',
+                }),
             })
         );
         expect(proposal.proposedNodes).toContainEqual(
@@ -155,9 +179,23 @@ describe('openaiOrchestrator longform Gate A', () => {
         expect(proposal.assistantMessage).toContain('롱폼 제작 기획');
         expect(proposal.assistantMessage).not.toMatch(/Gate [AB]|게이트/i);
         expect(proposal.proposedNodes.map(node => node.label).join(' ')).not.toMatch(/Gate [AB]|게이트/i);
+        expect(openaiAdapter.chatJson).toHaveBeenCalledWith(
+            expect.objectContaining({
+                model: 'gpt-test',
+                systemPrompt: expect.stringContaining('longform workflow planner'),
+                userMessage: expect.stringContaining('AI 에이전트의 미래'),
+            })
+        );
+        expect(proposal.metadata?.['aiOrchestratorDecision']).toEqual(
+            expect.objectContaining({
+                plan: expect.objectContaining({
+                    goal: 'AI 에이전트의 미래 롱폼 영상을 만든다',
+                }),
+            })
+        );
     });
 
-    it('still converts longform requests to Gate A when the model returns an invalid paid-media DAG', async () => {
+    it('uses OpenAI only for compact longform intent judgment, not the executable graph JSON', async () => {
         vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
             content: JSON.stringify({
                 ...paidVideoPlan,
@@ -194,5 +232,11 @@ describe('openaiOrchestrator longform Gate A', () => {
         expect(proposal.assistantMessage).toContain('롱폼 제작 기획');
         expect(proposal.assistantMessage).not.toMatch(/Gate [AB]|게이트/i);
         expect(proposal.approvalRequired).toBe(true);
+        expect(openaiAdapter.chatJson).toHaveBeenCalledWith(
+            expect.objectContaining({
+                maxTokens: 1200,
+                systemPrompt: expect.stringContaining('Do not return executable workflow nodes'),
+            })
+        );
     });
 });

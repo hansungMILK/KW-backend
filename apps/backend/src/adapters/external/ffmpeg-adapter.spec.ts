@@ -5,7 +5,7 @@ import { join } from 'path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { isSupportedFontFile, splitOverlayLines } from './ffmpeg-adapter';
+import { isSupportedFontFile, resolveFfmpegPath, resolveFfprobePath, splitOverlayLines } from './ffmpeg-adapter';
 
 afterEach(() => {
     vi.doUnmock('child_process');
@@ -55,6 +55,52 @@ describe('ffmpeg process wrapper', () => {
 
         await expect(execution).resolves.toBeUndefined();
         expect(spawn.mock.calls[0]?.[2]).toEqual({ stdio: ['ignore', 'ignore', 'pipe'] });
+    });
+});
+
+describe('ffmpeg binary resolution', () => {
+    it('honors explicit existing ffmpeg and ffprobe paths', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'ffmpeg-bin-resolution-'));
+        const ffmpeg = join(dir, 'ffmpeg');
+        const ffprobe = join(dir, 'ffprobe');
+
+        try {
+            writeFileSync(ffmpeg, '');
+            writeFileSync(ffprobe, '');
+
+            const env = {
+                FFMPEG_PATH: ffmpeg,
+                FFPROBE_PATH: ffprobe,
+            };
+
+            expect(resolveFfmpegPath(env)).toBe(ffmpeg);
+            expect(resolveFfprobePath(env, ffmpeg)).toBe(ffprobe);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    it('derives ffprobe from an existing ffmpeg sibling path', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'ffprobe-sibling-resolution-'));
+        const ffmpeg = join(dir, 'ffmpeg');
+        const ffprobe = join(dir, 'ffprobe');
+
+        try {
+            writeFileSync(ffmpeg, '');
+            writeFileSync(ffprobe, '');
+
+            expect(resolveFfprobePath({ FFMPEG_PATH: ffmpeg }, ffmpeg)).toBe(ffprobe);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    it('does not trust missing absolute serverless defaults on local machines', () => {
+        const missing = '/definitely-missing-eureka-flow/ffprobe';
+
+        expect(resolveFfprobePath({ FFPROBE_PATH: missing }, '/definitely-missing-eureka-flow/ffmpeg')).not.toBe(
+            missing
+        );
     });
 });
 
