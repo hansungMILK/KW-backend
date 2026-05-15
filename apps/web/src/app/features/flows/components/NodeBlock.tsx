@@ -838,6 +838,25 @@ const isLongformGateARecord = (value: unknown): boolean => {
     );
 };
 
+const getLongformNodePreviewTitle = (nodeType: string | undefined): string => {
+    switch (nodeType) {
+        case 'longform-source':
+            return '자료 수집 결과';
+        case 'longform-brief':
+            return '관점 설계 결과';
+        case 'longform-script':
+            return '롱폼 대본 초안';
+        case 'longform-storyboard':
+            return '스토리보드';
+        case 'longform-scene-json':
+            return 'HyperFrames 장면 계약';
+        case 'longform-review':
+            return '사용자 검수본';
+        default:
+            return '롱폼 제작 기획안';
+    }
+};
+
 const isVideoRecord = (value: unknown): value is Record<string, unknown> => {
     if (!isRecordValue(value)) return false;
     const mimeType = getRecordMimeType(value);
@@ -963,6 +982,7 @@ const formatCostTotal = (value: unknown): string | undefined => {
 const FriendlyOutputPreview: React.FC<{
     value: unknown;
     maxHeight: number;
+    nodeType?: string;
     reviewEnabled?: boolean;
     reviewedOutputSaved?: boolean;
     onReviewedOutputSave?: (value: Record<string, unknown>) => void;
@@ -970,6 +990,7 @@ const FriendlyOutputPreview: React.FC<{
 }> = ({
     value,
     maxHeight,
+    nodeType,
     reviewEnabled = false,
     reviewedOutputSaved = false,
     onReviewedOutputSave,
@@ -977,6 +998,9 @@ const FriendlyOutputPreview: React.FC<{
 }) => {
     const recordValue = isRecordValue(value) ? value : null;
     const scenes = asRecordArray(recordValue?.scenes);
+    const subtitleCues = asRecordArray(recordValue?.subtitleCues);
+    const motionCues = asRecordArray(recordValue?.motionCues);
+    const longformNodeType = nodeType?.startsWith('longform-') ? nodeType : undefined;
     const initialDraft = recordValue
         ? isLongformGateARecord(recordValue)
             ? buildLongformDraft(recordValue)
@@ -1005,6 +1029,134 @@ const FriendlyOutputPreview: React.FC<{
         </>
     );
 
+    if (longformNodeType === 'longform-srt-align' && recordValue && subtitleCues.length > 0) {
+        const alignmentMethod = firstStringValue(recordValue.alignmentMethod) ?? 'TTS-duration-aligned';
+        return withModal(
+            <div
+                className="p-2.5 bg-cyan-500/10 rounded-lg border border-cyan-500/30 overflow-auto"
+                style={{ maxHeight }}
+            >
+                <div className="flex items-center justify-between gap-2">
+                    <div className="text-[11px] font-semibold text-cyan-100">자막 정렬 결과</div>
+                    <button
+                        type="button"
+                        className="rounded border border-cyan-400/40 px-2 py-0.5 text-[10px] text-cyan-100 hover:bg-cyan-500/15"
+                        onClick={event => {
+                            event.stopPropagation();
+                            setModalContent({ value: recordValue, type: 'json' });
+                        }}
+                    >
+                        전체 보기
+                    </button>
+                </div>
+                <div className="mt-1 text-[10px] text-muted-foreground">
+                    {alignmentMethod} · {subtitleCues.length}개 cue
+                </div>
+                <div className="mt-2 space-y-1">
+                    {subtitleCues.slice(0, 4).map((cue, index) => {
+                        const text = firstStringValue(cue.text) ?? `자막 ${index + 1}`;
+                        const startSec = asNumberValue(cue.startSec);
+                        const endSec = asNumberValue(cue.endSec);
+                        const timing =
+                            startSec !== undefined && endSec !== undefined
+                                ? `${startSec.toFixed(1)}s-${endSec.toFixed(1)}s`
+                                : `cue ${index + 1}`;
+                        return (
+                            <div key={`${index}-${text}`} className="rounded bg-background/40 px-2 py-1 text-[10px]">
+                                <div className="text-cyan-100">{timing}</div>
+                                <div className="text-foreground/80 line-clamp-2">{text}</div>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+        );
+    }
+
+    if (longformNodeType === 'longform-motion-compose' && recordValue && motionCues.length > 0) {
+        const motionStyle = firstStringValue(recordValue.motionStyle) ?? 'motion graphics';
+        const compositionNotes = asStringArray(recordValue.compositionNotes);
+        return withModal(
+            <div
+                className="p-2.5 bg-violet-500/10 rounded-lg border border-violet-500/30 overflow-auto"
+                style={{ maxHeight }}
+            >
+                <div className="flex items-center justify-between gap-2">
+                    <div className="text-[11px] font-semibold text-violet-100">모션 설계 결과</div>
+                    <button
+                        type="button"
+                        className="rounded border border-violet-400/40 px-2 py-0.5 text-[10px] text-violet-100 hover:bg-violet-500/15"
+                        onClick={event => {
+                            event.stopPropagation();
+                            setModalContent({ value: recordValue, type: 'json' });
+                        }}
+                    >
+                        전체 보기
+                    </button>
+                </div>
+                <div className="mt-1 text-[10px] text-muted-foreground">
+                    {motionStyle} · {motionCues.length}개 motion cue
+                </div>
+                {compositionNotes[0] && (
+                    <div className="mt-2 rounded bg-violet-500/10 px-2 py-1 text-[10px] text-violet-100 line-clamp-2">
+                        {compositionNotes[0]}
+                    </div>
+                )}
+                <div className="mt-2 space-y-1">
+                    {motionCues.slice(0, 4).map((cue, index) => {
+                        const sceneId = firstStringValue(cue.sceneId) ?? `scene-${index + 1}`;
+                        const cueType = firstStringValue(cue.type) ?? 'motion';
+                        const description = firstStringValue(cue.description);
+                        return (
+                            <div
+                                key={`${index}-${sceneId}-${cueType}`}
+                                className="rounded bg-background/40 px-2 py-1 text-[10px]"
+                            >
+                                <div className="text-violet-100">
+                                    {sceneId} · {cueType}
+                                </div>
+                                {description && <div className="text-foreground/80 line-clamp-2">{description}</div>}
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+        );
+    }
+
+    if (longformNodeType === 'longform-tts' && recordValue && isRecordValue(recordValue.audio)) {
+        const audio = recordValue.audio;
+        const url = getUrlFromRecord(audio);
+        const durationSec = asNumberValue(audio.durationSec);
+        return withModal(
+            <div className="p-2.5 bg-muted/10 rounded-lg border border-border/30 overflow-auto" style={{ maxHeight }}>
+                <div className="flex items-center justify-between gap-2">
+                    <div className="text-[11px] font-semibold text-foreground">나레이션 음성</div>
+                    {url && (
+                        <button
+                            type="button"
+                            className="rounded border border-border px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+                            onClick={event => {
+                                event.stopPropagation();
+                                setModalContent({ value: url, type: 'audio' });
+                            }}
+                        >
+                            크게 듣기
+                        </button>
+                    )}
+                </div>
+                {durationSec !== undefined && (
+                    <div className="mt-1 text-[10px] text-muted-foreground">길이 약 {Math.round(durationSec)}초</div>
+                )}
+                {url ? (
+                    <audio className="mt-2 w-full" controls src={url} />
+                ) : (
+                    <div className="mt-2 text-[10px]">음성 생성 완료</div>
+                )}
+            </div>
+        );
+    }
+
     if (isLongformGateARecord(recordValue)) {
         const sourceDigest = asStringArray(recordValue.sourceDigest);
         const titleCandidates = asStringArray(recordValue.titleCandidates);
@@ -1021,13 +1173,27 @@ const FriendlyOutputPreview: React.FC<{
         const viewerPromise = firstStringValue(recordValue.viewerPromise);
         const angle = firstStringValue(recordValue.angle);
         const resolution = firstStringValue(recordValue.resolution);
+        const showAll = !longformNodeType;
+        const showBrief = showAll || longformNodeType === 'longform-brief';
+        const showSourceDigest = showAll || longformNodeType === 'longform-source';
+        const showOutline = showAll || longformNodeType === 'longform-brief' || longformNodeType === 'longform-script';
+        const showSections =
+            showAll || longformNodeType === 'longform-script' || longformNodeType === 'longform-review';
+        const showDraft = showAll || longformNodeType === 'longform-script' || longformNodeType === 'longform-review';
+        const showVisualChapters = showAll || longformNodeType === 'longform-storyboard';
+        const showScenePlan = showAll || longformNodeType === 'longform-review';
+        const showContractScenes = showAll || longformNodeType === 'longform-scene-json';
+        const showReviewHint =
+            showAll || longformNodeType === 'longform-script' || longformNodeType === 'longform-review';
 
         return withModal(
             <div
                 className="p-2.5 bg-sky-500/10 rounded-lg border border-sky-500/30 overflow-auto"
                 style={{ maxHeight }}
             >
-                <div className="text-[11px] font-semibold text-sky-200">롱폼 제작 기획안</div>
+                <div className="text-[11px] font-semibold text-sky-200">
+                    {getLongformNodePreviewTitle(longformNodeType)}
+                </div>
                 <div className="mt-1 text-[10px] text-muted-foreground">
                     {duration ? `예상 길이 ${duration}` : '예상 길이 산정 중'} · {rendererRoute}
                     {resolution ? ` · ${resolution}` : ''} · 비용 {cost ?? '산정 중'}
@@ -1037,7 +1203,7 @@ const FriendlyOutputPreview: React.FC<{
                         검수 상태: {reviewStatus} · 유료 제작 {mediaAllowed ? '허용됨' : '대기'}
                     </div>
                 )}
-                {(viewerPromise || angle || titleCandidates.length > 0) && (
+                {showBrief && (viewerPromise || angle || titleCandidates.length > 0) && (
                     <div className="mt-2 space-y-1 text-[10px] text-foreground/80">
                         {titleCandidates[0] && (
                             <div>
@@ -1056,7 +1222,7 @@ const FriendlyOutputPreview: React.FC<{
                         )}
                     </div>
                 )}
-                {sourceDigest.length > 0 && (
+                {showSourceDigest && sourceDigest.length > 0 && (
                     <div className="mt-2">
                         <div className="text-[10px] font-semibold text-foreground">자료 요약</div>
                         <div className="mt-1 space-y-1">
@@ -1068,7 +1234,7 @@ const FriendlyOutputPreview: React.FC<{
                         </div>
                     </div>
                 )}
-                {outline.length > 0 && (
+                {showOutline && outline.length > 0 && (
                     <div className="mt-2">
                         <div className="text-[10px] font-semibold text-foreground">아웃라인</div>
                         <div className="mt-1 space-y-1">
@@ -1087,7 +1253,7 @@ const FriendlyOutputPreview: React.FC<{
                         </div>
                     </div>
                 )}
-                {sections.length > 0 && (
+                {showSections && sections.length > 0 && (
                     <div className="mt-2">
                         <div className="text-[10px] font-semibold text-foreground">대본 섹션</div>
                         <div className="mt-1 space-y-1">
@@ -1106,7 +1272,7 @@ const FriendlyOutputPreview: React.FC<{
                         </div>
                     </div>
                 )}
-                {draft && (
+                {showDraft && draft && (
                     <div className="mt-2">
                         <div className="flex items-center justify-between gap-2">
                             <div className="text-[10px] font-semibold text-foreground">전체 대본 초안</div>
@@ -1126,7 +1292,7 @@ const FriendlyOutputPreview: React.FC<{
                         </div>
                     </div>
                 )}
-                {visualChapters.length > 0 && (
+                {showVisualChapters && visualChapters.length > 0 && (
                     <div className="mt-2">
                         <div className="text-[10px] font-semibold text-foreground">모션 챕터</div>
                         <div className="mt-1 space-y-1">
@@ -1145,7 +1311,7 @@ const FriendlyOutputPreview: React.FC<{
                         </div>
                     </div>
                 )}
-                {scenePlan.length > 0 && (
+                {showScenePlan && scenePlan.length > 0 && (
                     <div className="mt-2">
                         <div className="text-[10px] font-semibold text-foreground">씬 플랜</div>
                         <div className="mt-1 space-y-1">
@@ -1165,7 +1331,7 @@ const FriendlyOutputPreview: React.FC<{
                         </div>
                     </div>
                 )}
-                {contractScenes.length > 0 && (
+                {showContractScenes && contractScenes.length > 0 && (
                     <div className="mt-2">
                         <div className="text-[10px] font-semibold text-foreground">HyperFrames 장면 계약</div>
                         <div className="mt-1 space-y-1">
@@ -1184,9 +1350,11 @@ const FriendlyOutputPreview: React.FC<{
                         </div>
                     </div>
                 )}
-                <div className="mt-2 rounded bg-sky-500/10 px-2 py-1 text-[10px] text-sky-200">
-                    대본과 씬을 확인한 뒤 영상 제작을 진행할 수 있습니다.
-                </div>
+                {showReviewHint && (
+                    <div className="mt-2 rounded bg-sky-500/10 px-2 py-1 text-[10px] text-sky-200">
+                        대본과 씬을 확인한 뒤 영상 제작을 진행할 수 있습니다.
+                    </div>
+                )}
                 {reviewEnabled && draft && (
                     <div className="mt-2 space-y-1.5">
                         <textarea
@@ -1492,6 +1660,7 @@ const OutputPreview: React.FC<
                 <FriendlyOutputPreview
                     value={packet.value}
                     maxHeight={maxH}
+                    nodeType={definition.type}
                     reviewEnabled={
                         definition.type === 'content' ||
                         definition.type === 'longform-script' ||
