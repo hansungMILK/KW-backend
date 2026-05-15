@@ -942,6 +942,7 @@ const hasFriendlyOutputPreview = (value: unknown): boolean => {
         asRecordArray(value.images).length > 0 ||
         isRecordValue(value.audio) ||
         isRecordValue(value.video) ||
+        isRecordValue(value.qaReport) ||
         Boolean(getVideoPreviewRecord(value))
     );
 };
@@ -977,6 +978,27 @@ const formatCostTotal = (value: unknown): string | undefined => {
     if (total === undefined) return undefined;
     const currency = firstStringValue(value.currency) ?? 'USD';
     return currency === 'USD' ? `$${total.toFixed(2)}` : `${currency} ${total.toFixed(2)}`;
+};
+
+const getQaCheckLabel = (key: string): string =>
+    (
+        ({
+            previewUrl: '미리보기',
+            videoStream: '영상 스트림',
+            audioStream: '음성 스트림',
+            resolution2k: '2K 해상도',
+            durationPresent: '길이 확인',
+            subtitleLayer: '자막 레이어',
+            motionCues: '모션 큐',
+            visualDensity: '시각 구성',
+            placeholderFree: '플레이스홀더 제거',
+        }) as Record<string, string>
+    )[key] ?? key;
+
+const getStatusLabel = (value: unknown): string => {
+    if (value === true) return '통과';
+    if (value === false) return '실패';
+    return '미확인';
 };
 
 const FriendlyOutputPreview: React.FC<{
@@ -1126,6 +1148,301 @@ const FriendlyOutputPreview: React.FC<{
 
     if (longformNodeType === 'longform-tts' && recordValue && isRecordValue(recordValue.audio)) {
         const audio = recordValue.audio;
+        const url = getUrlFromRecord(audio);
+        const durationSec = asNumberValue(audio.durationSec);
+        return withModal(
+            <div className="p-2.5 bg-muted/10 rounded-lg border border-border/30 overflow-auto" style={{ maxHeight }}>
+                <div className="flex items-center justify-between gap-2">
+                    <div className="text-[11px] font-semibold text-foreground">나레이션 음성</div>
+                    {url && (
+                        <button
+                            type="button"
+                            className="rounded border border-border px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+                            onClick={event => {
+                                event.stopPropagation();
+                                setModalContent({ value: url, type: 'audio' });
+                            }}
+                        >
+                            크게 듣기
+                        </button>
+                    )}
+                </div>
+                {durationSec !== undefined && (
+                    <div className="mt-1 text-[10px] text-muted-foreground">길이 약 {Math.round(durationSec)}초</div>
+                )}
+                {url ? (
+                    <audio className="mt-2 w-full" controls src={url} />
+                ) : (
+                    <div className="mt-2 text-[10px]">음성 생성 완료</div>
+                )}
+            </div>
+        );
+    }
+
+    if (longformNodeType === 'longform-qa' && isRecordValue(recordValue.qaReport)) {
+        const qaReport = recordValue.qaReport;
+        const checks = isRecordValue(qaReport.checks) ? qaReport.checks : {};
+        const checkEntries = Object.entries(checks).slice(0, 8);
+        const passed = qaReport.passed === true;
+
+        return withModal(
+            <div
+                className={cn(
+                    'p-2.5 rounded-lg border overflow-auto',
+                    passed ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-red-500/10 border-red-500/30'
+                )}
+                style={{ maxHeight }}
+            >
+                <div className="flex items-center justify-between gap-2">
+                    <div className={cn('text-[11px] font-semibold', passed ? 'text-emerald-100' : 'text-red-100')}>
+                        QA 검수 결과
+                    </div>
+                    <button
+                        type="button"
+                        className="rounded border border-border px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+                        onClick={event => {
+                            event.stopPropagation();
+                            setModalContent({ value: recordValue, type: 'json' });
+                        }}
+                    >
+                        전체 보기
+                    </button>
+                </div>
+                <div className="mt-1 text-[10px] text-muted-foreground">렌더 품질 {passed ? '통과' : '확인 필요'}</div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                    {checkEntries.map(([key, status]) => (
+                        <span
+                            key={key}
+                            className={cn(
+                                'rounded-full border px-2 py-0.5 text-[10px]',
+                                status === true
+                                    ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-100'
+                                    : status === false
+                                      ? 'border-red-400/30 bg-red-500/10 text-red-100'
+                                      : 'border-border bg-background/40 text-muted-foreground'
+                            )}
+                        >
+                            {getQaCheckLabel(key)} {getStatusLabel(status)}
+                        </span>
+                    ))}
+                </div>
+                {checkEntries.length === 0 && (
+                    <div className="mt-2 text-[10px] text-muted-foreground">검수 항목이 기록되지 않았습니다.</div>
+                )}
+            </div>
+        );
+    }
+
+    if (longformNodeType === 'longform-package') {
+        const packageVideo = getVideoPreviewRecord(recordValue);
+        const downloadUrl = firstStringValue(
+            recordValue.downloadUrl,
+            recordValue.mp4Url,
+            getUrlFromRecord(packageVideo)
+        );
+        const qaReport = isRecordValue(recordValue.qaReport) ? recordValue.qaReport : undefined;
+        const qaPassed = qaReport?.passed === true;
+        const subtitleCuesCount = subtitleCues.length;
+
+        return withModal(
+            <div
+                className="p-2.5 bg-primary/10 rounded-lg border border-primary/30 overflow-auto"
+                style={{ maxHeight }}
+            >
+                <div className="flex items-center justify-between gap-2">
+                    <div className="text-[11px] font-semibold text-primary">최종 패키지</div>
+                    <button
+                        type="button"
+                        className="rounded border border-primary/40 px-2 py-0.5 text-[10px] text-primary hover:bg-primary/10"
+                        onClick={event => {
+                            event.stopPropagation();
+                            setModalContent({ value: recordValue, type: 'json' });
+                        }}
+                    >
+                        전체 보기
+                    </button>
+                </div>
+                <div className="mt-1 text-[10px] text-muted-foreground">
+                    MP4 · QA {qaPassed ? '통과' : '확인 필요'}
+                    {subtitleCuesCount > 0 ? ` · 자막 ${subtitleCuesCount}개` : ''}
+                </div>
+                {downloadUrl && (
+                    <a
+                        className="mt-2 inline-flex items-center gap-1 rounded border border-primary/40 px-2 py-1 text-[10px] text-primary hover:bg-primary/10"
+                        href={downloadUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={event => event.stopPropagation()}
+                    >
+                        <Download className="h-3 w-3" />
+                        MP4 다운로드
+                    </a>
+                )}
+            </div>
+        );
+    }
+
+    if (nodeType === 'integration') {
+        const metadata = isRecordValue(recordValue.metadata) ? recordValue.metadata : undefined;
+        const seoMetadata = isRecordValue(recordValue.seoMetadata) ? recordValue.seoMetadata : undefined;
+        const integrationVideo = getVideoPreviewRecord(recordValue);
+        const title = firstStringValue(recordValue.title, metadata?.title, seoMetadata?.title) ?? '최종 메타데이터';
+        const description = firstStringValue(recordValue.description, metadata?.description, seoMetadata?.description);
+        const hashtags = asStringArray(recordValue.hashtags);
+        const publicUrl = firstStringValue(
+            recordValue.publicUrl,
+            recordValue.downloadUrl,
+            recordValue.mp4Url,
+            getUrlFromRecord(integrationVideo)
+        );
+
+        return withModal(
+            <div className="p-2.5 bg-muted/10 rounded-lg border border-border/30 overflow-auto" style={{ maxHeight }}>
+                <div className="flex items-center justify-between gap-2">
+                    <div className="text-[11px] font-semibold text-foreground">메타데이터 생성 결과</div>
+                    <button
+                        type="button"
+                        className="rounded border border-border px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+                        onClick={event => {
+                            event.stopPropagation();
+                            setModalContent({ value: recordValue, type: 'json' });
+                        }}
+                    >
+                        전체 보기
+                    </button>
+                </div>
+                <div className="mt-2 rounded bg-background/40 px-2 py-1.5">
+                    <div className="text-[10px] font-semibold text-foreground line-clamp-2">{title}</div>
+                    {description && (
+                        <div className="mt-1 text-[10px] text-muted-foreground line-clamp-3">{description}</div>
+                    )}
+                </div>
+                {hashtags.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                        {hashtags.slice(0, 6).map(tag => (
+                            <span key={tag} className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary">
+                                {tag}
+                            </span>
+                        ))}
+                    </div>
+                )}
+                {publicUrl && (
+                    <a
+                        className="mt-2 inline-flex items-center gap-1 text-[10px] text-primary underline"
+                        href={publicUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={event => event.stopPropagation()}
+                    >
+                        <Download className="h-3 w-3" />
+                        게시 영상 열기
+                    </a>
+                )}
+            </div>
+        );
+    }
+
+    const video = getVideoPreviewRecord(recordValue);
+    if (video) {
+        const url = getUrlFromRecord(video) ?? getUrlFromRecord(recordValue);
+        const videoMetadata = isRecordValue(video.metadata) ? video.metadata : undefined;
+        const rootMetadata = isRecordValue(recordValue.metadata) ? recordValue.metadata : undefined;
+        const durationSec =
+            asNumberValue(video.durationSec) ??
+            asNumberValue(videoMetadata?.durationSec) ??
+            asNumberValue(recordValue.durationSec) ??
+            asNumberValue(rootMetadata?.durationSec);
+        return withModal(
+            <div className="p-2.5 bg-muted/10 rounded-lg border border-border/30 overflow-auto" style={{ maxHeight }}>
+                <div className="flex items-center justify-between gap-2">
+                    <div className="text-[11px] font-semibold text-foreground">최종 영상</div>
+                    {url && (
+                        <button
+                            type="button"
+                            className="rounded border border-border px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+                            onClick={event => {
+                                event.stopPropagation();
+                                setModalContent({ value: url, type: 'video' });
+                            }}
+                        >
+                            크게 보기
+                        </button>
+                    )}
+                </div>
+                {durationSec !== undefined && (
+                    <div className="mt-1 text-[10px] text-muted-foreground">길이 약 {Math.round(durationSec)}초</div>
+                )}
+                {url ? (
+                    <>
+                        <video className="mt-2 max-h-64 w-full rounded bg-black object-contain" controls src={url} />
+                        <a
+                            className="mt-2 inline-flex items-center gap-1 text-[10px] text-primary underline"
+                            href={url}
+                            target="_blank"
+                            rel="noreferrer"
+                        >
+                            <Download className="h-3 w-3" />
+                            MP4 열기/다운로드
+                        </a>
+                    </>
+                ) : (
+                    <div className="mt-2 text-[10px]">영상 생성 완료</div>
+                )}
+            </div>
+        );
+    }
+
+    const images = asRecordArray(recordValue.images);
+    if (images.length > 0) {
+        return withModal(
+            <div className="p-2 bg-muted/10 rounded-lg border border-border/30 overflow-auto" style={{ maxHeight }}>
+                <div className="mb-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                    <span>이미지 {images.length}장 생성됨</span>
+                    <button
+                        type="button"
+                        className="rounded border border-border px-2 py-0.5 text-[10px] hover:text-foreground"
+                        onClick={event => {
+                            event.stopPropagation();
+                            setModalContent({ value: recordValue, type: 'image-gallery' });
+                        }}
+                    >
+                        갤러리 보기
+                    </button>
+                </div>
+                <div className="grid grid-cols-3 gap-1.5">
+                    {images.slice(0, 6).map((image, index) => {
+                        const url = getUrlFromRecord(image);
+                        return (
+                            <button
+                                type="button"
+                                key={`${url ?? 'image'}-${index}`}
+                                className="aspect-[9/16] overflow-hidden rounded bg-black/30"
+                                onClick={event => {
+                                    event.stopPropagation();
+                                    if (url) setModalContent({ value: url, type: 'image' });
+                                }}
+                            >
+                                {url ? (
+                                    <S3Image
+                                        src={url}
+                                        className="h-full w-full object-cover"
+                                        alt={`Scene ${index + 1}`}
+                                    />
+                                ) : (
+                                    <div className="flex h-full items-center justify-center text-[9px] text-muted-foreground">
+                                        이미지
+                                    </div>
+                                )}
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
+        );
+    }
+
+    const audio = isRecordValue(recordValue.audio) ? recordValue.audio : undefined;
+    if (audio) {
         const url = getUrlFromRecord(audio);
         const durationSec = asNumberValue(audio.durationSec);
         return withModal(
@@ -1391,138 +1708,6 @@ const FriendlyOutputPreview: React.FC<{
                             {isApproving ? '승인 저장 후 제작 시작 중...' : '승인하고 유료 제작 허용'}
                         </button>
                     </div>
-                )}
-            </div>
-        );
-    }
-
-    const video = getVideoPreviewRecord(recordValue);
-    if (video) {
-        const url = getUrlFromRecord(video) ?? getUrlFromRecord(recordValue);
-        const videoMetadata = isRecordValue(video.metadata) ? video.metadata : undefined;
-        const rootMetadata = isRecordValue(recordValue.metadata) ? recordValue.metadata : undefined;
-        const durationSec =
-            asNumberValue(video.durationSec) ??
-            asNumberValue(videoMetadata?.durationSec) ??
-            asNumberValue(recordValue.durationSec) ??
-            asNumberValue(rootMetadata?.durationSec);
-        return withModal(
-            <div className="p-2.5 bg-muted/10 rounded-lg border border-border/30 overflow-auto" style={{ maxHeight }}>
-                <div className="flex items-center justify-between gap-2">
-                    <div className="text-[11px] font-semibold text-foreground">최종 영상</div>
-                    {url && (
-                        <button
-                            type="button"
-                            className="rounded border border-border px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
-                            onClick={event => {
-                                event.stopPropagation();
-                                setModalContent({ value: url, type: 'video' });
-                            }}
-                        >
-                            크게 보기
-                        </button>
-                    )}
-                </div>
-                {durationSec !== undefined && (
-                    <div className="mt-1 text-[10px] text-muted-foreground">길이 약 {Math.round(durationSec)}초</div>
-                )}
-                {url ? (
-                    <>
-                        <video className="mt-2 max-h-64 w-full rounded bg-black object-contain" controls src={url} />
-                        <a
-                            className="mt-2 inline-flex items-center gap-1 text-[10px] text-primary underline"
-                            href={url}
-                            target="_blank"
-                            rel="noreferrer"
-                        >
-                            <Download className="h-3 w-3" />
-                            MP4 열기/다운로드
-                        </a>
-                    </>
-                ) : (
-                    <div className="mt-2 text-[10px]">영상 생성 완료</div>
-                )}
-            </div>
-        );
-    }
-
-    const images = asRecordArray(recordValue.images);
-    if (images.length > 0) {
-        return withModal(
-            <div className="p-2 bg-muted/10 rounded-lg border border-border/30 overflow-auto" style={{ maxHeight }}>
-                <div className="mb-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-                    <span>이미지 {images.length}장 생성됨</span>
-                    <button
-                        type="button"
-                        className="rounded border border-border px-2 py-0.5 text-[10px] hover:text-foreground"
-                        onClick={event => {
-                            event.stopPropagation();
-                            setModalContent({ value: recordValue, type: 'image-gallery' });
-                        }}
-                    >
-                        갤러리 보기
-                    </button>
-                </div>
-                <div className="grid grid-cols-3 gap-1.5">
-                    {images.slice(0, 6).map((image, index) => {
-                        const url = getUrlFromRecord(image);
-                        return (
-                            <button
-                                type="button"
-                                key={`${url ?? 'image'}-${index}`}
-                                className="aspect-[9/16] overflow-hidden rounded bg-black/30"
-                                onClick={event => {
-                                    event.stopPropagation();
-                                    if (url) setModalContent({ value: url, type: 'image' });
-                                }}
-                            >
-                                {url ? (
-                                    <S3Image
-                                        src={url}
-                                        className="h-full w-full object-cover"
-                                        alt={`Scene ${index + 1}`}
-                                    />
-                                ) : (
-                                    <div className="flex h-full items-center justify-center text-[9px] text-muted-foreground">
-                                        이미지
-                                    </div>
-                                )}
-                            </button>
-                        );
-                    })}
-                </div>
-            </div>
-        );
-    }
-
-    const audio = isRecordValue(recordValue.audio) ? recordValue.audio : undefined;
-    if (audio) {
-        const url = getUrlFromRecord(audio);
-        const durationSec = asNumberValue(audio.durationSec);
-        return withModal(
-            <div className="p-2.5 bg-muted/10 rounded-lg border border-border/30 overflow-auto" style={{ maxHeight }}>
-                <div className="flex items-center justify-between gap-2">
-                    <div className="text-[11px] font-semibold text-foreground">나레이션 음성</div>
-                    {url && (
-                        <button
-                            type="button"
-                            className="rounded border border-border px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
-                            onClick={event => {
-                                event.stopPropagation();
-                                setModalContent({ value: url, type: 'audio' });
-                            }}
-                        >
-                            크게 듣기
-                        </button>
-                    )}
-                </div>
-                {durationSec !== undefined && (
-                    <div className="mt-1 text-[10px] text-muted-foreground">길이 약 {Math.round(durationSec)}초</div>
-                )}
-                {url ? (
-                    <audio className="mt-2 w-full" controls src={url} />
-                ) : (
-                    <div className="mt-2 text-[10px]">음성 생성 완료</div>
                 )}
             </div>
         );

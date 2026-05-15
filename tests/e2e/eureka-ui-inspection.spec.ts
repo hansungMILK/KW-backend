@@ -802,10 +802,10 @@ test.describe('Eureka Flow UI inspection', () => {
 
         await page.getByRole('button', { name: /워크플로우 실행|Run Workflow/i }).click();
         await expect(page.getByText('대본 검수 모드로 실행을 시작했습니다.')).toBeVisible({ timeout: 10000 });
-        await expect(page.getByText('롱폼 제작 기획안', { exact: true }).first()).toBeVisible({ timeout: 10000 });
+        await expect(page.getByText('사용자 검수본', { exact: true }).first()).toBeVisible({ timeout: 10000 });
         await expect(page.getByText('전체 대본 초안')).toBeVisible();
-        await expect(page.getByText('HyperFrames 장면 계약')).toBeVisible();
         await expect(page.getByText(/hyperframes/i).first()).toBeVisible();
+        await expect(page.getByText('HyperFrames 장면 계약')).toHaveCount(0);
         await expect(page.getByText(/Gate [AB]|게이트/i)).toHaveCount(0);
         await capture(page, '19-longform-gate-a-run-completed');
 

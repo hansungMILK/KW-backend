@@ -25,11 +25,56 @@ const firstString = (...values: unknown[]): string | undefined => {
     return undefined;
 };
 
+const firstNumber = (...values: unknown[]): number | undefined => {
+    for (const value of values) {
+        if (typeof value === 'number' && Number.isFinite(value)) return value;
+    }
+    return undefined;
+};
+
+const asRecordArray = (value: unknown): Record<string, unknown>[] =>
+    Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => Boolean(asRecord(item))) : [];
+
+const getUrlFromRecord = (value: unknown): string | undefined => {
+    const record = asRecord(value);
+    if (!record) return undefined;
+    return firstString(record.url, record.publicUrl, record.data, record.previewUrl, record.downloadUrl);
+};
+
+const looksLikeVideoUrl = (value: string | undefined): boolean =>
+    Boolean(value && (value.startsWith('data:video/') || /\.(mp4|mov|webm)(?:$|[?#])/i.test(value)));
+
+const isVideoRecord = (value: unknown): value is Record<string, unknown> => {
+    const record = asRecord(value);
+    if (!record) return false;
+    const mimeType = firstString(record.mimeType, record.contentType)?.toLowerCase();
+    const assetType = firstString(record.type, record.assetType, record.kind)?.toLowerCase();
+    const format = firstString(record.format, record.extension)?.toLowerCase();
+    const url = getUrlFromRecord(record);
+    return (
+        assetType === 'video' ||
+        mimeType?.startsWith('video/') === true ||
+        format === 'mp4' ||
+        format === 'mov' ||
+        format === 'webm' ||
+        looksLikeVideoUrl(url)
+    );
+};
+
+const getVideoRecord = (value: Record<string, unknown>): Record<string, unknown> | undefined => {
+    if (isVideoRecord(value.video)) return value.video;
+    const artifactVideo = asRecordArray(value.artifacts).find(isVideoRecord);
+    if (artifactVideo) return artifactVideo;
+    return isVideoRecord(value) ? value : undefined;
+};
+
 const hasLongformFriendlyShape = (value: unknown): value is Record<string, unknown> => {
     const record = asRecord(value);
     if (!record) return false;
     return Boolean(
-        firstString(record.fullScriptDraft, record.renderer, record.rendererRoute, record.resolution) ||
+        getVideoRecord(record) ||
+            asRecordArray(record.images).length > 0 ||
+            firstString(record.fullScriptDraft, record.renderer, record.rendererRoute, record.resolution) ||
             Array.isArray(record.sourceDigest) ||
             Array.isArray(record.sections) ||
             Array.isArray(record.visualChapters) ||
@@ -38,6 +83,30 @@ const hasLongformFriendlyShape = (value: unknown): value is Record<string, unkno
 };
 
 const LongformTooltipSummary = ({ value }: { value: Record<string, unknown> }) => {
+    const video = getVideoRecord(value);
+    if (video) {
+        const durationSec = firstNumber(video.durationSec, asRecord(video.metadata)?.durationSec, value.durationSec);
+        return (
+            <div className="min-w-[180px] max-w-[320px] text-[10px] text-foreground">
+                <div className="font-semibold text-foreground">최종 영상</div>
+                <div className="mt-1 text-muted-foreground">
+                    MP4 생성됨{durationSec !== undefined ? ` · 약 ${Math.round(durationSec)}초` : ''}
+                </div>
+                <div className="mt-1 line-clamp-1 text-primary">미리보기/다운로드 가능</div>
+            </div>
+        );
+    }
+
+    const images = asRecordArray(value.images);
+    if (images.length > 0) {
+        return (
+            <div className="min-w-[180px] max-w-[320px] text-[10px] text-foreground">
+                <div className="font-semibold text-foreground">이미지 결과</div>
+                <div className="mt-1 text-muted-foreground">장면 이미지 {images.length}장</div>
+            </div>
+        );
+    }
+
     const sourceCount = Array.isArray(value.sourceDigest) ? value.sourceDigest.length : 0;
     const sectionCount = Array.isArray(value.sections) ? value.sections.length : 0;
     const sceneCount = Array.isArray(value.scenes) ? value.scenes.length : 0;
