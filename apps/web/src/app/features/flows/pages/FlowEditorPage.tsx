@@ -18,7 +18,7 @@ import { ApiKeyDialog } from '@flows/shared';
 import { useInitFlowSocket } from '@flows/socket';
 import { useWebCoreStore } from '@flows/web-core';
 
-import { getWorkflowRunMode, isWorkflowRunButtonDisabled } from './run-mode';
+import { type WorkflowRunStatus, getWorkflowRunMode, isWorkflowRunButtonDisabled } from './run-mode';
 import { FlowAgentPanel } from '../components/FlowAgentPanel';
 import { Header } from '../components/Header';
 import { HelpDialog } from '../components/HelpDialog';
@@ -50,9 +50,15 @@ type RunNodeSnapshot = Awaited<ReturnType<typeof getRunNodes>>[number];
 type RunActivity = {
     nodeLabel?: string;
     progress?: number;
-    state?: 'queued' | 'running' | 'completed' | 'failed';
+    state?: 'queued' | 'running' | 'reviewing' | 'completed' | 'failed';
     message?: string;
     error?: string | null;
+};
+
+type RunReviewSummary = {
+    stoppedForReview?: boolean;
+    reviewNodeId?: string;
+    message?: string;
 };
 
 const RUN_NODE_POLL_MS = 1500;
@@ -117,6 +123,18 @@ const toOutputPacket = (node: RunNodeSnapshot) => {
     };
 };
 
+const isStoppedForReviewSummary = (summary: unknown): summary is RunReviewSummary => {
+    if (!summary || typeof summary !== 'object' || Array.isArray(summary)) return false;
+    return (summary as RunReviewSummary).stoppedForReview === true;
+};
+
+const getScriptReviewWaitingMessage = (message?: string): string => {
+    if (!message || message === 'Script review step completed') {
+        return '대본 단계가 완료되었습니다. 대본 노드에서 검수본을 저장한 뒤 검수본으로 이어서 실행 버튼을 누르면 이미지, TTS, 영상 합성이 이어집니다.';
+    }
+    return message;
+};
+
 export const FlowEditorPage = () => {
     const { t } = useTranslation(['flows']);
     const canvasRef = useRef<WorkflowCanvasRef>(null);
@@ -143,9 +161,10 @@ export const FlowEditorPage = () => {
     } = useFlows();
 
     const [isAgentOpen, setIsAgentOpen] = useState(false);
-    const [runStatus, setRunStatus] = useState<'running' | 'completed' | 'failed' | null>(null);
+    const [runStatus, setRunStatus] = useState<WorkflowRunStatus>(null);
     const [runActivity, setRunActivity] = useState<RunActivity | null>(null);
     const [activeRunId, setActiveRunId] = useState<string | null>(null);
+    const activeRunScriptReviewFirstRef = useRef(false);
     const [latestProposal, setLatestProposal] = useState<ProposalCreatedMessage | null>(null);
     const [pendingWorkflowLoad, setPendingWorkflowLoad] = useState<PendingWorkflowLoad | null>(null);
 
@@ -153,6 +172,7 @@ export const FlowEditorPage = () => {
         setRunStatus(null);
         setRunActivity(null);
         setActiveRunId(null);
+        activeRunScriptReviewFirstRef.current = false;
         setLatestProposal(null);
         setPendingWorkflowLoad(null);
     }, []);
@@ -166,8 +186,25 @@ export const FlowEditorPage = () => {
         [blockRegistry]
     );
 
+    const setScriptReviewWaitingState = useCallback(
+        (summary?: RunReviewSummary) => {
+            setRunStatus('reviewing');
+            setRunActivity({
+                nodeLabel: summary?.reviewNodeId ? getCanvasNodeLabel(summary.reviewNodeId) : '대본 검수 대기',
+                progress: 100,
+                state: 'reviewing',
+                message: getScriptReviewWaitingMessage(summary?.message),
+            });
+            setIsAgentOpen(true);
+        },
+        [getCanvasNodeLabel]
+    );
+
     const applyRunNodeSnapshots = useCallback(
-        (runNodes: RunNodeSnapshot[]): 'running' | 'completed' | 'failed' | null => {
+        (
+            runNodes: RunNodeSnapshot[],
+            options?: { preserveTerminalStatus?: boolean }
+        ): Exclude<WorkflowRunStatus, 'reviewing'> => {
             const visibleRunNodes = runNodes.filter(node => !node.nodeId.startsWith('port_'));
             if (visibleRunNodes.length === 0) return null;
 
@@ -237,12 +274,14 @@ export const FlowEditorPage = () => {
                 return 'running';
             }
 
-            setRunStatus('completed');
-            setRunActivity({
-                nodeLabel: '전체 워크플로우',
-                progress: 100,
-                state: 'completed',
-            });
+            if (!options?.preserveTerminalStatus) {
+                setRunStatus('completed');
+                setRunActivity({
+                    nodeLabel: '전체 워크플로우',
+                    progress: 100,
+                    state: 'completed',
+                });
+            }
             return 'completed';
         },
         [getCanvasNodeLabel]
@@ -254,8 +293,13 @@ export const FlowEditorPage = () => {
                 const [latestRun] = await listFlowRuns(flowId, 1);
                 if (!latestRun || latestRun.status === 'CANCELLED') return;
 
-                const runNodes = await getRunNodes(latestRun.runId);
-                const derivedStatus = applyRunNodeSnapshots(runNodes);
+                const [run, runNodes] = await Promise.all([getRun(latestRun.runId), getRunNodes(latestRun.runId)]);
+                const reviewSummary = isStoppedForReviewSummary(run.finalOutputSummary)
+                    ? run.finalOutputSummary
+                    : undefined;
+                const derivedStatus = applyRunNodeSnapshots(runNodes, {
+                    preserveTerminalStatus: !!reviewSummary,
+                });
 
                 if (latestRun.status === 'QUEUED' || latestRun.status === 'RUNNING') {
                     setActiveRunId(latestRun.runId);
@@ -276,6 +320,10 @@ export const FlowEditorPage = () => {
 
                 if (latestRun.status === 'COMPLETED') {
                     setActiveRunId(null);
+                    if (reviewSummary) {
+                        setScriptReviewWaitingState(reviewSummary);
+                        return;
+                    }
                     setRunStatus('completed');
                     setRunActivity({
                         nodeLabel: '전체 워크플로우',
@@ -303,7 +351,7 @@ export const FlowEditorPage = () => {
                 console.debug('[FlowEditor] Failed to hydrate latest run:', error);
             }
         },
-        [applyRunNodeSnapshots]
+        [applyRunNodeSnapshots, setScriptReviewWaitingState]
     );
 
     // Handle flow update notification from WebSocket (new format)
@@ -568,15 +616,58 @@ export const FlowEditorPage = () => {
         (message: RunCompletedMessage) => {
             const runId = message.runId ?? activeRunId;
             if (runId) {
-                void getRunNodes(runId)
-                    .then(runNodes => {
-                        applyRunNodeSnapshots(runNodes);
+                void Promise.all([getRun(runId), getRunNodes(runId)])
+                    .then(([run, runNodes]) => {
+                        const reviewSummary = isStoppedForReviewSummary(run.finalOutputSummary)
+                            ? run.finalOutputSummary
+                            : undefined;
+                        applyRunNodeSnapshots(runNodes, {
+                            preserveTerminalStatus: !!reviewSummary || activeRunScriptReviewFirstRef.current,
+                        });
+                        setActiveRunId(null);
+
+                        if (reviewSummary || activeRunScriptReviewFirstRef.current) {
+                            setScriptReviewWaitingState(
+                                reviewSummary ?? {
+                                    stoppedForReview: true,
+                                    message: message.message,
+                                }
+                            );
+                            return;
+                        }
+
+                        activeRunScriptReviewFirstRef.current = false;
+                        setRunStatus('completed');
+                        setRunActivity({
+                            nodeLabel: '전체 워크플로우',
+                            progress: 100,
+                            state: 'completed',
+                            message: message.message ?? '모든 노드 실행이 끝났습니다.',
+                        });
                     })
                     .catch(error => {
                         console.debug('[FlowEditor] Failed to refresh completed run nodes:', error);
+                        setActiveRunId(null);
+                        if (activeRunScriptReviewFirstRef.current) {
+                            setScriptReviewWaitingState({
+                                stoppedForReview: true,
+                                message: message.message,
+                            });
+                            return;
+                        }
+                        activeRunScriptReviewFirstRef.current = false;
+                        setRunStatus('completed');
+                        setRunActivity({
+                            nodeLabel: '전체 워크플로우',
+                            progress: 100,
+                            state: 'completed',
+                            message: message.message ?? '모든 노드 실행이 끝났습니다.',
+                        });
                     });
+                return;
             }
             setActiveRunId(null);
+            activeRunScriptReviewFirstRef.current = false;
             setRunStatus('completed');
             setRunActivity({
                 nodeLabel: '전체 워크플로우',
@@ -585,12 +676,13 @@ export const FlowEditorPage = () => {
                 message: message.message ?? '모든 노드 실행이 끝났습니다.',
             });
         },
-        [activeRunId, applyRunNodeSnapshots]
+        [activeRunId, applyRunNodeSnapshots, setScriptReviewWaitingState]
     );
 
     const handleRunFailed = useCallback(
         (message: RunFailedMessage) => {
             setActiveRunId(null);
+            activeRunScriptReviewFirstRef.current = false;
             setRunStatus('failed');
             setRunActivity({
                 nodeLabel: message.failedNodeId ? getCanvasNodeLabel(message.failedNodeId) : '전체 워크플로우',
@@ -638,7 +730,12 @@ export const FlowEditorPage = () => {
                 const [run, runNodes] = await Promise.all([getRun(activeRunId), getRunNodes(activeRunId)]);
                 if (cancelled) return;
 
-                const derivedStatus = applyRunNodeSnapshots(runNodes);
+                const reviewSummary = isStoppedForReviewSummary(run.finalOutputSummary)
+                    ? run.finalOutputSummary
+                    : undefined;
+                const derivedStatus = applyRunNodeSnapshots(runNodes, {
+                    preserveTerminalStatus: !!reviewSummary || activeRunScriptReviewFirstRef.current,
+                });
 
                 if (run.status === 'FAILED') {
                     const summary = run.finalOutputSummary as
@@ -646,6 +743,7 @@ export const FlowEditorPage = () => {
                         | null
                         | undefined;
                     setRunStatus('failed');
+                    activeRunScriptReviewFirstRef.current = false;
                     setRunActivity({
                         nodeLabel: summary?.failedNodeId ? getCanvasNodeLabel(summary.failedNodeId) : '전체 워크플로우',
                         progress: 100,
@@ -659,6 +757,7 @@ export const FlowEditorPage = () => {
 
                 if (run.status === 'CANCELLED') {
                     setRunStatus('failed');
+                    activeRunScriptReviewFirstRef.current = false;
                     setRunActivity({
                         nodeLabel: '전체 워크플로우',
                         progress: 100,
@@ -671,6 +770,12 @@ export const FlowEditorPage = () => {
                 }
 
                 if (run.status === 'COMPLETED' || derivedStatus === 'completed') {
+                    if (reviewSummary || activeRunScriptReviewFirstRef.current) {
+                        setScriptReviewWaitingState(reviewSummary);
+                        setActiveRunId(null);
+                        return;
+                    }
+                    activeRunScriptReviewFirstRef.current = false;
                     setRunStatus('completed');
                     setRunActivity({
                         nodeLabel: '전체 워크플로우',
@@ -696,7 +801,7 @@ export const FlowEditorPage = () => {
             cancelled = true;
             if (timeoutId !== null) window.clearTimeout(timeoutId);
         };
-    }, [activeRunId, applyRunNodeSnapshots, getCanvasNodeLabel]);
+    }, [activeRunId, applyRunNodeSnapshots, getCanvasNodeLabel, setScriptReviewWaitingState]);
 
     const [isAppReady, setIsAppReady] = useState(false);
     const [isBootError, setIsBootError] = useState(false);
@@ -705,6 +810,7 @@ export const FlowEditorPage = () => {
     const [isApiKeyDialogOpen, setIsApiKeyDialogOpen] = useState(false);
     const [isHelpDialogOpen, setIsHelpDialogOpen] = useState(false);
     const [isWorkflowRunning, setIsWorkflowRunning] = useState(false);
+    const [isApplyingProposal, setIsApplyingProposal] = useState(false);
     const [helpDialogTab, setHelpDialogTab] = useState<HelpTab>('gettingStarted');
     const [agentBtnPos, setAgentBtnPos] = useState<{ x: number; y: number } | null>(null);
     const agentBtnDragRef = useRef<{ mouseX: number; mouseY: number; btnX: number; btnY: number } | null>(null);
@@ -952,7 +1058,13 @@ export const FlowEditorPage = () => {
     }, []);
 
     const handleRunWorkflow = async () => {
-        if (!canvasRef.current || isWorkflowRunButtonDisabled({ isWorkflowRunning, isLoading, runStatus })) return;
+        if (
+            !canvasRef.current ||
+            isApplyingProposal ||
+            isWorkflowRunButtonDisabled({ isWorkflowRunning, isLoading, runStatus })
+        ) {
+            return;
+        }
 
         setIsWorkflowRunning(true);
         try {
@@ -977,6 +1089,7 @@ export const FlowEditorPage = () => {
             const { executionMode, scriptReviewFirst: runScriptReviewFirst } = getWorkflowRunMode(
                 data.nodes as NodeData[] | undefined
             );
+            activeRunScriptReviewFirstRef.current = runScriptReviewFirst;
 
             const run = await createFlowRun(result.id, {
                 executionMode,
@@ -1004,11 +1117,13 @@ export const FlowEditorPage = () => {
         }
     };
 
-    const runButtonDisabled = isWorkflowRunButtonDisabled({ isWorkflowRunning, isLoading, runStatus });
+    const runButtonDisabled =
+        isApplyingProposal || isWorkflowRunButtonDisabled({ isWorkflowRunning, isLoading, runStatus });
 
     const handleApproveProposal = useCallback(
         async (nodes: unknown[], edges: unknown[]) => {
             if (!canvasRef.current || (!nodes.length && !edges.length)) return;
+            setIsApplyingProposal(true);
             try {
                 await canvasRef.current.loadWorkflow({
                     nodes,
@@ -1031,6 +1146,8 @@ export const FlowEditorPage = () => {
                 }
             } catch {
                 showNotification('캔버스 업데이트 실패', 'error');
+            } finally {
+                setIsApplyingProposal(false);
             }
         },
         [currentFlowId, saveCurrentFlow, updateUrl]
@@ -1203,8 +1320,12 @@ export const FlowEditorPage = () => {
             {/* Hidden file input */}
             <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={handleFileChange} />
 
-            {/* Full-screen Canvas */}
-            <div className="absolute inset-0">
+            {/* Canvas surface. When the agent panel is open, reserve its width so controls are not hidden behind it. */}
+            <div
+                className={`absolute top-0 bottom-0 left-0 transition-[right] duration-200 ${
+                    isAgentOpen ? 'right-0 sm:right-80' : 'right-0'
+                }`}
+            >
                 <WorkflowCanvas
                     ref={canvasRef}
                     flowId={currentFlowId}
@@ -1215,6 +1336,32 @@ export const FlowEditorPage = () => {
                     onShowNotification={showNotification}
                     onLongformReviewApproved={handleRunWorkflow}
                 />
+
+                {/* Full Workflow Run Button */}
+                <button
+                    type="button"
+                    onClick={() => void handleRunWorkflow()}
+                    disabled={runButtonDisabled}
+                    className="absolute bottom-20 left-1/2 -translate-x-1/2 z-30 inline-flex items-center gap-2 rounded-xl border border-primary/40 bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-floating transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                    title="전체 워크플로우 실행"
+                >
+                    {isApplyingProposal || isWorkflowRunning ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                        <Play className="h-4 w-4" />
+                    )}
+                    <span>
+                        {isApplyingProposal
+                            ? '제안 배치 중'
+                            : isWorkflowRunning
+                              ? '실행 요청 중'
+                              : runStatus === 'running'
+                                ? '워크플로우 실행 중'
+                                : runStatus === 'reviewing'
+                                  ? '검수본으로 이어서 실행'
+                                  : '워크플로우 실행'}
+                    </span>
+                </button>
             </div>
 
             {/* Floating Header */}
@@ -1262,6 +1409,7 @@ export const FlowEditorPage = () => {
                 onShare={handleShare}
                 onApiKeySettings={handleApiKeySettings}
                 onHelp={() => handleOpenHelp('gettingStarted')}
+                isAgentPanelOpen={isAgentOpen}
             />
 
             {/* Floating Sidebar */}
@@ -1289,24 +1437,6 @@ export const FlowEditorPage = () => {
                 runStatus={runStatus}
                 runActivity={runActivity}
             />
-
-            {/* Full Workflow Run Button */}
-            <button
-                type="button"
-                onClick={() => void handleRunWorkflow()}
-                disabled={runButtonDisabled}
-                className="absolute bottom-20 left-1/2 -translate-x-1/2 z-30 inline-flex items-center gap-2 rounded-xl border border-primary/40 bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-floating transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-                title="전체 워크플로우 실행"
-            >
-                {isWorkflowRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                <span>
-                    {isWorkflowRunning
-                        ? '실행 요청 중'
-                        : runStatus === 'running'
-                          ? '워크플로우 실행 중'
-                          : '워크플로우 실행'}
-                </span>
-            </button>
 
             {/* Flow Agent Button */}
             {!isAgentOpen && (
@@ -1348,6 +1478,7 @@ export const FlowEditorPage = () => {
                     }}
                     style={agentBtnPos ? { left: agentBtnPos.x, top: agentBtnPos.y } : undefined}
                     className={`z-30 w-12 h-12 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center hover:bg-primary/90 cursor-grab active:cursor-grabbing select-none ${agentBtnPos ? 'fixed' : 'absolute bottom-24 right-6'}`}
+                    aria-label="Flow Agent 열기"
                     title="Flow Agent"
                 >
                     <svg

@@ -176,4 +176,26 @@ describe('FlowAgentPanel proposal content profile controls', () => {
         expect(await screen.findByText('두 번째 플로우 기록')).toBeTruthy();
         expect(screen.queryByText('첫 번째 플로우 기록')).toBeNull();
     });
+
+    it('shows script-review waiting state without marking the workflow completed', async () => {
+        render(
+            <FlowAgentPanel
+                open
+                onClose={() => undefined}
+                flowId="flow-1"
+                runStatus="reviewing"
+                runActivity={{
+                    state: 'reviewing',
+                    nodeLabel: '대본 검수',
+                    message: '대본 노드에서 검수본을 저장한 뒤 이어서 실행하세요.',
+                }}
+            />
+        );
+
+        expect(await screen.findByText('대본 검수 대기')).toBeTruthy();
+        expect(screen.getByText(/현재 노드:/)).toBeTruthy();
+        expect(screen.getByText('대본 검수')).toBeTruthy();
+        expect(screen.getByText('대본 노드에서 검수본을 저장한 뒤 이어서 실행하세요.')).toBeTruthy();
+        expect(screen.queryByText('워크플로우 실행 완료')).toBeNull();
+    });
 });

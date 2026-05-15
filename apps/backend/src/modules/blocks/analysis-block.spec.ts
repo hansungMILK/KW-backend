@@ -80,6 +80,91 @@ describe('analysisBlock', () => {
         expect(JSON.stringify(result.output['issues'])).toContain('상단 제목이 너무 깁니다');
     });
 
+    it('auto-remediates source-backed factual wording cautions instead of failing the workflow', async () => {
+        vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
+            content: JSON.stringify({
+                suggestedIssues: [
+                    {
+                        severity: 'high',
+                        sceneNumber: 3,
+                        message:
+                            "2025년 계약 연장과 계약 만료 시점은 최신 공식 발표 기준이 맞는지 시점 확인이 필요합니다. 단정형 대신 '공식 발표에 따르면'처럼 유지하는 것이 안전합니다.",
+                    },
+                    {
+                        severity: 'high',
+                        sceneNumber: 6,
+                        message: '최신 사실관계는 출처가 있어도 영상 시점 기준의 정확성을 재확인해야 합니다.',
+                    },
+                ],
+            }),
+        });
+
+        const normalizedScenes = Array.from({ length: 12 }, (_, index) => ({
+            sceneNumber: index + 1,
+            caption: `장면 ${index + 1}`,
+            narration:
+                index === 2
+                    ? '2025년 계약 연장으로 계약은 2026년까지 이어집니다.'
+                    : index === 5
+                      ? '2025년 유로파리그 우승의 주장으로 다시 주목받았습니다.'
+                      : `검증 가능한 설명형 나레이션 문장입니다 ${index + 1}`,
+            imagePrompt: 'A simple Korean explainer shorts scene.',
+            visual: {
+                topTitle: '토트넘 강등 위기',
+                mainCaption: `장면 ${index + 1}`,
+            },
+            claimType: 'fact',
+            sourceRefs: ['source-1'],
+            durationSec: 5,
+        }));
+
+        const result = await analysisBlock.execute({
+            normalizedScenes,
+            metadata: {
+                title: '토트넘 강등 위기',
+                presetId: 'general-shorts',
+            },
+        });
+
+        expect(result.output['approved']).toBe(true);
+        expect(JSON.stringify(result.output['issues'])).toContain('자동 완화');
+        expect(JSON.stringify(result.output['autoRemediations'])).toContain('sceneNumber');
+
+        const repairedScenes = result.output['normalizedScenes'] as Array<{ sceneNumber: number; narration: string }>;
+        expect(repairedScenes.find(scene => scene.sceneNumber === 3)?.narration).toContain('공식 발표 기준으로');
+        expect(repairedScenes.find(scene => scene.sceneNumber === 6)?.narration).toContain('공식 발표 기준으로');
+    });
+
+    it('does not block source-backed news controversy topics only because they contain the word scam', async () => {
+        const normalizedScenes = Array.from({ length: 12 }, (_, index) => ({
+            sceneNumber: index + 1,
+            caption: `논란 장면 ${index + 1}`,
+            narration:
+                index === 0
+                    ? '보도에 따르면 모수 와인 사기 논란은 결제와 제공 방식에 대한 의혹에서 시작됐습니다.'
+                    : `출처 기반으로 논란의 배경을 설명하는 나레이션입니다 ${index + 1}`,
+            imagePrompt: 'A source-backed Korean news explainer scene.',
+            visual: {
+                topTitle: '모수 와인 논란',
+                mainCaption: `논란 장면 ${index + 1}`,
+            },
+            claimType: 'fact',
+            sourceRefs: ['source-1'],
+            durationSec: 5,
+        }));
+
+        const result = await analysisBlock.execute({
+            normalizedScenes,
+            metadata: {
+                title: '모수 와인 사기논란',
+                presetId: 'general-shorts',
+            },
+        });
+
+        expect(result.output['approved']).toBe(true);
+        expect(JSON.stringify(result.output['issues'])).not.toContain('금지 키워드 "사기"');
+    });
+
     it('approves complete longform Gate A artifacts and keeps paid execution blocked', async () => {
         const result = await analysisBlock.execute(
             {

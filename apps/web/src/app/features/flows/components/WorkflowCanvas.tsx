@@ -878,7 +878,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                         const groups: NodeData[][] = [];
                         ns.forEach(n => {
                             const col = groups.find(
-                                g => g.length > 0 && Math.abs(g[0].position.x - n.position.x) < PORT_LAYOUT.NODE_WIDTH
+                                g => g.length > 0 && Math.abs(g[0].position.x - n.position.x) < getNodeWidth(g[0])
                             );
                             if (col) col.push(n);
                             else groups.push([n]);
@@ -934,7 +934,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                         const pad = 60;
                         const minX = Math.min(...nodesReadyToRender.map(n => n.position.x));
                         const minY = Math.min(...nodesReadyToRender.map(n => n.position.y));
-                        const maxX = Math.max(...nodesReadyToRender.map(n => n.position.x + PORT_LAYOUT.NODE_WIDTH));
+                        const maxX = Math.max(...nodesReadyToRender.map(n => n.position.x + getNodeWidth(n)));
                         const maxY = Math.max(
                             ...nodesReadyToRender.map(
                                 n =>
@@ -1154,7 +1154,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                         const pad = 60;
                         const minX = Math.min(...positionedNodes.map(n => n.position.x));
                         const minY = Math.min(...positionedNodes.map(n => n.position.y));
-                        const maxX = Math.max(...positionedNodes.map(n => n.position.x + PORT_LAYOUT.NODE_WIDTH + 10));
+                        const maxX = Math.max(...positionedNodes.map(n => n.position.x + getNodeWidth(n) + 10));
                         const maxY = Math.max(
                             ...positionedNodes.map(n => n.position.y + estimateNodeHeight(n, blockRegistry[n.type]))
                         );

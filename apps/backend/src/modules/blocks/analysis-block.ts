@@ -23,6 +23,12 @@ const ADMISSION_SAFE_VIOLENCE_TERMS = ['학교폭력', '학폭', '폭력 조치�
 const ANALYSIS_SYSTEM_PROMPT = `You are a Korean YouTube Shorts content safety and quality reviewer.
 Review the provided scene narrations and return a brief assessment.
 
+Severity rules:
+- critical/high: only unsafe, unsupported, source-missing, or materially false content that must stop production.
+- medium: source-backed factual wording that needs softer attribution such as "공식 발표 기준으로" or "보도에 따르면".
+- low: style, pacing, wording, or layout polish.
+- If claimType=fact has sourceRefs, do not mark it as source-missing. Prefer medium for phrasing/date freshness cautions.
+
 Respond with JSON only — no markdown fences, no extra text:
 {
   "safetyComment": "brief safety assessment in Korean (1–2 sentences)",
@@ -39,6 +45,14 @@ interface Issue {
     severity: 'low' | 'medium' | 'high' | 'critical';
     message: string;
     sceneNumber?: number;
+}
+
+interface AutoRemediation {
+    sceneNumber: number;
+    action: 'soften-factual-wording';
+    before: string;
+    after: string;
+    reason: string;
 }
 
 interface NormalizedScene {
@@ -163,6 +177,9 @@ function runRuleChecks(
 
         for (const banned of BANNED_KEYWORDS) {
             if (hasBannedKeyword(combinedText, banned, presetId)) {
+                if (isSourceBackedNewsContext(combinedText, banned, claimType, sourceRefs)) {
+                    continue;
+                }
                 issues.push({
                     severity: 'high',
                     message: `금지 키워드 "${banned}" 감지됨.`,
@@ -280,6 +297,18 @@ function hasBannedKeyword(text: string, banned: string, presetId: string): boole
         return normalized.includes(banned);
     }
     return text.includes(banned);
+}
+
+function isSourceBackedNewsContext(
+    text: string,
+    banned: string,
+    claimType: string | undefined,
+    sourceRefs: unknown[]
+): boolean {
+    if (sourceRefs.length === 0) return false;
+    if (claimType !== 'fact' && claimType !== 'context') return false;
+    if (banned !== '사기' && banned !== '도박' && banned !== '폭력') return false;
+    return /논란|의혹|혐의|사건|보도|수사|소송|판결|피해|문제/.test(text);
 }
 
 function hasAdmissionGuaranteeClaim(text: string): boolean {
@@ -415,15 +444,19 @@ export const analysisBlock: BlockExecutor = {
 
         // AI enhancement in real provider mode; non-fatal if it fails.
         const allIssues = await runAIReview(scenes, ruleIssues, rulepack.analysisPrompt);
+        const remediated = autoRemediateSourceBackedFactualCautions(scenes, allIssues);
 
-        const blockingIssues = allIssues.filter(issue => issue.severity === 'high' || issue.severity === 'critical');
+        const blockingIssues = remediated.issues.filter(
+            issue => issue.severity === 'high' || issue.severity === 'critical'
+        );
         const approved = safetyScore >= SAFETY_THRESHOLD && blockingIssues.length === 0;
 
         const output = {
             safetyScore,
             qualityScore,
-            issues: allIssues,
+            issues: remediated.issues,
             approved,
+            ...(remediated.autoRemediations.length > 0 ? { autoRemediations: remediated.autoRemediations } : {}),
         };
 
         const validated = AnalysisOutputSchema.safeParse(output);
@@ -442,7 +475,7 @@ export const analysisBlock: BlockExecutor = {
         return {
             output: {
                 ...(validated.data as Record<string, unknown>),
-                normalizedScenes: scenes,
+                normalizedScenes: remediated.scenes,
                 ...(metadata ? { metadata } : {}),
                 presetId: rulepack.id,
             },
@@ -450,6 +483,73 @@ export const analysisBlock: BlockExecutor = {
         };
     },
 };
+
+function autoRemediateSourceBackedFactualCautions(
+    scenes: NormalizedScene[],
+    issues: Issue[]
+): {
+    scenes: NormalizedScene[];
+    issues: Issue[];
+    autoRemediations: AutoRemediation[];
+} {
+    const sceneCopies = scenes.map(scene => ({ ...scene }));
+    const autoRemediations: AutoRemediation[] = [];
+    const remediatedIssueIndexes = new Set<number>();
+
+    issues.forEach((issue, issueIndex) => {
+        if (!isRemediableSourceBackedFactualCaution(issue)) return;
+        if (typeof issue.sceneNumber !== 'number') return;
+
+        const sceneIndex = sceneCopies.findIndex(scene => scene.sceneNumber === issue.sceneNumber);
+        if (sceneIndex < 0) return;
+
+        const scene = sceneCopies[sceneIndex];
+        if (scene.claimType !== 'fact') return;
+        if (!Array.isArray(scene.sourceRefs) || scene.sourceRefs.length === 0) return;
+        if (typeof scene.narration !== 'string' || scene.narration.trim().length === 0) return;
+
+        const before = scene.narration.trim();
+        const after = softenFactualNarration(before);
+        if (after === before) return;
+
+        sceneCopies[sceneIndex] = { ...scene, narration: after };
+        autoRemediations.push({
+            sceneNumber: issue.sceneNumber,
+            action: 'soften-factual-wording',
+            before,
+            after,
+            reason: issue.message,
+        });
+        remediatedIssueIndexes.add(issueIndex);
+    });
+
+    const downgradedIssues = issues.map((issue, issueIndex) => {
+        if (!remediatedIssueIndexes.has(issueIndex)) return issue;
+        return {
+            ...issue,
+            severity: 'medium' as const,
+            message: `자동 완화: ${issue.message}`,
+        };
+    });
+
+    return { scenes: sceneCopies, issues: downgradedIssues, autoRemediations };
+}
+
+function isRemediableSourceBackedFactualCaution(issue: Issue): boolean {
+    if (issue.severity !== 'high' && issue.severity !== 'critical') return false;
+    const message = issue.message;
+    if (/sourceRefs?\s*가\s*없|출처.*없|출처\s*누락|금지\s*키워드|보장\/과장|보장|혐오|불법|마약|음란/.test(message)) {
+        return false;
+    }
+    return /공식\s*발표|보도|시점|최신|재확인|단정형|단정|확인일|사실관계|기준|표현/.test(message);
+}
+
+function softenFactualNarration(narration: string): string {
+    if (/^(공식 발표 기준으로|공식 발표에 따르면|보도에 따르면|출처 기준으로)/.test(narration)) {
+        return narration;
+    }
+    return `공식 발표 기준으로, ${narration}`;
+}
 
 function isLongformGateAInput(input: unknown, config?: Record<string, unknown>): boolean {
     const values: unknown[] = [config?.['mode'], config?.['gate']];

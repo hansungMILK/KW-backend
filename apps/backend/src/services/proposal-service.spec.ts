@@ -42,6 +42,62 @@ describe('proposalService.approve image generation overrides', () => {
         vi.clearAllMocks();
     });
 
+    it('saves approved proposals in a horizontal DAG layout by default', async () => {
+        const proposal: Proposal = {
+            proposalId: 'proposal-layout',
+            flowId: 'flow-layout',
+            sourceMessageId: 'message-layout',
+            status: 'PENDING',
+            proposedNodes: [
+                { id: 'search', blockType: 'search', type: 'search', config: {} },
+                { id: 'script', blockType: 'content', type: 'content', config: {} },
+                { id: 'image', blockType: 'media-image', type: 'media-image', config: {} },
+                { id: 'tts', blockType: 'media-tts', type: 'media-tts', config: {} },
+                { id: 'video', blockType: 'media-video', type: 'media-video', config: {} },
+            ],
+            proposedEdges: [
+                { sourceNodeId: 'search', targetNodeId: 'script' },
+                { sourceNodeId: 'script', targetNodeId: 'image' },
+                { sourceNodeId: 'script', targetNodeId: 'tts' },
+                { sourceNodeId: 'image', targetNodeId: 'video' },
+                { sourceNodeId: 'tts', targetNodeId: 'video' },
+            ],
+            approvalRequired: true,
+            createdAt: '2026-05-11T00:00:00.000Z',
+            updatedAt: '2026-05-11T00:00:00.000Z',
+        };
+
+        getProposal.mockResolvedValue(proposal);
+        getFlow.mockResolvedValue({
+            id: 'flow-layout',
+            name: 'Flow',
+            state: 'DRAFT',
+            nodes: [],
+            edges: [],
+            createdAt: '2026-05-11T00:00:00.000Z',
+            updatedAt: '2026-05-11T00:00:00.000Z',
+        });
+
+        const result = await proposalService.approve('proposal-layout');
+
+        expect(result.ok).toBe(true);
+        const savedNodes = putFlow.mock.calls[0]?.[0]?.nodes as Array<{
+            id: string;
+            position: { x: number; y: number };
+            width?: number;
+            height?: number;
+        }>;
+        const byId = new Map(savedNodes.map(node => [node.id, node]));
+
+        expect(byId.get('search')?.position.x).toBeLessThan(byId.get('script')?.position.x ?? 0);
+        expect(byId.get('script')?.position.x).toBeLessThan(byId.get('image')?.position.x ?? 0);
+        expect(byId.get('image')?.position.x).toBe(byId.get('tts')?.position.x);
+        expect(byId.get('image')?.position.y).not.toBe(byId.get('tts')?.position.y);
+        expect(byId.get('video')?.position.x).toBeGreaterThan(byId.get('image')?.position.x ?? 0);
+        expect(byId.get('image')).toEqual(expect.objectContaining({ width: 340, height: 320 }));
+        expect(byId.get('video')).toEqual(expect.objectContaining({ width: 360, height: 440 }));
+    });
+
     it('applies selected image style and quality to the approved flow and keeps proposal cost metadata in sync', async () => {
         const proposal: Proposal = {
             proposalId: 'proposal-1',

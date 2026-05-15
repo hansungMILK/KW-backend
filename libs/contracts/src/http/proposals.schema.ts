@@ -111,7 +111,7 @@ export const ProposalApproveParamsSchema = z.object({
 
 export const ProposalApproveRequestSchema = z.object({
     decisionNote: z.string().optional(),
-    layoutType: z.enum(['vertical', 'horizontal', 'grid']).default('vertical'),
+    layoutType: z.enum(['vertical', 'horizontal', 'grid']).default('horizontal'),
     imageStyleId: ImageStyleIdSchema.optional(),
     imageQuality: ImageQualitySchema.optional(),
     sceneCount: z.number().int().min(1).max(24).optional(),

@@ -5,7 +5,7 @@ type WorkflowRunMode = {
     scriptReviewFirst: boolean;
 };
 
-export type WorkflowRunStatus = 'running' | 'completed' | 'failed' | null;
+export type WorkflowRunStatus = 'running' | 'reviewing' | 'completed' | 'failed' | null;
 
 export const isWorkflowRunButtonDisabled = (state: {
     isWorkflowRunning: boolean;

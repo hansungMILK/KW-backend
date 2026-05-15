@@ -200,6 +200,17 @@ export const AnalysisOutputSchema = z.object({
         })
     ),
     approved: z.boolean(),
+    autoRemediations: z
+        .array(
+            z.object({
+                sceneNumber: z.number(),
+                action: z.string(),
+                before: z.string(),
+                after: z.string(),
+                reason: z.string(),
+            })
+        )
+        .optional(),
 });
 
 /** media-image block */

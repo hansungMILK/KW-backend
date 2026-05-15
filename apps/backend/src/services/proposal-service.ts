@@ -52,6 +52,18 @@ type ApprovalOverrides = {
     reviewMode?: ReviewMode;
 };
 
+type ApprovalEdge = Record<string, unknown>;
+
+const APPROVAL_LAYOUT = {
+    START_X: 100,
+    BASELINE_Y: 220,
+    LEVEL_WIDTH: 340,
+    NODE_HEIGHT: 190,
+    LEVEL_GAP: 70,
+    GRID_COLS: 3,
+    GRID_ROW_HEIGHT: 220,
+} as const;
+
 export const proposalService = {
     /**
      * Approve a proposal:
@@ -79,22 +91,13 @@ export const proposalService = {
 
         const now = new Date().toISOString();
 
-        // Apply layout to proposed nodes based on layoutType
-        let layoutNodes = proposal.proposedNodes as Array<Record<string, unknown>>;
-        const layout = layoutType ?? 'vertical';
-        if (layout === 'horizontal') {
-            layoutNodes = layoutNodes.map((n, i) => ({
-                ...n,
-                position: { x: 100 + i * 300, y: 200 },
-            }));
-        } else if (layout === 'grid') {
-            const cols = 3;
-            layoutNodes = layoutNodes.map((n, i) => ({
-                ...n,
-                position: { x: 100 + (i % cols) * 300, y: 100 + Math.floor(i / cols) * 200 },
-            }));
-        }
-        // 'vertical' or default: use existing positions (y-spaced by orchestrator)
+        // Persist a readable DAG layout as the saved canvas state. Frontend auto-layout
+        // is only a view helper; refresh must load the same understandable layout.
+        const layoutNodes = applyApprovalLayout(
+            proposal.proposedNodes as Array<Record<string, unknown>>,
+            proposal.proposedEdges as ApprovalEdge[],
+            layoutType ?? 'horizontal'
+        );
 
         const overriddenNodes = applyApprovalRenderCostBreakdown(
             applyApprovalOverrides(layoutNodes, overrides, proposal.metadata, proposal.proposalId),
@@ -186,6 +189,190 @@ export const proposalService = {
         return { ok: true, data: { proposal: updatedProposal } };
     },
 };
+
+function applyApprovalLayout(
+    nodes: Array<Record<string, unknown>>,
+    edges: ApprovalEdge[],
+    layout: string
+): Array<Record<string, unknown>> {
+    if (layout === 'vertical') return nodes;
+    if (layout === 'grid') return applyGridLayout(nodes);
+    return applyHorizontalDagLayout(nodes, edges);
+}
+
+function applyGridLayout(nodes: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+    return nodes.map((node, index) => ({
+        ...node,
+        position: {
+            x: APPROVAL_LAYOUT.START_X + (index % APPROVAL_LAYOUT.GRID_COLS) * APPROVAL_LAYOUT.LEVEL_WIDTH,
+            y: 100 + Math.floor(index / APPROVAL_LAYOUT.GRID_COLS) * APPROVAL_LAYOUT.GRID_ROW_HEIGHT,
+        },
+    }));
+}
+
+function applyHorizontalDagLayout(
+    nodes: Array<Record<string, unknown>>,
+    edges: ApprovalEdge[]
+): Array<Record<string, unknown>> {
+    if (nodes.length < 2) return nodes;
+
+    const originalOrder = new Map<string, number>();
+    const nodeIds = new Set<string>();
+    nodes.forEach((node, index) => {
+        const id = getNodeId(node);
+        if (!id) return;
+        originalOrder.set(id, index);
+        nodeIds.add(id);
+    });
+
+    if (nodeIds.size < 2) return nodes;
+
+    const adjacency = new Map<string, string[]>();
+    const inDegree = new Map<string, number>();
+    const parents = new Map<string, string[]>();
+    nodeIds.forEach(id => {
+        adjacency.set(id, []);
+        inDegree.set(id, 0);
+        parents.set(id, []);
+    });
+
+    for (const edge of edges) {
+        const sourceId = getEdgeNodeId(edge, 'source');
+        const targetId = getEdgeNodeId(edge, 'target');
+        if (!sourceId || !targetId || !nodeIds.has(sourceId) || !nodeIds.has(targetId)) continue;
+        adjacency.get(sourceId)?.push(targetId);
+        parents.get(targetId)?.push(sourceId);
+        inDegree.set(targetId, (inDegree.get(targetId) ?? 0) + 1);
+    }
+
+    if (edges.length === 0 || Array.from(inDegree.values()).every(value => value === 0)) {
+        return nodes.map((node, index) => ({
+            ...node,
+            position: {
+                x: APPROVAL_LAYOUT.START_X + index * APPROVAL_LAYOUT.LEVEL_WIDTH,
+                y: APPROVAL_LAYOUT.BASELINE_Y,
+            },
+            ...getOutputPreviewSize(node),
+        }));
+    }
+
+    const levels = new Map<string, number>();
+    const queue = Array.from(nodeIds)
+        .filter(id => (inDegree.get(id) ?? 0) === 0)
+        .sort((a, b) => (originalOrder.get(a) ?? 0) - (originalOrder.get(b) ?? 0));
+    queue.forEach(id => levels.set(id, 0));
+
+    const processed = new Set<string>();
+    const mutableInDegree = new Map(inDegree);
+
+    while (queue.length > 0) {
+        const current = queue.shift();
+        if (!current) break;
+        processed.add(current);
+
+        for (const child of adjacency.get(current) ?? []) {
+            levels.set(child, Math.max(levels.get(child) ?? 0, (levels.get(current) ?? 0) + 1));
+            mutableInDegree.set(child, (mutableInDegree.get(child) ?? 0) - 1);
+            if (mutableInDegree.get(child) === 0) {
+                queue.push(child);
+                queue.sort((a, b) => (originalOrder.get(a) ?? 0) - (originalOrder.get(b) ?? 0));
+            }
+        }
+    }
+
+    const fallbackLevel = Math.max(0, ...Array.from(levels.values())) + 1;
+    nodeIds.forEach(id => {
+        if (!processed.has(id)) levels.set(id, fallbackLevel);
+    });
+
+    const groups = new Map<number, Array<Record<string, unknown>>>();
+    for (const node of nodes) {
+        const id = getNodeId(node);
+        const level = id ? (levels.get(id) ?? 0) : 0;
+        const group = groups.get(level) ?? [];
+        group.push(node);
+        groups.set(level, group);
+    }
+
+    const yByNodeId = new Map<string, number>();
+    const positioned = new Map<string, Record<string, unknown>>();
+    const sortedLevels = Array.from(groups.keys()).sort((a, b) => a - b);
+
+    for (const level of sortedLevels) {
+        const group = [...(groups.get(level) ?? [])].sort((a, b) => {
+            const aId = getNodeId(a);
+            const bId = getNodeId(b);
+            const aParentY = averageParentY(aId, parents, yByNodeId);
+            const bParentY = averageParentY(bId, parents, yByNodeId);
+            if (Math.abs(aParentY - bParentY) > 1) return aParentY - bParentY;
+            return (originalOrder.get(aId ?? '') ?? 0) - (originalOrder.get(bId ?? '') ?? 0);
+        });
+
+        const totalHeight =
+            group.length * APPROVAL_LAYOUT.NODE_HEIGHT + Math.max(0, group.length - 1) * APPROVAL_LAYOUT.LEVEL_GAP;
+        const startY = Math.max(100, APPROVAL_LAYOUT.BASELINE_Y - totalHeight / 2 + APPROVAL_LAYOUT.NODE_HEIGHT / 2);
+
+        group.forEach((node, index) => {
+            const id = getNodeId(node);
+            const x = APPROVAL_LAYOUT.START_X + level * APPROVAL_LAYOUT.LEVEL_WIDTH;
+            const y = Math.round(startY + index * (APPROVAL_LAYOUT.NODE_HEIGHT + APPROVAL_LAYOUT.LEVEL_GAP));
+            const key = id ?? `index-${index}`;
+            if (id) yByNodeId.set(id, y);
+            positioned.set(key, {
+                ...node,
+                position: { x, y },
+                ...getOutputPreviewSize(node),
+            });
+        });
+    }
+
+    return nodes.map((node, index) => {
+        const id = getNodeId(node);
+        return positioned.get(id ?? `index-${index}`) ?? node;
+    });
+}
+
+function getOutputPreviewSize(node: Record<string, unknown>): Record<string, number> {
+    const blockType = String(node['blockType'] ?? node['type'] ?? '');
+    if (blockType === 'media-video' || blockType === 'metadata') return { width: 360, height: 440 };
+    if (blockType === 'media-image') return { width: 340, height: 320 };
+    if (blockType === 'media-tts' || blockType === 'tts') return { width: 320, height: 220 };
+    if (blockType === 'content' || blockType === 'longform-script' || blockType === 'longform-review') {
+        return { width: 340, height: 320 };
+    }
+    return {};
+}
+
+function getNodeId(node: Record<string, unknown>): string | undefined {
+    const id = node['id'];
+    return typeof id === 'string' && id.length > 0 ? id : undefined;
+}
+
+function getEdgeNodeId(edge: ApprovalEdge, direction: 'source' | 'target'): string | undefined {
+    const keys =
+        direction === 'source'
+            ? ['sourceNodeId', 'source', 'fromNodeId', 'from']
+            : ['targetNodeId', 'target', 'toNodeId', 'to'];
+    for (const key of keys) {
+        const value = edge[key];
+        if (typeof value === 'string' && value.length > 0) return value;
+    }
+    return undefined;
+}
+
+function averageParentY(
+    nodeId: string | undefined,
+    parents: Map<string, string[]>,
+    yByNodeId: Map<string, number>
+): number {
+    if (!nodeId) return APPROVAL_LAYOUT.BASELINE_Y;
+    const parentIds = parents.get(nodeId) ?? [];
+    const knownParents = parentIds
+        .map(parentId => yByNodeId.get(parentId))
+        .filter((value): value is number => typeof value === 'number');
+    if (knownParents.length === 0) return APPROVAL_LAYOUT.BASELINE_Y;
+    return knownParents.reduce((sum, value) => sum + value, 0) / knownParents.length;
+}
 
 function applyApprovalOverrides(
     nodes: Array<Record<string, unknown>>,

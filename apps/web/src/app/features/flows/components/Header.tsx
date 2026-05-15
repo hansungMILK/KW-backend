@@ -67,6 +67,7 @@ interface HeaderProps {
     onShare: () => void;
     onApiKeySettings?: () => void;
     onHelp?: () => void;
+    isAgentPanelOpen?: boolean;
 }
 
 const FlowNameInput: React.FC<FlowInfoProps> = ({ flowName, onNameChange }) => {
@@ -276,6 +277,7 @@ export const Header: React.FC<HeaderProps> = ({
     onShare: _onShare,
     onApiKeySettings: _onApiKeySettings,
     onHelp: _onHelp,
+    isAgentPanelOpen = false,
 }) => {
     const { t } = useTranslation(['flows']);
 
@@ -287,7 +289,12 @@ export const Header: React.FC<HeaderProps> = ({
     };
 
     return (
-        <div className="absolute top-0 left-0 right-0 z-30 pointer-events-none">
+        <div
+            className={cn(
+                'absolute top-0 left-0 right-0 z-30 pointer-events-none transition-[right] duration-200',
+                isAgentPanelOpen && 'sm:right-80'
+            )}
+        >
             <div className="flex items-center justify-between px-2 sm:px-4 py-2 sm:py-3">
                 {/* Left: Brand + Flow Info */}
                 <div className="pointer-events-auto">
@@ -313,6 +320,21 @@ export const Header: React.FC<HeaderProps> = ({
 
                 {/* Right: Toolbar */}
                 <div className="pointer-events-auto flex items-center gap-1.5 sm:gap-2">
+                    <button
+                        type="button"
+                        onClick={fileActions.onNew}
+                        className={cn(
+                            'hidden sm:inline-flex items-center gap-2 h-9 sm:h-10 px-3 rounded-xl',
+                            'bg-background/80 backdrop-blur-xl border border-border/50',
+                            'text-sm font-semibold text-foreground shadow-sm',
+                            'hover:bg-accent/40 transition-colors'
+                        )}
+                        aria-label="새로 시작"
+                    >
+                        <FileText className="w-4 h-4 text-primary" />
+                        새로 시작
+                    </button>
+
                     {/* Edit Tools - hidden on mobile, shown on tablet+ */}
                     <div
                         className={cn(
@@ -321,11 +343,6 @@ export const Header: React.FC<HeaderProps> = ({
                             'shadow-sm'
                         )}
                     >
-                        <ToolbarButton
-                            onClick={fileActions.onNew}
-                            icon={<FileText className="w-4 h-4" />}
-                            tooltip={t('header.newFlow')}
-                        />
                         <ToolbarButton
                             onClick={editActions.onSave}
                             icon={<Save className="w-4 h-4" />}

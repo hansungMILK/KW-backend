@@ -36,6 +36,16 @@ describe('workflow run mode', () => {
         ).toBe(true);
     });
 
+    it('keeps the run button enabled while waiting for script review', () => {
+        expect(
+            isWorkflowRunButtonDisabled({
+                isWorkflowRunning: false,
+                isLoading: false,
+                runStatus: 'reviewing',
+            })
+        ).toBe(false);
+    });
+
     it('runs in step mode when the approved content node requests script-first review', () => {
         expect(getWorkflowRunMode([contentNode({ reviewMode: 'script-first' })])).toEqual({
             executionMode: 'step',

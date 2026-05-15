@@ -6,6 +6,7 @@ import {
     Braces,
     Check,
     Copy,
+    Download,
     Expand,
     Hash,
     Image,
@@ -799,7 +800,10 @@ const getUrlFromRecord = (value: unknown): string | undefined => {
 };
 
 const looksLikeVideoUrl = (value: string | undefined): boolean =>
-    Boolean(value && /\.(mp4|mov|webm)(?:$|[?#])/i.test(value));
+    Boolean(value && (value.startsWith('data:video/') || /\.(mp4|mov|webm)(?:$|[?#])/i.test(value)));
+
+const getRecordFormat = (value: unknown): string | undefined =>
+    isRecordValue(value) ? firstStringValue(value.format, value.extension)?.toLowerCase() : undefined;
 
 const getRecordMimeType = (value: unknown): string | undefined =>
     isRecordValue(value) ? firstStringValue(value.mimeType, value.contentType)?.toLowerCase() : undefined;
@@ -838,8 +842,16 @@ const isVideoRecord = (value: unknown): value is Record<string, unknown> => {
     if (!isRecordValue(value)) return false;
     const mimeType = getRecordMimeType(value);
     const assetType = getRecordAssetType(value);
+    const format = getRecordFormat(value);
     const url = getUrlFromRecord(value);
-    return assetType === 'video' || mimeType?.startsWith('video/') === true || looksLikeVideoUrl(url);
+    return (
+        assetType === 'video' ||
+        mimeType?.startsWith('video/') === true ||
+        format === 'mp4' ||
+        format === 'mov' ||
+        format === 'webm' ||
+        looksLikeVideoUrl(url)
+    );
 };
 
 const getVideoPreviewRecord = (value: Record<string, unknown>): Record<string, unknown> | undefined => {
@@ -915,6 +927,21 @@ const hasFriendlyOutputPreview = (value: unknown): boolean => {
     );
 };
 
+const getPreferredNodeWidth = (node: NodeData, definition: BlockDefinitionWithFrontend | null | undefined): number => {
+    const baseWidth = getNodeWidth(node);
+    if (!definition) return baseWidth;
+
+    const packet = getFirstOutputData(node, definition);
+    const value = packet?.value;
+    if (!isRecordValue(value) || !hasFriendlyOutputPreview(value)) return baseWidth;
+
+    if (getVideoPreviewRecord(value)) return Math.max(baseWidth, 360);
+    if (asRecordArray(value.images).length > 0) return Math.max(baseWidth, 340);
+    if (isLongformGateARecord(value)) return Math.max(baseWidth, 360);
+    if (isRecordValue(value.script) || asRecordArray(value.scenes).length > 0) return Math.max(baseWidth, 340);
+    return baseWidth;
+};
+
 const formatDurationSec = (value: unknown): string | undefined => {
     const durationSec = asNumberValue(value);
     if (durationSec === undefined) return undefined;
@@ -957,12 +984,26 @@ const FriendlyOutputPreview: React.FC<{
         : '';
     const [draft, setDraft] = useState(initialDraft);
     const [isApproving, setIsApproving] = useState(false);
+    const [modalContent, setModalContent] = useState<{ value: unknown; type?: string } | null>(null);
 
     useEffect(() => {
         setDraft(initialDraft);
     }, [initialDraft]);
 
     if (!recordValue) return null;
+
+    const withModal = (content: React.ReactNode) => (
+        <>
+            {content}
+            <ContentPreviewModal
+                open={modalContent !== null}
+                onOpenChange={open => {
+                    if (!open) setModalContent(null);
+                }}
+                content={modalContent}
+            />
+        </>
+    );
 
     if (isLongformGateARecord(recordValue)) {
         const sourceDigest = asStringArray(recordValue.sourceDigest);
@@ -981,7 +1022,7 @@ const FriendlyOutputPreview: React.FC<{
         const angle = firstStringValue(recordValue.angle);
         const resolution = firstStringValue(recordValue.resolution);
 
-        return (
+        return withModal(
             <div
                 className="p-2.5 bg-sky-500/10 rounded-lg border border-sky-500/30 overflow-auto"
                 style={{ maxHeight }}
@@ -1067,7 +1108,19 @@ const FriendlyOutputPreview: React.FC<{
                 )}
                 {draft && (
                     <div className="mt-2">
-                        <div className="text-[10px] font-semibold text-foreground">전체 대본 초안</div>
+                        <div className="flex items-center justify-between gap-2">
+                            <div className="text-[10px] font-semibold text-foreground">전체 대본 초안</div>
+                            <button
+                                type="button"
+                                className="rounded border border-sky-400/40 px-2 py-0.5 text-[10px] text-sky-100 hover:bg-sky-500/15"
+                                onClick={event => {
+                                    event.stopPropagation();
+                                    setModalContent({ value: recordValue, type: 'script' });
+                                }}
+                            >
+                                크게 보기
+                            </button>
+                        </div>
                         <div className="mt-1 whitespace-pre-wrap text-[10px] text-foreground/80 line-clamp-5">
                             {draft}
                         </div>
@@ -1185,26 +1238,123 @@ const FriendlyOutputPreview: React.FC<{
             asNumberValue(videoMetadata?.durationSec) ??
             asNumberValue(recordValue.durationSec) ??
             asNumberValue(rootMetadata?.durationSec);
-        return (
+        return withModal(
             <div className="p-2.5 bg-muted/10 rounded-lg border border-border/30 overflow-auto" style={{ maxHeight }}>
-                <div className="text-[11px] font-semibold text-foreground">최종 영상</div>
+                <div className="flex items-center justify-between gap-2">
+                    <div className="text-[11px] font-semibold text-foreground">최종 영상</div>
+                    {url && (
+                        <button
+                            type="button"
+                            className="rounded border border-border px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+                            onClick={event => {
+                                event.stopPropagation();
+                                setModalContent({ value: url, type: 'video' });
+                            }}
+                        >
+                            크게 보기
+                        </button>
+                    )}
+                </div>
                 {durationSec !== undefined && (
                     <div className="mt-1 text-[10px] text-muted-foreground">길이 약 {Math.round(durationSec)}초</div>
                 )}
                 {url ? (
                     <>
-                        <video className="mt-2 max-h-36 w-full rounded bg-black" controls src={url} />
+                        <video className="mt-2 max-h-64 w-full rounded bg-black object-contain" controls src={url} />
                         <a
-                            className="mt-2 block text-[10px] text-primary underline"
+                            className="mt-2 inline-flex items-center gap-1 text-[10px] text-primary underline"
                             href={url}
                             target="_blank"
                             rel="noreferrer"
                         >
+                            <Download className="h-3 w-3" />
                             MP4 열기/다운로드
                         </a>
                     </>
                 ) : (
                     <div className="mt-2 text-[10px]">영상 생성 완료</div>
+                )}
+            </div>
+        );
+    }
+
+    const images = asRecordArray(recordValue.images);
+    if (images.length > 0) {
+        return withModal(
+            <div className="p-2 bg-muted/10 rounded-lg border border-border/30 overflow-auto" style={{ maxHeight }}>
+                <div className="mb-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                    <span>이미지 {images.length}장 생성됨</span>
+                    <button
+                        type="button"
+                        className="rounded border border-border px-2 py-0.5 text-[10px] hover:text-foreground"
+                        onClick={event => {
+                            event.stopPropagation();
+                            setModalContent({ value: recordValue, type: 'image-gallery' });
+                        }}
+                    >
+                        갤러리 보기
+                    </button>
+                </div>
+                <div className="grid grid-cols-3 gap-1.5">
+                    {images.slice(0, 6).map((image, index) => {
+                        const url = getUrlFromRecord(image);
+                        return (
+                            <button
+                                type="button"
+                                key={`${url ?? 'image'}-${index}`}
+                                className="aspect-[9/16] overflow-hidden rounded bg-black/30"
+                                onClick={event => {
+                                    event.stopPropagation();
+                                    if (url) setModalContent({ value: url, type: 'image' });
+                                }}
+                            >
+                                {url ? (
+                                    <S3Image
+                                        src={url}
+                                        className="h-full w-full object-cover"
+                                        alt={`Scene ${index + 1}`}
+                                    />
+                                ) : (
+                                    <div className="flex h-full items-center justify-center text-[9px] text-muted-foreground">
+                                        이미지
+                                    </div>
+                                )}
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
+        );
+    }
+
+    const audio = isRecordValue(recordValue.audio) ? recordValue.audio : undefined;
+    if (audio) {
+        const url = getUrlFromRecord(audio);
+        const durationSec = asNumberValue(audio.durationSec);
+        return withModal(
+            <div className="p-2.5 bg-muted/10 rounded-lg border border-border/30 overflow-auto" style={{ maxHeight }}>
+                <div className="flex items-center justify-between gap-2">
+                    <div className="text-[11px] font-semibold text-foreground">나레이션 음성</div>
+                    {url && (
+                        <button
+                            type="button"
+                            className="rounded border border-border px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+                            onClick={event => {
+                                event.stopPropagation();
+                                setModalContent({ value: url, type: 'audio' });
+                            }}
+                        >
+                            크게 듣기
+                        </button>
+                    )}
+                </div>
+                {durationSec !== undefined && (
+                    <div className="mt-1 text-[10px] text-muted-foreground">길이 약 {Math.round(durationSec)}초</div>
+                )}
+                {url ? (
+                    <audio className="mt-2 w-full" controls src={url} />
+                ) : (
+                    <div className="mt-2 text-[10px]">음성 생성 완료</div>
                 )}
             </div>
         );
@@ -1220,12 +1370,24 @@ const FriendlyOutputPreview: React.FC<{
             .filter((line): line is string => Boolean(line))
             .slice(0, 4);
 
-        return (
+        return withModal(
             <div
                 className="p-2.5 bg-amber-500/10 rounded-lg border border-amber-500/30 overflow-auto"
                 style={{ maxHeight }}
             >
-                <div className="text-[11px] font-semibold text-amber-200 line-clamp-2">{title}</div>
+                <div className="flex items-start justify-between gap-2">
+                    <div className="text-[11px] font-semibold text-amber-200 line-clamp-2">{title}</div>
+                    <button
+                        type="button"
+                        className="shrink-0 rounded border border-amber-400/40 px-2 py-0.5 text-[10px] text-amber-100 hover:bg-amber-500/15"
+                        onClick={event => {
+                            event.stopPropagation();
+                            setModalContent({ value: recordValue, type: 'script' });
+                        }}
+                    >
+                        대본 크게 보기
+                    </button>
+                </div>
                 {angle && <div className="mt-1 text-[10px] text-foreground/70 line-clamp-2">{angle}</div>}
                 {lines.length > 0 && (
                     <div className="mt-2 space-y-1">
@@ -1267,60 +1429,6 @@ const FriendlyOutputPreview: React.FC<{
         );
     }
 
-    const images = asRecordArray(recordValue.images);
-    if (images.length > 0) {
-        return (
-            <div className="p-2 bg-muted/10 rounded-lg border border-border/30 overflow-auto" style={{ maxHeight }}>
-                <div className="mb-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-                    <span>이미지 {images.length}장 생성됨</span>
-                    <span>{images[0]?.sceneNumber ? `씬 ${String(images[0].sceneNumber)}부터` : '갤러리'}</span>
-                </div>
-                <div className="grid grid-cols-3 gap-1.5">
-                    {images.slice(0, 6).map((image, index) => {
-                        const url = getUrlFromRecord(image);
-                        return (
-                            <div
-                                key={`${url ?? 'image'}-${index}`}
-                                className="aspect-[9/16] overflow-hidden rounded bg-black/30"
-                            >
-                                {url ? (
-                                    <S3Image
-                                        src={url}
-                                        className="h-full w-full object-cover"
-                                        alt={`Scene ${index + 1}`}
-                                    />
-                                ) : (
-                                    <div className="flex h-full items-center justify-center text-[9px] text-muted-foreground">
-                                        이미지
-                                    </div>
-                                )}
-                            </div>
-                        );
-                    })}
-                </div>
-            </div>
-        );
-    }
-
-    const audio = isRecordValue(recordValue.audio) ? recordValue.audio : undefined;
-    if (audio) {
-        const url = getUrlFromRecord(audio);
-        const durationSec = asNumberValue(audio.durationSec);
-        return (
-            <div className="p-2.5 bg-muted/10 rounded-lg border border-border/30 overflow-auto" style={{ maxHeight }}>
-                <div className="text-[11px] font-semibold text-foreground">나레이션 음성</div>
-                {durationSec !== undefined && (
-                    <div className="mt-1 text-[10px] text-muted-foreground">길이 약 {Math.round(durationSec)}초</div>
-                )}
-                {url ? (
-                    <audio className="mt-2 w-full" controls src={url} />
-                ) : (
-                    <div className="mt-2 text-[10px]">음성 생성 완료</div>
-                )}
-            </div>
-        );
-    }
-
     return null;
 };
 
@@ -1334,8 +1442,12 @@ const OutputPreview: React.FC<
     const { t } = useTranslation(['nodes']);
     const packet = getFirstOutputData(node, definition);
 
-    // Use custom height or default 180px
-    const maxH = contentHeight ?? 180;
+    // Friendly previews need enough room to be useful without opening raw JSON.
+    const maxH =
+        contentHeight ??
+        (packet?.value !== null && typeof packet?.value === 'object' && hasFriendlyOutputPreview(packet.value)
+            ? 320
+            : 180);
 
     // Skip if this is an input/output visualization node (they have their own visualizations)
     if (
@@ -1635,7 +1747,7 @@ export const NodeBlock: React.FC<NodeBlockProps> = ({
     }, []);
 
     // Get current dimensions (local during resize, otherwise from node)
-    const currentWidth = localWidth ?? getNodeWidth(node);
+    const currentWidth = localWidth ?? getPreferredNodeWidth(node, definition);
     const currentHeight = localHeight ?? node.height;
 
     // Calculate content area height (total height minus header and padding overhead)

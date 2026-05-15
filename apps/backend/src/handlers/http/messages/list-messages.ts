@@ -1,6 +1,7 @@
 import { MessageListParamsSchema } from '@flows/contracts';
 
 import { messageRepo } from '../../../repositories/message-repository';
+import { proposalRepo } from '../../../repositories/proposal-repository';
 import { getPathParam, getQueryParam, withMiddleware } from '../../../utils/middleware';
 import { badRequest, ok } from '../../../utils/response';
 
@@ -19,9 +20,16 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
 
     const limit = Number(getQueryParam(event, 'limit') || '50');
     const result = await messageRepo.listByFlow(parsed.data.flowId, limit);
+    const items = await Promise.all(
+        result.items.map(async message => {
+            if (!message.proposalId) return message;
+            const proposal = await proposalRepo.get(message.proposalId);
+            return proposal ? { ...message, proposal } : message;
+        })
+    );
 
     return ok({
-        items: result.items,
+        items,
         nextCursor: result.nextCursor,
     });
 };

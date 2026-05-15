@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { ProposalSchema } from './proposals.schema';
+
 /**
  * HTTP contracts for /flows/{flowId}/messages endpoints.
  * New domain — not in existing eureka-flow frontend.
@@ -29,6 +31,12 @@ export const MessageSchema = z.object({
 
 export type Message = z.infer<typeof MessageSchema>;
 
+export const MessageListItemSchema = MessageSchema.extend({
+    proposal: ProposalSchema.optional(),
+});
+
+export type MessageListItem = z.infer<typeof MessageListItemSchema>;
+
 // ============================================================================
 // GET /flows/{flowId}/messages
 // ============================================================================
@@ -43,7 +51,7 @@ export const MessageListQuerySchema = z.object({
 });
 
 export const MessageListResponseSchema = z.object({
-    items: z.array(MessageSchema),
+    items: z.array(MessageListItemSchema),
     nextCursor: z.string().nullable(),
 });
 

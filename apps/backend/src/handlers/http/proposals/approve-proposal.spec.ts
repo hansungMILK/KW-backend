@@ -82,7 +82,7 @@ describe('approve proposal handler', () => {
         } as APIGatewayProxyEvent);
 
         expect(response.statusCode).toBe(200);
-        expect(approveProposal).toHaveBeenCalledWith('proposal-1', undefined, 'vertical', {
+        expect(approveProposal).toHaveBeenCalledWith('proposal-1', undefined, 'horizontal', {
             imageStyleId: undefined,
             imageQuality: undefined,
             sceneCount: undefined,

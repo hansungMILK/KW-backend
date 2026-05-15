@@ -38,9 +38,7 @@ export interface MessageView {
 const asRecord = (value: unknown): Record<string, unknown> =>
     typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
 
-const formatEstimatedCost = (
-    cost: NonNullable<MessageCreateResponse['proposal']>['estimatedCost']
-): string | undefined => {
+const formatEstimatedCost = (cost: { currency: string; total: number } | undefined): string | undefined => {
     if (!cost) return undefined;
     const currency = cost.currency === 'USD' ? '$' : `${cost.currency} `;
     return `${currency}${cost.total.toFixed(2)}`;
@@ -67,19 +65,29 @@ const toProposalEdge = (edge: unknown): { source: string; target: string } | nul
     return { source: String(source), target: String(target) };
 };
 
-const toMessageProposal = (response: MessageCreateResponse): MessageProposal | undefined => {
-    if (!response.proposal || response.proposal.proposedNodes.length === 0) return undefined;
+type ProposalPayload =
+    | NonNullable<MessageCreateResponse['proposal']>
+    | NonNullable<MessageListResponse['items'][number]['proposal']>;
+
+const toMessageProposal = (
+    proposal: ProposalPayload | undefined,
+    description?: string
+): MessageProposal | undefined => {
+    if (!proposal || proposal.proposedNodes.length === 0) return undefined;
     return {
-        id: response.proposal.proposalId,
-        blocks: response.proposal.proposedNodes.map(toProposalBlock),
-        edges: response.proposal.proposedEdges
+        id: proposal.proposalId,
+        blocks: proposal.proposedNodes.map(toProposalBlock),
+        edges: proposal.proposedEdges
             .map(toProposalEdge)
             .filter((edge): edge is { source: string; target: string } => Boolean(edge)),
-        estimatedCost: formatEstimatedCost(response.proposal.estimatedCost),
-        estimatedCostUsd: response.proposal.estimatedCostUsd ?? response.proposal.estimatedCost?.total,
-        maxRunEstimatedCostUsd: response.proposal.maxRunEstimatedCostUsd,
-        metadata: response.proposal.metadata,
-        description: response.assistantMessage?.content,
+        estimatedCost: formatEstimatedCost(proposal.estimatedCost),
+        estimatedCostUsd:
+            'estimatedCostUsd' in proposal
+                ? (proposal.estimatedCostUsd ?? proposal.estimatedCost?.total)
+                : proposal.estimatedCost?.total,
+        maxRunEstimatedCostUsd: 'maxRunEstimatedCostUsd' in proposal ? proposal.maxRunEstimatedCostUsd : undefined,
+        metadata: proposal.metadata,
+        description,
     };
 };
 
@@ -98,7 +106,7 @@ export const sendFlowMessage = async (flowId: string, body: SendMessageBody): Pr
         flowId: response.data.assistantMessage.flowId,
         role: 'agent',
         content: response.data.assistantMessage.content,
-        proposal: toMessageProposal(response.data),
+        proposal: toMessageProposal(response.data.proposal, response.data.assistantMessage.content),
         createdAt: Date.parse(response.data.assistantMessage.createdAt),
     };
 };
@@ -116,6 +124,7 @@ export const getFlowMessages = async (flowId: string): Promise<MessageView[]> =>
         flowId: message.flowId,
         role: message.role === 'USER' ? 'user' : 'agent',
         content: message.content,
+        proposal: toMessageProposal(message.proposal, message.content),
         createdAt: Date.parse(message.createdAt),
     }));
 };

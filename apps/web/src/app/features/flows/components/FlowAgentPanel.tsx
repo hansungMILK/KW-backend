@@ -96,11 +96,11 @@ interface FlowAgentPanelProps {
     onApproveProposal?: (nodes: unknown[], edges: unknown[]) => void | Promise<void>;
     /** Externally pushed proposal.created WS event */
     externalProposal?: ProposalCreatedMessage | null;
-    runStatus?: 'running' | 'completed' | 'failed' | null;
+    runStatus?: 'running' | 'reviewing' | 'completed' | 'failed' | null;
     runActivity?: {
         nodeLabel?: string;
         progress?: number;
-        state?: 'queued' | 'running' | 'completed' | 'failed';
+        state?: 'queued' | 'running' | 'reviewing' | 'completed' | 'failed';
         message?: string;
         error?: string | null;
     } | null;
@@ -390,9 +390,11 @@ export const FlowAgentPanel = ({
                         className={`rounded-lg border px-3 py-2 text-[12px] ${
                             runStatus === 'running'
                                 ? 'border-status-running/30 bg-status-running/10 text-status-running'
-                                : runStatus === 'completed'
-                                  ? 'border-status-completed/30 bg-status-completed/10 text-status-completed'
-                                  : 'border-destructive/30 bg-destructive/10 text-destructive'
+                                : runStatus === 'reviewing'
+                                  ? 'border-primary/40 bg-primary/10 text-primary'
+                                  : runStatus === 'completed'
+                                    ? 'border-status-completed/30 bg-status-completed/10 text-status-completed'
+                                    : 'border-destructive/30 bg-destructive/10 text-destructive'
                         }`}
                     >
                         <div className="flex items-center gap-2 font-semibold">
@@ -404,6 +406,7 @@ export const FlowAgentPanel = ({
                             )}
                             <span>
                                 {runStatus === 'running' && '워크플로우 실행 중'}
+                                {runStatus === 'reviewing' && '대본 검수 대기'}
                                 {runStatus === 'completed' && '워크플로우 실행 완료'}
                                 {runStatus === 'failed' && '워크플로우 실행 실패'}
                             </span>
@@ -418,7 +421,11 @@ export const FlowAgentPanel = ({
                             <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
                                 <div
                                     className={`h-full rounded-full transition-all duration-300 ${
-                                        runStatus === 'failed' ? 'bg-destructive' : 'bg-status-running'
+                                        runStatus === 'failed'
+                                            ? 'bg-destructive'
+                                            : runStatus === 'reviewing'
+                                              ? 'bg-primary'
+                                              : 'bg-status-running'
                                     }`}
                                     style={{ width: `${Math.min(100, Math.max(3, runActivity.progress))}%` }}
                                 />
@@ -826,7 +833,8 @@ export const FlowAgentPanel = ({
                             isComposingRef.current = false;
                         }}
                         onKeyDown={handleKeyDown}
-                        placeholder="메세지를 입력해주세요."
+                        aria-label="메시지 입력"
+                        placeholder="메시지를 입력해주세요."
                         rows={1}
                         className="flex-1 bg-transparent text-[12px] text-foreground placeholder:text-muted-foreground resize-none outline-none leading-relaxed"
                         style={{ maxHeight: '80px' }}
