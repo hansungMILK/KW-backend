@@ -25,6 +25,10 @@ export type HyperframesScene = {
     caption?: string;
     narration?: string;
     visualText?: string;
+    visualType?: string;
+    visualData?: Record<string, unknown>;
+    subtitleDraft?: string;
+    onScreenTextPlan?: unknown;
     durationSec?: number;
     objects?: Array<{ id?: string; type?: string; text?: string }>;
 };
@@ -201,6 +205,74 @@ export function buildLongformHyperframesHtml(
         line-height: 1.28;
         font-weight: 900;
       }
+      .visual-content {
+        position: absolute;
+        inset: 46px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 24px;
+      }
+      .visual-title {
+        font-size: 44px;
+        line-height: 1.18;
+        font-weight: 950;
+        color: #fff200;
+      }
+      .visual-body,
+      .visual-item,
+      .visual-metric,
+      .visual-quote {
+        padding: 22px 26px;
+        border-radius: 24px;
+        background: rgba(0, 0, 0, 0.44);
+        font-size: 34px;
+        line-height: 1.34;
+        font-weight: 820;
+      }
+      .visual-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 22px;
+      }
+      .visual-column {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .visual-column-title {
+        font-size: 28px;
+        font-weight: 900;
+        color: rgba(255, 255, 255, 0.7);
+      }
+      .subtitle-layer {
+        position: absolute;
+        left: 280px;
+        right: 280px;
+        bottom: 104px;
+        height: 120px;
+        pointer-events: none;
+      }
+      .subtitle-cue {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        opacity: 0;
+        transform: translateY(18px);
+        margin: 0 auto;
+        width: fit-content;
+        max-width: 100%;
+        padding: 22px 34px;
+        border-radius: 22px;
+        background: rgba(0, 0, 0, 0.74);
+        color: #fff;
+        font-size: 42px;
+        line-height: 1.25;
+        font-weight: 900;
+        text-align: center;
+        box-shadow: 0 18px 52px rgba(0, 0, 0, 0.34);
+      }
       .progress-bar {
         position: absolute;
         left: 132px;
@@ -228,12 +300,14 @@ export function buildLongformHyperframesHtml(
               : ''
       }
       ${scenes.map(renderScene).join('\n')}
+      ${renderSubtitleLayer(request.subtitleCues)}
       <div class="progress-bar"><span id="progress-fill"></span></div>
     </div>
     <script>
       window.__timelines = window.__timelines || {};
       const tl = gsap.timeline({ paused: true });
       ${scenes.map(renderSceneTimeline).join('\n')}
+      ${renderSubtitleTimeline(request.subtitleCues, durationSec)}
       tl.fromTo("#progress-fill", { scaleX: 0 }, { scaleX: 1, duration: ${durationSec}, ease: "none" }, 0);
       window.__timelines["main"] = tl;
     </script>
@@ -248,9 +322,7 @@ function renderScene(scene: ReturnType<typeof buildSceneTimeline>[number]): stri
           <div class="headline">${escapeHtml(scene.title)}</div>
           <div class="caption">${escapeHtml(scene.caption)}</div>
         </div>
-        <div class="visual">
-          <div class="visual-label">${escapeHtml(scene.visualText)}</div>
-        </div>
+        ${renderVisualPanel(scene)}
       </section>`;
 }
 
@@ -267,8 +339,116 @@ function renderSceneTimeline(scene: ReturnType<typeof buildSceneTimeline>[number
       tl.fromTo("#${scene.id}", { autoAlpha: 0, x: ${enterX}, y: ${enterY}, scale: 0.985 }, { autoAlpha: 1, x: 0, y: 0, scale: 1, duration: 0.55, ease: "${scene.easing}" }, ${scene.startSec});
       tl.to("#${scene.id} .headline", { scale: ${headlineScale}, duration: ${Math.min(1.2, Math.max(0.4, scene.durationSec * 0.24))}, ease: "${scene.easing}", transformOrigin: "left center" }, ${scene.startSec + 0.2});
       tl.to("#${scene.id} .visual", { scale: ${visualScale}, rotate: ${visualRotate}, duration: ${Math.max(0.6, scene.durationSec - 0.4)}, ease: "none" }, ${scene.startSec});
-      tl.to("#${scene.id} .visual-label", { y: ${labelY}, color: "${scene.primaryMotion === 'underline' ? '#fff200' : '#ffffff'}", duration: 0.45, ease: "${scene.easing}" }, ${scene.startSec + 0.35});
+      tl.to("#${scene.id} .visual-content", { y: ${labelY}, color: "${scene.primaryMotion === 'underline' ? '#fff200' : '#ffffff'}", duration: 0.45, ease: "${scene.easing}" }, ${scene.startSec + 0.35});
       tl.to("#${scene.id}", { autoAlpha: 0, y: -48, duration: 0.35, ease: "power2.in" }, ${Math.max(scene.startSec, scene.endSec - 0.35)});`;
+}
+
+function renderVisualPanel(scene: ReturnType<typeof buildSceneTimeline>[number]): string {
+    return `<div class="visual visual-${escapeHtml(scene.visualType)}">
+          <div class="visual-content ${escapeHtml(`visual-${scene.visualType}`)}">
+            ${renderVisualContent(scene.visualType, scene.visualData, scene.title, scene.visualText)}
+          </div>
+        </div>`;
+}
+
+function renderVisualContent(
+    visualType: string,
+    visualData: Record<string, unknown>,
+    title: string,
+    fallbackText: string
+): string {
+    const visualTitle = normalizeText(visualData.title) || title;
+    const items = stringItems(visualData.items).length ? stringItems(visualData.items) : stringItems(visualData.claims);
+    const body = normalizeText(visualData.body) || fallbackText;
+
+    if (visualType === 'event-timeline') {
+        return [
+            `<div class="visual-title">${escapeHtml(visualTitle)}</div>`,
+            ...items
+                .slice(0, 5)
+                .map((item, index) => `<div class="visual-item">${index + 1}. ${escapeHtml(item)}</div>`),
+        ].join('\n');
+    }
+    if (visualType === 'comparison') {
+        return `<div class="visual-title">${escapeHtml(visualTitle)}</div>
+          <div class="visual-grid">
+            ${renderComparisonColumn(normalizeText(visualData.leftLabel) || '겉보기', stringItems(visualData.leftItems))}
+            ${renderComparisonColumn(normalizeText(visualData.rightLabel) || '핵심', stringItems(visualData.rightItems))}
+          </div>`;
+    }
+    if (visualType === 'quote-card') {
+        return `<div class="visual-title">${escapeHtml(visualTitle)}</div>
+          <div class="visual-quote">“${escapeHtml(normalizeText(visualData.quote) || body)}”</div>
+          <div class="visual-body">${escapeHtml(normalizeText(visualData.source) || '자료 기반')}</div>`;
+    }
+    if (visualType === 'process-flow') {
+        return [
+            `<div class="visual-title">${escapeHtml(visualTitle)}</div>`,
+            ...stringItems(visualData.steps)
+                .slice(0, 5)
+                .map((item, index) => `<div class="visual-item">${index + 1}. ${escapeHtml(item)}</div>`),
+        ].join('\n');
+    }
+    if (visualType === 'metric-reveal') {
+        const metrics = arrayItems(visualData.metrics);
+        return [
+            `<div class="visual-title">${escapeHtml(visualTitle)}</div>`,
+            ...metrics
+                .slice(0, 4)
+                .map(
+                    metric =>
+                        `<div class="visual-metric">${escapeHtml(normalizeText(metric.label) || '핵심')} · ${escapeHtml(
+                            normalizeText(metric.value) || body
+                        )}</div>`
+                ),
+        ].join('\n');
+    }
+    if (visualType === 'source-proof') {
+        return [
+            `<div class="visual-title">${escapeHtml(visualTitle)}</div>`,
+            ...items.slice(0, 4).map(item => `<div class="visual-item">${escapeHtml(item)}</div>`),
+        ].join('\n');
+    }
+    return `<div class="visual-title">${escapeHtml(visualTitle)}</div><div class="visual-body">${escapeHtml(body)}</div>`;
+}
+
+function renderComparisonColumn(label: string, items: string[]): string {
+    const lines = items.length ? items : ['핵심 내용을 비교합니다.'];
+    return `<div class="visual-column">
+        <div class="visual-column-title">${escapeHtml(label)}</div>
+        ${lines
+            .slice(0, 3)
+            .map(item => `<div class="visual-item">${escapeHtml(item)}</div>`)
+            .join('\n')}
+      </div>`;
+}
+
+function renderSubtitleLayer(subtitleCues: HyperframesSubtitleCue[]): string {
+    const cues = subtitleCues.filter(cue => normalizeText(cue.text));
+    if (cues.length === 0) return '<div class="subtitle-layer"></div>';
+    return `<div class="subtitle-layer">
+        ${cues
+            .map(
+                (cue, index) =>
+                    `<div id="subtitle-cue-${index}" class="subtitle-cue">${escapeHtml(normalizeText(cue.text))}</div>`
+            )
+            .join('\n')}
+      </div>`;
+}
+
+function renderSubtitleTimeline(subtitleCues: HyperframesSubtitleCue[], durationSec: number): string {
+    return subtitleCues
+        .map((cue, index) => {
+            const text = normalizeText(cue.text);
+            if (!text) return '';
+            const startSec = positiveNumber(cue.startSec) ?? 0;
+            const endSec = Math.min(durationSec, positiveNumber(cue.endSec) ?? durationSec);
+            if (endSec <= startSec) return '';
+            return `
+      tl.fromTo("#subtitle-cue-${index}", { autoAlpha: 0, y: 18 }, { autoAlpha: 1, y: 0, duration: 0.16, ease: "power2.out" }, ${roundMillis(startSec)});
+      tl.to("#subtitle-cue-${index}", { autoAlpha: 0, y: -10, duration: 0.16, ease: "power2.in" }, ${roundMillis(Math.max(startSec, endSec - 0.16))});`;
+        })
+        .join('\n');
 }
 
 function buildSceneTimeline(request: HyperframesRenderRequest, durationSec: number) {
@@ -294,14 +474,83 @@ function buildSceneTimeline(request: HyperframesRenderRequest, durationSec: numb
             title: normalizeText(scene.headline ?? scene.title) || `장면 ${index + 1}`,
             caption:
                 normalizeText(cue?.text ?? scene.narration ?? scene.caption) || '핵심 내용을 시각적으로 정리합니다.',
+            visualType: normalizeVisualType(scene.visualType ?? scene.layout),
+            visualData: normalizeVisualData(scene),
             visualText:
-                normalizeText(scene.visualText ?? scene.layout ?? scene.objects?.[0]?.text) ||
+                normalizeText(scene.visualText ?? scene.objects?.[0]?.text ?? scene.subtitleDraft) ||
                 '자료, 비교, 타임라인을 한 화면에서 이해하게 구성합니다.',
             motionTypes,
             primaryMotion: primaryMotionType(motionTypes),
             easing: easingForMotion(motionTypes),
         };
     });
+}
+
+function normalizeVisualType(value: unknown): string {
+    const normalized = normalizeText(value).toLowerCase();
+    if (normalized === 'timeline') return 'event-timeline';
+    if (normalized === 'diagram' || normalized === 'diagram-board') return 'process-flow';
+    if (normalized === 'chapter-board') return 'fact-card';
+    if (
+        [
+            'source-proof',
+            'event-timeline',
+            'comparison',
+            'metric-reveal',
+            'fact-card',
+            'quote-card',
+            'process-flow',
+        ].includes(normalized)
+    ) {
+        return normalized;
+    }
+    return 'fact-card';
+}
+
+function normalizeVisualData(scene: HyperframesScene): Record<string, unknown> {
+    const explicit = isRecord(scene.visualData) ? scene.visualData : {};
+    const visualType = normalizeVisualType(scene.visualType ?? scene.layout);
+    const title = normalizeText(explicit.title) || normalizeText(scene.headline ?? scene.title) || '핵심 장면';
+    const objectTexts = (scene.objects ?? []).map(object => normalizeText(object.text)).filter(Boolean);
+    const fallbackItems = objectTexts.length
+        ? objectTexts
+        : [normalizeText(scene.visualText ?? scene.caption) || title];
+
+    if (Object.keys(explicit).length > 0) return { ...explicit, title };
+    if (visualType === 'event-timeline') return { title, items: fallbackItems.slice(0, 5) };
+    if (visualType === 'comparison') {
+        return {
+            title,
+            leftLabel: '겉보기',
+            leftItems: fallbackItems.slice(0, 2),
+            rightLabel: '핵심',
+            rightItems: fallbackItems.slice(2, 4).length ? fallbackItems.slice(2, 4) : fallbackItems.slice(0, 2),
+        };
+    }
+    if (visualType === 'quote-card') return { title, quote: fallbackItems[0], source: '자료 기반' };
+    if (visualType === 'process-flow') return { title, steps: fallbackItems.slice(0, 5) };
+    if (visualType === 'metric-reveal') {
+        return {
+            title,
+            metrics: fallbackItems.slice(0, 3).map((value, index) => ({ label: `핵심 ${index + 1}`, value })),
+        };
+    }
+    if (visualType === 'source-proof') return { title, claims: fallbackItems.slice(0, 4) };
+    return { title, body: fallbackItems.join(' ') };
+}
+
+function stringItems(value: unknown): string[] {
+    return Array.isArray(value) ? value.map(normalizeText).filter(Boolean) : [];
+}
+
+function arrayItems(value: unknown): Array<Record<string, unknown>> {
+    return Array.isArray(value)
+        ? value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+        : [];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
 function motionTypesForScene(motionCues: HyperframesMotionCue[], scene: HyperframesScene, index: number): string[] {

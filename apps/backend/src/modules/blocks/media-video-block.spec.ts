@@ -353,7 +353,10 @@ describe('mediaVideoBlock', () => {
             expect.objectContaining({
                 sceneId: 'scene-1',
                 headline: '첫 번째 모션 장면',
-                layout: 'source-proof',
+                visualType: 'source-proof',
+                visualData: expect.objectContaining({
+                    claims: expect.any(Array),
+                }),
             }),
         ]);
         expect(putObject).not.toHaveBeenCalledWith(
@@ -361,6 +364,36 @@ describe('mediaVideoBlock', () => {
             expect.any(Buffer),
             'image/x-portable-pixmap'
         );
+    });
+
+    it('rejects longform Gate B when scenes only contain placeholder visual labels', async () => {
+        await expect(
+            mediaVideoBlock.execute(
+                longformVideoInput({
+                    gateBApproved: true,
+                    scenes: [
+                        {
+                            sceneId: 'scene-1',
+                            headline: '개발용 placeholder 장면',
+                            layout: 'chapter-board',
+                            visualText: 'chapter-board',
+                        },
+                    ],
+                }),
+                {
+                    mode: 'longform-gate-b',
+                    rendererRoute: 'hyperframes',
+                    htmlComposeEstimatedCostUsd: 1,
+                    hyperframesRenderEstimatedCostUsd: 1,
+                },
+                {
+                    runId: 'run_1',
+                    nodeId: 'node_1',
+                }
+            )
+        ).rejects.toThrow(/visual contract/i);
+
+        expect(hyperframesAdapter.renderLongform).not.toHaveBeenCalled();
     });
 
     it('rejects longform Gate B when ffprobe QA cannot confirm audio and video streams', async () => {
@@ -645,6 +678,19 @@ function longformVideoInput(overrides: Record<string, unknown> = {}) {
             voiceId: 'pNInz6obpgDQGcFmaJgB',
         },
         motionCues: [{ sceneNumber: 1, type: 'slow-zoom-in' }],
+        scenes: [
+            {
+                sceneId: 'scene-1',
+                sceneNumber: 1,
+                headline: '첫 번째 모션 장면',
+                visualType: 'source-proof',
+                visualData: {
+                    title: '첫 번째 모션 장면',
+                    claims: ['승인 뒤 실제 제작되는 첫 장면입니다.'],
+                },
+                objects: [{ id: 'section-1-headline', type: 'headline', text: '첫 번째 모션 장면' }],
+            },
+        ],
         approvedGateAArtifact: {
             gate: 'A',
             mode: 'longform-gate-a',

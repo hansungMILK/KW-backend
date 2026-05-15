@@ -49,8 +49,10 @@ Turn a Korean longform script into Hyperframes-ready visual chapters.
 
 Rules:
 - Design chapter-level motion-graphics scenes, not one static text card per paragraph.
-- Use source-proof cards, timelines, comparisons, metric reveals, diagram boards, and conclusion cards when useful.
+- Use source-proof cards, event timelines, comparisons, metric reveals, fact cards, quote cards, and process flows when useful.
 - Every object id must be stable and derived from the section id.
+- Never return placeholder visual archetypes such as chapter-board.
+- Every chapter must include a meaningful subtitleDraft and visualData for its visualArchetype.
 - Return JSON only:
 {
   "visualChapters": [
@@ -58,8 +60,10 @@ Rules:
       "chapterId": "chapter-1",
       "sectionId": "section-1",
       "headline": "...",
-      "visualArchetype": "source-proof|timeline|comparison|metric-reveal|chapter-board",
+      "visualArchetype": "source-proof|event-timeline|comparison|metric-reveal|fact-card|quote-card|process-flow",
       "viewerPurpose": "...",
+      "subtitleDraft": "one concise Korean on-screen subtitle line",
+      "visualData": { "title": "...", "claims": ["..."], "items": ["..."], "body": "..." },
       "objects": [{ "id": "section-1-headline", "type": "headline|quote|metric|diagram|caption", "text": "..." }],
       "motionPlan": "..."
     }
@@ -286,12 +290,18 @@ export const longformSceneJsonBlock: BlockExecutor = {
         const scenes = visualChapters.map((chapter, index) => {
             const chapterId = firstString(chapter.chapterId) ?? `chapter-${index + 1}`;
             const objects = arrayOfRecords(chapter.objects);
+            const headline = firstString(chapter.headline) ?? `Scene ${index + 1}`;
+            const visualType = normalizeVisualType(firstString(chapter.visualType, chapter.visualArchetype), index);
             return {
                 sceneId: `scene-${index + 1}`,
                 chapterId,
-                layout: firstString(chapter.visualArchetype) ?? 'chapter-board',
-                headline: firstString(chapter.headline) ?? `Scene ${index + 1}`,
+                layout: visualType,
+                visualType,
+                headline,
                 objects,
+                visualData: buildVisualData(visualType, chapter, {}, headline, objects),
+                subtitleDraft: buildSubtitleDraft(chapter, {}, headline, objects),
+                onScreenTextPlan: buildOnScreenTextPlan(chapter, {}, headline, objects),
                 perCueActivity: [
                     {
                         cueIndex: index * 3,
@@ -461,7 +471,23 @@ export const longformQaBlock: BlockExecutor = {
         const audioStream = probe.hasAudio === true;
         const resolution2k = width === 2560 && height === 1440 && probeWidth === 2560 && probeHeight === 1440;
         const durationPresent = probeDurationSec !== undefined;
-        const passed = hasPreview && videoStream && audioStream && resolution2k && durationPresent;
+        const productionQa = toRecord(record.longformProductionQa);
+        const subtitleLayer = (positiveNumber(productionQa.subtitleCueCount) ?? 0) > 0;
+        const motionCues = (positiveNumber(productionQa.motionCueCount) ?? 0) > 0;
+        const visualSceneCount = positiveNumber(productionQa.visualSceneCount) ?? 0;
+        const visualDataSceneCount = positiveNumber(productionQa.visualDataSceneCount) ?? 0;
+        const visualDensity = visualSceneCount > 0 && visualDataSceneCount >= visualSceneCount;
+        const placeholderFree = productionQa.placeholderFree === true;
+        const passed =
+            hasPreview &&
+            videoStream &&
+            audioStream &&
+            resolution2k &&
+            durationPresent &&
+            subtitleLayer &&
+            motionCues &&
+            visualDensity &&
+            placeholderFree;
         return {
             output: {
                 ...record,
@@ -473,6 +499,10 @@ export const longformQaBlock: BlockExecutor = {
                         audioStream,
                         resolution2k,
                         durationPresent,
+                        subtitleLayer,
+                        motionCues,
+                        visualDensity,
+                        placeholderFree,
                     },
                 },
             },
@@ -600,6 +630,9 @@ async function generateAiMotion(
                     sceneId: firstString(scene.sceneId),
                     headline: firstString(scene.headline),
                     layout: firstString(scene.layout),
+                    visualType: firstString(scene.visualType),
+                    visualData: scene.visualData,
+                    subtitleDraft: firstString(scene.subtitleDraft),
                     objects: arrayOfRecords(scene.objects).map(object => ({
                         id: firstString(object.id),
                         type: firstString(object.type),
@@ -671,7 +704,7 @@ function normalizeVisualChapter(
     const section = sections[index] ?? {};
     const sectionId = firstString(chapter.sectionId, section.sectionId) ?? `section-${index + 1}`;
     const headline = firstString(chapter.headline, section.title) ?? `챕터 ${index + 1}`;
-    const visualArchetype = firstString(chapter.visualArchetype) ?? pickArchetype(index);
+    const visualArchetype = normalizeVisualType(firstString(chapter.visualType, chapter.visualArchetype), index);
     const objects = arrayOfRecords(chapter.objects).map((object, objectIndex) => ({
         id: firstString(object.id) ?? `${sectionId}-object-${objectIndex + 1}`,
         type: firstString(object.type) ?? (objectIndex === 0 ? 'headline' : visualArchetype),
@@ -687,6 +720,9 @@ function normalizeVisualChapter(
         visualArchetype,
         viewerPurpose: firstString(chapter.viewerPurpose) ?? '지금 듣는 내용을 화면 구조로 즉시 이해하게 만든다.',
         objects,
+        subtitleDraft: buildSubtitleDraft(chapter, section, headline, objects),
+        onScreenTextPlan: buildOnScreenTextPlan(chapter, section, headline, objects),
+        visualData: buildVisualData(visualArchetype, chapter, section, headline, objects),
         motionPlan:
             firstString(chapter.motionPlan) ??
             'stable chapter canvas with cue-driven focus, highlight, reveal, and connector motion',
@@ -694,6 +730,156 @@ function normalizeVisualChapter(
             ? stringArray(chapter.evidenceRefs)
             : sourceIdsForSection(script.sourceMap, sectionId),
     };
+}
+
+function normalizeVisualType(value: string | undefined, index: number): string {
+    const normalized = value?.trim().toLowerCase();
+    if (normalized === 'timeline') return 'event-timeline';
+    if (normalized === 'diagram' || normalized === 'diagram-board') return 'process-flow';
+    if (normalized && normalized !== 'chapter-board' && allowedVisualTypes().includes(normalized)) return normalized;
+    return index === 0 ? 'fact-card' : pickArchetype(index);
+}
+
+function allowedVisualTypes(): string[] {
+    return ['source-proof', 'event-timeline', 'comparison', 'metric-reveal', 'fact-card', 'quote-card', 'process-flow'];
+}
+
+function buildSubtitleDraft(
+    chapter: RecordValue,
+    section: RecordValue,
+    headline: string,
+    objects: RecordValue[]
+): string {
+    return (
+        firstString(chapter.subtitleDraft, chapter.onScreenSubtitle, section.subtitleDraft, section.narration) ??
+        visualTexts(objects).find(text => text !== headline) ??
+        headline
+    );
+}
+
+function buildOnScreenTextPlan(
+    chapter: RecordValue,
+    section: RecordValue,
+    headline: string,
+    objects: RecordValue[]
+): string[] {
+    const explicit = [
+        ...stringArray(chapter.onScreenTextPlan),
+        ...arrayOfRecords(chapter.onScreenTextPlan)
+            .map(item => firstString(item.text))
+            .filter((text): text is string => Boolean(text)),
+    ];
+    const values = explicit.length
+        ? explicit
+        : [
+              headline,
+              ...visualTexts(objects).filter(text => text !== headline),
+              firstString(section.summary, section.narration),
+          ].filter((text): text is string => Boolean(text));
+    return [...new Set(values.map(text => trimText(cleanText(text), 96)).filter(Boolean))].slice(0, 5);
+}
+
+function buildVisualData(
+    visualType: string,
+    chapter: RecordValue,
+    section: RecordValue,
+    headline: string,
+    objects: RecordValue[]
+): RecordValue {
+    const explicit = toRecord(chapter.visualData);
+    if (Object.keys(explicit).length > 0) return sanitizeVisualData(visualType, explicit, headline, objects);
+
+    const objectTexts = visualTexts(objects).filter(text => text !== headline);
+    const body =
+        firstString(objectTexts.join(' '), chapter.viewerPurpose, section.summary, section.narration, headline) ??
+        headline;
+    const items = objectTexts.length ? objectTexts : [body];
+
+    if (visualType === 'event-timeline') return { title: headline, items: items.slice(0, 5) };
+    if (visualType === 'comparison') {
+        return {
+            title: headline,
+            leftLabel: '겉보기',
+            leftItems: items.slice(0, 2),
+            rightLabel: '핵심',
+            rightItems: items.slice(2, 4).length ? items.slice(2, 4) : [body],
+        };
+    }
+    if (visualType === 'quote-card') {
+        return {
+            title: headline,
+            quote: items[0] ?? body,
+            source: firstString(arrayOfRecords(section.sourceRefs)[0]?.id) ?? '자료 기반',
+        };
+    }
+    if (visualType === 'process-flow') return { title: headline, steps: items.slice(0, 5) };
+    if (visualType === 'metric-reveal') {
+        return {
+            title: headline,
+            metrics: items.slice(0, 3).map((text, itemIndex) => ({ label: `핵심 ${itemIndex + 1}`, value: text })),
+        };
+    }
+    if (visualType === 'source-proof') return { title: headline, claims: items.slice(0, 4) };
+    return { title: headline, body };
+}
+
+function sanitizeVisualData(
+    visualType: string,
+    data: RecordValue,
+    headline: string,
+    objects: RecordValue[]
+): RecordValue {
+    const title = firstString(data.title, headline) ?? headline;
+    if (visualType === 'event-timeline') {
+        return { ...data, title, items: ensureStringItems(data.items, objects, headline) };
+    }
+    if (visualType === 'comparison') {
+        const items = ensureStringItems(data.items, objects, headline);
+        return {
+            ...data,
+            title,
+            leftItems: stringArray(data.leftItems).length ? stringArray(data.leftItems) : items.slice(0, 2),
+            rightItems: stringArray(data.rightItems).length ? stringArray(data.rightItems) : items.slice(2, 4),
+        };
+    }
+    if (visualType === 'quote-card') {
+        return {
+            ...data,
+            title,
+            quote: firstString(data.quote, ensureStringItems(data.items, objects, headline)[0], headline),
+        };
+    }
+    if (visualType === 'process-flow') {
+        return { ...data, title, steps: ensureStringItems(data.steps, objects, headline) };
+    }
+    if (visualType === 'metric-reveal') {
+        const metrics = arrayOfRecords(data.metrics).length
+            ? arrayOfRecords(data.metrics)
+            : ensureStringItems(data.items, objects, headline).map((text, itemIndex) => ({
+                  label: `핵심 ${itemIndex + 1}`,
+                  value: text,
+              }));
+        return { ...data, title, metrics };
+    }
+    if (visualType === 'source-proof') {
+        return { ...data, title, claims: ensureStringItems(data.claims, objects, headline) };
+    }
+    return {
+        ...data,
+        title,
+        body: firstString(data.body, ensureStringItems(data.items, objects, headline).join(' '), headline),
+    };
+}
+
+function ensureStringItems(value: unknown, objects: RecordValue[], headline: string): string[] {
+    const items = stringArray(value);
+    if (items.length > 0) return items.slice(0, 6);
+    const objectTexts = visualTexts(objects).filter(text => text !== headline);
+    return (objectTexts.length ? objectTexts : [headline]).slice(0, 6);
+}
+
+function visualTexts(objects: RecordValue[]): string[] {
+    return objects.map(object => firstString(object.text)).filter((text): text is string => Boolean(text));
 }
 
 function normalizeMotionCues(value: unknown, scenes: RecordValue[], subtitleCues: RecordValue[]): RecordValue[] {
@@ -1162,7 +1348,9 @@ function resolveMotionTargetIds(scenes: RecordValue[], sceneId: string, index: n
 }
 
 function pickArchetype(index: number): string {
-    return ['source-proof', 'timeline', 'comparison', 'metric-reveal', 'chapter-board'][index % DEFAULT_SECTION_COUNT];
+    return ['source-proof', 'event-timeline', 'comparison', 'metric-reveal', 'fact-card'][
+        index % DEFAULT_SECTION_COUNT
+    ];
 }
 
 function pickEmphasis(index: number): string {

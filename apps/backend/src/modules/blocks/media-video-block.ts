@@ -45,6 +45,8 @@ export const mediaVideoBlock: BlockExecutor = {
             caption?: string;
             narration?: string;
             visualText?: string;
+            visualType?: string;
+            visualData?: Record<string, unknown>;
             sourceLabel?: string;
             layout?: string;
             sourceRefs?: unknown[];
@@ -74,6 +76,7 @@ export const mediaVideoBlock: BlockExecutor = {
         const rendererRoute = resolveRendererRoute(input, config);
         const useHyperframesRenderer = longformGateB && rendererRoute.toLowerCase().includes('hyperframes');
         const enableBackgroundMusic = longformGateB || config?.backgroundMusic !== false;
+        const longformMotionScenes = longformGateB ? normalizeLongformVisualScenes(motionScenes) : motionScenes;
 
         if (longformGateB) {
             assertApprovedLongformGateB(input, config);
@@ -91,12 +94,12 @@ export const mediaVideoBlock: BlockExecutor = {
                 ? audioObj.durationSec
                 : undefined;
         const longformProductionQa = longformGateB
-            ? assertLongformProductionInputs(audioObj, subtitleCues, motionCues)
+            ? assertLongformProductionInputs(audioObj, subtitleCues, motionCues, longformMotionScenes)
             : undefined;
         const rawImages = useHyperframesRenderer
             ? rawImagesFromInput
             : longformGateB
-              ? await ensureLongformMotionBoardImages(rawImagesFromInput, motionScenes, subtitleCues, metadata)
+              ? await ensureLongformMotionBoardImages(rawImagesFromInput, longformMotionScenes, subtitleCues, metadata)
               : rawImagesFromInput;
         const images = buildSyncedImageSegments(rawImages, rawScenes, subtitleCues, metadata, audioDurationSec);
 
@@ -121,7 +124,7 @@ export const mediaVideoBlock: BlockExecutor = {
             }
 
             await recordVideoTrace('media-video: composing started', {
-                imageCount: useHyperframesRenderer ? motionScenes.length : images.length,
+                imageCount: useHyperframesRenderer ? longformMotionScenes.length : images.length,
                 hasAudio: Boolean(audioUrl),
                 rendererRoute,
                 backgroundMusic: backgroundMusic
@@ -155,7 +158,7 @@ export const mediaVideoBlock: BlockExecutor = {
 
                     if (useHyperframesRenderer) {
                         return await hyperframesAdapter.renderLongform({
-                            scenes: motionScenes,
+                            scenes: longformMotionScenes,
                             subtitleCues,
                             motionCues,
                             audioUrl,
@@ -654,11 +657,146 @@ function assertLongformRenderCostWithinLimit(input: unknown, config?: Record<str
     );
 }
 
+function normalizeLongformVisualScenes<
+    T extends {
+        sceneId?: string;
+        sceneNumber?: number;
+        title?: string;
+        headline?: string;
+        caption?: string;
+        narration?: string;
+        visualText?: string;
+        visualType?: string;
+        visualData?: Record<string, unknown>;
+        layout?: string;
+        objects?: unknown;
+    },
+>(scenes: T[]): T[] {
+    return scenes.map((scene, index) => {
+        const visualType = normalizeLongformVisualType(scene.visualType ?? scene.layout, index);
+        const visualData = hasMeaningfulVisualContract(scene)
+            ? scene.visualData
+            : buildFallbackLongformVisualData(scene, visualType);
+        return {
+            ...scene,
+            layout: visualType,
+            visualType,
+            visualData,
+        };
+    });
+}
+
+function normalizeLongformVisualType(value: unknown, index: number): string {
+    const normalized = normalizeSubtitleText(value).toLowerCase();
+    if (normalized === 'timeline') return 'event-timeline';
+    if (normalized === 'diagram' || normalized === 'diagram-board') return 'process-flow';
+    if (normalized === 'chapter-board') return 'fact-card';
+    if (
+        [
+            'source-proof',
+            'event-timeline',
+            'comparison',
+            'metric-reveal',
+            'fact-card',
+            'quote-card',
+            'process-flow',
+        ].includes(normalized)
+    ) {
+        return normalized;
+    }
+    return ['source-proof', 'event-timeline', 'comparison', 'metric-reveal', 'fact-card'][index % 5];
+}
+
+function buildFallbackLongformVisualData(
+    scene: {
+        title?: string;
+        headline?: string;
+        caption?: string;
+        narration?: string;
+        visualText?: string;
+        objects?: unknown;
+    },
+    visualType: string
+): Record<string, unknown> {
+    const title = normalizeSubtitleText(scene.headline) || normalizeSubtitleText(scene.title) || '롱폼 장면';
+    const objectTexts = Array.isArray(scene.objects)
+        ? scene.objects
+              .map(item => (isRecord(item) ? normalizeSubtitleText(item['text']) : ''))
+              .filter(text => text && !PLACEHOLDER_TEXT_PATTERN.test(text))
+        : [];
+    const body =
+        objectTexts.find(text => text !== title) ||
+        normalizeSubtitleText(scene.narration) ||
+        normalizeSubtitleText(scene.caption) ||
+        normalizeSubtitleText(scene.visualText) ||
+        title;
+    const items = objectTexts.length ? objectTexts : [body];
+
+    if (visualType === 'event-timeline') return { title, items: items.slice(0, 5) };
+    if (visualType === 'comparison') {
+        return {
+            title,
+            leftLabel: '겉보기',
+            leftItems: items.slice(0, 2),
+            rightLabel: '핵심',
+            rightItems: items.slice(2, 4).length ? items.slice(2, 4) : [body],
+        };
+    }
+    if (visualType === 'quote-card') return { title, quote: body, source: '자료 기반' };
+    if (visualType === 'process-flow') return { title, steps: items.slice(0, 5) };
+    if (visualType === 'metric-reveal') {
+        return {
+            title,
+            metrics: items.slice(0, 3).map((value, itemIndex) => ({ label: `핵심 ${itemIndex + 1}`, value })),
+        };
+    }
+    if (visualType === 'source-proof') return { title, claims: items.slice(0, 4) };
+    return { title, body };
+}
+
+const PLACEHOLDER_TEXT_PATTERN = /\b(chapter-board|placeholder|todo|sample)\b|개발용/i;
+
+function hasMeaningfulVisualContract(scene: { visualData?: Record<string, unknown> }): boolean {
+    const data = scene.visualData;
+    if (!isRecord(data)) return false;
+    const strings = collectVisualStrings(data);
+    return strings.some(text => !PLACEHOLDER_TEXT_PATTERN.test(text));
+}
+
+function sceneContainsPlaceholderLabel(scene: Record<string, unknown>): boolean {
+    const visibleValues = [
+        scene['title'],
+        scene['headline'],
+        scene['caption'],
+        scene['narration'],
+        scene['visualText'],
+        scene['visualData'],
+        scene['objects'],
+    ];
+    return visibleValues.flatMap(collectVisualStrings).some(text => PLACEHOLDER_TEXT_PATTERN.test(text));
+}
+
+function collectVisualStrings(value: unknown): string[] {
+    if (typeof value === 'string') return [normalizeSubtitleText(value)].filter(Boolean);
+    if (Array.isArray(value)) return value.flatMap(collectVisualStrings);
+    if (isRecord(value)) return Object.values(value).flatMap(collectVisualStrings);
+    return [];
+}
+
 function assertLongformProductionInputs(
     audio: { provider?: string; model?: string; voiceId?: string } | undefined,
     subtitleCues: Array<{ text?: string; startSec?: number; endSec?: number }>,
-    motionCues: Array<{ type?: string }>
-): { ttsProvider: string; voiceId: string; subtitleCueCount: number; motionCueCount: number } {
+    motionCues: Array<{ type?: string }>,
+    scenes: Array<{ visualData?: Record<string, unknown>; visualText?: string }>
+): {
+    ttsProvider: string;
+    voiceId: string;
+    subtitleCueCount: number;
+    motionCueCount: number;
+    visualSceneCount: number;
+    visualDataSceneCount: number;
+    placeholderFree: boolean;
+} {
     const provider = typeof audio?.provider === 'string' ? audio.provider.trim().toLowerCase() : '';
     const voiceId = typeof audio?.voiceId === 'string' ? audio.voiceId.trim() : '';
     if (provider !== 'elevenlabs' || !voiceId) {
@@ -685,11 +823,21 @@ function assertLongformProductionInputs(
         throw new Error('longform media execution requires motion graphics cues before MP4 render');
     }
 
+    const visualSceneCount = scenes.length;
+    const visualDataSceneCount = scenes.filter(hasMeaningfulVisualContract).length;
+    const placeholderFree = !scenes.some(sceneContainsPlaceholderLabel);
+    if (visualSceneCount === 0 || visualDataSceneCount < visualSceneCount || !placeholderFree) {
+        throw new Error('longform media execution requires meaningful visual contract before MP4 render');
+    }
+
     return {
         ttsProvider: 'elevenlabs',
         voiceId,
         subtitleCueCount: timedSubtitleCues.length,
         motionCueCount: usableMotionCues.length,
+        visualSceneCount,
+        visualDataSceneCount,
+        placeholderFree,
     };
 }
 

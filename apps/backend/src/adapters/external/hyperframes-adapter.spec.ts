@@ -71,4 +71,47 @@ describe('hyperframes motion directions', () => {
         expect(html).toContain('scale: 1.07');
         expect(html).toContain('expo.out');
     });
+
+    it('renders timed subtitles and meaningful visual panels instead of placeholder labels', () => {
+        const html = buildLongformHyperframesHtml(
+            {
+                scenes: [
+                    {
+                        sceneId: 'scene-1',
+                        sceneNumber: 1,
+                        headline: '느대 탈출 사건 흐름',
+                        layout: 'chapter-board',
+                        visualType: 'event-timeline',
+                        visualData: {
+                            title: '사건 흐름',
+                            items: ['대전 오월드에서 탈출', '수색 장기화', '가짜 정보가 더 빨리 확산'],
+                        },
+                    },
+                ],
+                subtitleCues: [
+                    {
+                        sceneNumber: 1,
+                        text: '대전 오월드에서 늑대 한 마리가 탈출했습니다.',
+                        startSec: 0,
+                        endSec: 3.5,
+                    },
+                ],
+                motionCues: [{ sceneNumber: 1, type: 'reveal' }],
+                audioUrl: 'file://narration.mp3',
+                audioDurationSec: 3.5,
+                outputWidth: 2560,
+                outputHeight: 1440,
+            },
+            {
+                narrationSrc: './assets/narration.mp3',
+                gsapSrc: './assets/gsap.min.js',
+            }
+        );
+
+        expect(html).toContain('class="subtitle-layer"');
+        expect(html).toContain('대전 오월드에서 늑대 한 마리가 탈출했습니다.');
+        expect(html).toContain('visual-event-timeline');
+        expect(html).toContain('대전 오월드에서 탈출');
+        expect(html).not.toContain('chapter-board');
+    });
 });

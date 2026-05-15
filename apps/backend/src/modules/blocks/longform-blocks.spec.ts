@@ -307,6 +307,48 @@ describe('longform blocks', () => {
         expect(result.output.renderer).toBe('hyperframes');
         expect(result.output.resolution).toBe('2560x1440');
         expect(result.output.scenes[0].perCueActivity.length).toBeGreaterThan(0);
+        expect(result.output.scenes[0]).toEqual(
+            expect.objectContaining({
+                visualType: 'source-proof',
+                visualData: expect.objectContaining({
+                    title: '상장 추진',
+                    claims: expect.any(Array),
+                }),
+                subtitleDraft: expect.any(String),
+                onScreenTextPlan: expect.any(Array),
+            })
+        );
+        expect(JSON.stringify(result.output.scenes)).not.toContain('chapter-board');
+    });
+
+    it('converts storyboard chapter-board fallbacks into meaningful visual contracts', async () => {
+        const result = await longformSceneJsonBlock.execute({
+            visualChapters: [
+                {
+                    chapterId: 'chapter-1',
+                    sectionId: 'section-1',
+                    headline: '탈출 사건 핵심',
+                    visualArchetype: 'chapter-board',
+                    viewerPurpose: '사건 흐름을 단계별로 보여준다.',
+                    objects: [
+                        { id: 'section-1-headline', type: 'headline', text: '탈출 사건 핵심' },
+                        { id: 'section-1-step-1', type: 'caption', text: '대전 오월드에서 탈출' },
+                        { id: 'section-1-step-2', type: 'caption', text: '수색이 길어지며 관심이 커짐' },
+                    ],
+                },
+            ],
+        });
+
+        expect(result.output.scenes[0]).toEqual(
+            expect.objectContaining({
+                layout: 'fact-card',
+                visualType: 'fact-card',
+                visualData: expect.objectContaining({
+                    body: expect.stringContaining('대전 오월드'),
+                }),
+            })
+        );
+        expect(JSON.stringify(result.output.scenes)).not.toContain('chapter-board');
     });
 
     it('targets real scene object ids when composing longform motion cues', async () => {
@@ -588,6 +630,44 @@ describe('longform blocks', () => {
                     audioStream: false,
                     videoStream: true,
                     resolution2k: true,
+                }),
+            })
+        );
+    });
+
+    it('fails longform QA when render contract did not prove subtitles, visuals, and motion', async () => {
+        const result = await longformQaBlock.execute({
+            video: {
+                width: 2560,
+                height: 1440,
+                previewUrl: 'http://localhost:8800/_local-assets/video.mp4',
+            },
+            qa: {
+                hasVideo: true,
+                hasAudio: true,
+                width: 2560,
+                height: 1440,
+                durationSec: 120,
+            },
+            longformProductionQa: {
+                ttsProvider: 'elevenlabs',
+                voiceId: 'pNInz6obpgDQGcFmaJgB',
+                subtitleCueCount: 0,
+                motionCueCount: 0,
+                visualSceneCount: 1,
+                visualDataSceneCount: 0,
+                placeholderFree: false,
+            },
+        });
+
+        expect(result.output.qaReport).toEqual(
+            expect.objectContaining({
+                passed: false,
+                checks: expect.objectContaining({
+                    subtitleLayer: false,
+                    motionCues: false,
+                    visualDensity: false,
+                    placeholderFree: false,
                 }),
             })
         );
