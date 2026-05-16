@@ -724,13 +724,9 @@ function buildFallbackLongformVisualData(
               .map(item => (isRecord(item) ? normalizeSubtitleText(item['text']) : ''))
               .filter(text => text && !PLACEHOLDER_TEXT_PATTERN.test(text))
         : [];
-    const body =
-        objectTexts.find(text => text !== title) ||
-        normalizeSubtitleText(scene.narration) ||
-        normalizeSubtitleText(scene.caption) ||
-        normalizeSubtitleText(scene.visualText) ||
-        title;
-    const items = objectTexts.length ? objectTexts : [body];
+    const visualTextItems = splitVisualText(normalizeSubtitleText(scene.visualText)).filter(text => text !== title);
+    const items = objectTexts.length ? objectTexts : visualTextItems.length ? visualTextItems : [title];
+    const body = items.find(text => text !== title) || title;
 
     if (visualType === 'event-timeline') return { title, items: items.slice(0, 5) };
     if (visualType === 'comparison') {
@@ -761,6 +757,15 @@ function hasMeaningfulVisualContract(scene: { visualData?: Record<string, unknow
     if (!isRecord(data)) return false;
     const strings = collectVisualStrings(data);
     return strings.some(text => !PLACEHOLDER_TEXT_PATTERN.test(text));
+}
+
+function splitVisualText(value: string): string[] {
+    if (!value) return [];
+    return value
+        .split(/[.!?。！？\n]+|(?<=다)\s+/)
+        .map(text => text.trim())
+        .filter(Boolean)
+        .slice(0, 5);
 }
 
 function sceneContainsPlaceholderLabel(scene: Record<string, unknown>): boolean {

@@ -1,40 +1,60 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
 import { ScrollText, X } from 'lucide-react';
 
-import { fetchBlockLogs } from '@flows/flows';
+import { fetchBlockLogs, listFlowRuns } from '@flows/flows';
 
 import type { LogEntry } from '@flows/flows';
 
 interface LogModalProps {
     nodeId: string;
+    runId?: string | null;
+    flowId?: string | null;
     onClose: () => void;
 }
 
-export const LogModal: React.FC<LogModalProps> = ({ nodeId, onClose }) => {
+export const LogModal: React.FC<LogModalProps> = ({ nodeId, runId, flowId, onClose }) => {
     const { t } = useTranslation(['flows']);
     const [logs, setLogs] = useState<LogEntry[]>([]);
     const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
     const [filter, setFilter] = useState('');
 
-    useEffect(() => {
+    const loadLogs = useCallback(async () => {
         setLoading(true);
-        fetchBlockLogs(nodeId).then(data => {
+        setError(null);
+        try {
+            let resolvedRunId = runId ?? undefined;
+            if (!resolvedRunId && flowId) {
+                const [latestRun] = await listFlowRuns(flowId, 1);
+                resolvedRunId = latestRun?.runId;
+            }
+
+            if (!resolvedRunId) {
+                setLogs([]);
+                return;
+            }
+
+            const data = await fetchBlockLogs({ runId: resolvedRunId, nodeId });
             setLogs(data);
+        } catch (err) {
+            setLogs([]);
+            setError(err instanceof Error ? err.message : '로그를 불러오지 못했습니다.');
+        } finally {
             setLoading(false);
-        });
-    }, [nodeId]);
+        }
+    }, [flowId, nodeId, runId]);
+
+    useEffect(() => {
+        void loadLogs();
+    }, [loadLogs]);
 
     const filteredLogs = logs.filter(l => l.message.toLowerCase().includes(filter.toLowerCase()));
 
     const handleRefresh = () => {
-        setLoading(true);
-        fetchBlockLogs(nodeId).then(data => {
-            setLogs(data);
-            setLoading(false);
-        });
+        void loadLogs();
     };
 
     return createPortal(
@@ -80,6 +100,8 @@ export const LogModal: React.FC<LogModalProps> = ({ nodeId, onClose }) => {
                         <div className="flex justify-center items-center h-full text-muted-foreground text-xs">
                             {t('canvas.loading')}
                         </div>
+                    ) : error ? (
+                        <div className="text-center text-destructive text-xs py-10 px-6 break-words">{error}</div>
                     ) : filteredLogs.length === 0 ? (
                         <div className="text-center text-muted-foreground text-xs py-10 italic">
                             {t('canvas.noLogs')}

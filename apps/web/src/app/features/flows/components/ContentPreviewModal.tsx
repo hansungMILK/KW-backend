@@ -54,24 +54,6 @@ const getContentTypeIcon = (type: ContentType): React.ReactNode => {
     }
 };
 
-/** Detect content type from value and explicit type */
-const detectContentType = (value: unknown, explicitType?: string): ContentType => {
-    if (explicitType === 'image') return 'image';
-    if (explicitType === 'image-gallery') return 'image-gallery';
-    if (explicitType === 'script') return 'script';
-    if (explicitType === 'video') return 'video';
-    if (explicitType === 'audio') return 'audio';
-    const stringValue = typeof value === 'string' ? value : '';
-    if (stringValue.startsWith('data:video/') || /\.(mp4|mov|webm)(?:$|[?#])/i.test(stringValue)) return 'video';
-    if (stringValue.startsWith('data:audio/') || /\.(mp3|wav|m4a|aac|ogg)(?:$|[?#])/i.test(stringValue)) {
-        return 'audio';
-    }
-    if (explicitType === 'json' || (value !== null && typeof value === 'object')) return 'json';
-    if (tryParseJson(value)) return 'json';
-    if (explicitType === 'markdown' || isMarkdownContent(value)) return 'markdown';
-    return 'text';
-};
-
 const isRecordValue = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -91,7 +73,59 @@ const firstStringValue = (...values: unknown[]): string | undefined => {
 
 const getUrlFromRecord = (value: unknown): string | undefined => {
     if (!isRecordValue(value)) return undefined;
-    return firstStringValue(value.url, value.publicUrl, value.data);
+    const nestedVideo = isRecordValue(value.video) ? value.video : undefined;
+    const nestedAudio = isRecordValue(value.audio) ? value.audio : undefined;
+    const nestedAsset = isRecordValue(value.asset) ? value.asset : undefined;
+    return firstStringValue(
+        value.url,
+        value.publicUrl,
+        value.previewUrl,
+        value.downloadUrl,
+        value.data,
+        nestedVideo?.url,
+        nestedVideo?.previewUrl,
+        nestedVideo?.downloadUrl,
+        nestedAudio?.url,
+        nestedAudio?.previewUrl,
+        nestedAudio?.downloadUrl,
+        nestedAsset?.url,
+        nestedAsset?.previewUrl,
+        nestedAsset?.downloadUrl
+    );
+};
+
+const getMediaUrl = (value: unknown): string | undefined => {
+    if (typeof value === 'string') return value;
+    return getUrlFromRecord(value);
+};
+
+/** Detect content type from value and explicit type */
+const detectContentType = (value: unknown, explicitType?: string): ContentType => {
+    if (explicitType === 'image') return 'image';
+    if (explicitType === 'image-gallery') return 'image-gallery';
+    if (explicitType === 'script') return 'script';
+
+    const mediaUrl = getMediaUrl(value);
+    const stringValue = typeof mediaUrl === 'string' ? mediaUrl : '';
+    if (
+        explicitType === 'video' ||
+        stringValue.startsWith('data:video/') ||
+        /\.(mp4|mov|webm)(?:$|[?#])/i.test(stringValue)
+    ) {
+        return 'video';
+    }
+    if (
+        explicitType === 'audio' ||
+        stringValue.startsWith('data:audio/') ||
+        /\.(mp3|wav|m4a|aac|ogg)(?:$|[?#])/i.test(stringValue)
+    ) {
+        return 'audio';
+    }
+    if (isRecordValue(value) && Array.isArray(value.images)) return 'image-gallery';
+    if (explicitType === 'json' || (value !== null && typeof value === 'object')) return 'json';
+    if (tryParseJson(value)) return 'json';
+    if (explicitType === 'markdown' || isMarkdownContent(value)) return 'markdown';
+    return 'text';
 };
 
 /** Copy image to clipboard using canvas (handles CORS and format issues) */
@@ -411,7 +445,7 @@ export const ContentPreviewModal: React.FC<ContentPreviewModalProps> = ({ open, 
     const renderContent = () => {
         switch (contentType) {
             case 'image':
-                return <ImagePreview src={String(content.value)} />;
+                return <ImagePreview src={getMediaUrl(content.value) ?? String(content.value)} />;
 
             case 'image-gallery':
                 return <ImageGalleryPreview value={content.value} />;
@@ -420,10 +454,10 @@ export const ContentPreviewModal: React.FC<ContentPreviewModalProps> = ({ open, 
                 return <ScriptPreview value={content.value} />;
 
             case 'video':
-                return <VideoPreview src={String(content.value)} />;
+                return <VideoPreview src={getMediaUrl(content.value) ?? String(content.value)} />;
 
             case 'audio':
-                return <AudioPreview src={String(content.value)} />;
+                return <AudioPreview src={getMediaUrl(content.value) ?? String(content.value)} />;
 
             case 'json': {
                 const jsonData = tryParseJson(content.value) ?? content.value;

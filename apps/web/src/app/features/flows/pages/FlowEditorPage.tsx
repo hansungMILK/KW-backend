@@ -1329,6 +1329,7 @@ export const FlowEditorPage = () => {
                 <WorkflowCanvas
                     ref={canvasRef}
                     flowId={currentFlowId}
+                    activeRunId={activeRunId}
                     onNodeSelect={handleSelectionChange}
                     onChange={handleCanvasChange}
                     onOpenLibrary={handleOpenLibrary}

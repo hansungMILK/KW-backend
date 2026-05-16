@@ -403,6 +403,53 @@ const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
     );
 };
 
+const summarizePorts = (ports: Array<{ label?: string; id?: string; type?: string }>): string =>
+    ports.length
+        ? ports.map(port => `${port.label || port.id || '포트'} (${port.type || 'unknown'})`).join(', ')
+        : '없음';
+
+const BlockGuide: React.FC<{ definition: BlockDefinition; configSchema: ConfigField[] }> = ({
+    definition,
+    configSchema,
+}) => {
+    const configFields = configSchema.filter(field => field.type !== 'separator');
+
+    return (
+        <div className="mt-2 space-y-2 text-[11px] leading-relaxed text-muted-foreground">
+            <div className="rounded-md border border-border/40 bg-background/40 p-2">
+                <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-foreground/70">
+                    무엇을 하나요
+                </div>
+                <p>{definition.description || '이 블록은 입력을 받아 다음 단계에서 사용할 출력으로 변환합니다.'}</p>
+            </div>
+            <div className="grid gap-2">
+                <div className="rounded-md border border-border/40 bg-background/30 p-2">
+                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-foreground/70">
+                        입력
+                    </div>
+                    <p>{summarizePorts(definition.inputs)}</p>
+                </div>
+                <div className="rounded-md border border-border/40 bg-background/30 p-2">
+                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-foreground/70">
+                        출력
+                    </div>
+                    <p>{summarizePorts(definition.outputs)}</p>
+                </div>
+                <div className="rounded-md border border-border/40 bg-background/30 p-2">
+                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-foreground/70">
+                        설정
+                    </div>
+                    <p>
+                        {configFields.length
+                            ? configFields.map(field => field.label || field.key).join(', ')
+                            : '추가 설정 없이 자동 실행됩니다.'}
+                    </p>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 export const DetailPanel: React.FC<DetailPanelProps> = ({
     flowId,
     selectedNode,
@@ -779,11 +826,11 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
 
                 <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3" onWheel={e => e.stopPropagation()}>
                     {/* Description Section */}
-                    <CollapsibleSection
-                        title={t('flows:detailPanel.description')}
-                        icon={<FileText className="w-3.5 h-3.5" />}
-                        defaultOpen={false}
-                    >
+                    <CollapsibleSection title="설명서" icon={<FileText className="w-3.5 h-3.5" />} defaultOpen={true}>
+                        <BlockGuide definition={def} configSchema={configSchema} />
+                        <div className="mt-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                            내 메모
+                        </div>
                         <textarea
                             className="w-full bg-background/60 border border-border/50 rounded-md p-2 text-xs text-foreground focus:border-primary/50 outline-none resize-none h-14 transition-colors mt-2"
                             value={selectedNode.description || ''}

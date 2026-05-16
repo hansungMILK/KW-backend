@@ -14,6 +14,7 @@ import type {
     SaveFlowView,
     UpdateFlowBody,
 } from '../types';
+import type { Trace, TraceListResponse } from '@flows/contracts';
 
 const _log = console.log.bind(console, '[flows-api]');
 const flowWriteQueues = new Map<string, Promise<unknown>>();
@@ -250,13 +251,42 @@ export const upsertFlow = async (id: string, body: SaveFlowBody): Promise<SaveFl
     });
 };
 
+export interface FetchBlockLogsOptions {
+    runId: string;
+    nodeId: string;
+    limit?: number;
+}
+
+const traceLevelToLogLevel = (traceType: Trace['traceType']): LogEntry['level'] => {
+    if (traceType === 'ERROR') return 'ERROR';
+    if (traceType === 'RETRY' || traceType === 'POLICY') return 'WARN';
+    return 'INFO';
+};
+
+const formatTraceMessage = (trace: Trace): string => {
+    const data = trace.data && Object.keys(trace.data).length > 0 ? ` ${JSON.stringify(trace.data)}` : '';
+    return `[${trace.traceType}] ${trace.message}${data}`;
+};
+
 /**
- * Fetch execution logs for a node
- * TODO: Implement against the run trace API when the UI needs node logs.
+ * Fetch execution logs for a node from the run trace API.
  */
-export const fetchBlockLogs = async (nodeId: string): Promise<LogEntry[]> => {
-    _log(`> fetchBlockLogs(${nodeId})`);
-    return [];
+export const fetchBlockLogs = async ({ runId, nodeId, limit = 100 }: FetchBlockLogsOptions): Promise<LogEntry[]> => {
+    if (!runId) throw new Error('Run ID is required');
+    if (!nodeId) throw new Error('Node ID is required');
+
+    _log(`> fetchBlockLogs(${runId}, ${nodeId})`, { limit });
+    const response = await api.get<TraceListResponse>(`/runs/${runId}/nodes/${nodeId}/traces`, {
+        params: { limit },
+    });
+
+    return response.data.items.map(trace => ({
+        id: trace.traceId,
+        timestamp: trace.occurredAt,
+        type: trace.traceType,
+        level: traceLevelToLogLevel(trace.traceType),
+        message: formatTraceMessage(trace),
+    }));
 };
 
 export const createPacket = (value: unknown, type: 'text' | 'image' | 'number'): DataPacket => ({

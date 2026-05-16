@@ -114,4 +114,40 @@ describe('hyperframes motion directions', () => {
         expect(html).toContain('대전 오월드에서 탈출');
         expect(html).not.toContain('chapter-board');
     });
+
+    it('does not duplicate full narration as body copy when timed subtitles are present', () => {
+        const narration = '야, 이 소식 진짜 반갑다. 무한도전 팬이면 바로 감 오지 않나?';
+        const html = buildLongformHyperframesHtml(
+            {
+                scenes: [
+                    {
+                        sceneId: 'scene-1',
+                        sceneNumber: 1,
+                        headline: '왜 지금 다시 무한도전인가',
+                        narration,
+                        caption: narration,
+                        visualType: 'event-timeline',
+                        visualData: {
+                            title: '무한도전 감성이 다시 켜진 순간',
+                            items: ['유재석 진행 프로그램', '박명수 출연', '정준하 출연', '팬 반응 재점화'],
+                        },
+                    },
+                ],
+                subtitleCues: [{ sceneNumber: 1, text: narration, startSec: 0, endSec: 4 }],
+                motionCues: [{ sceneNumber: 1, type: 'reveal' }],
+                audioUrl: 'file://narration.mp3',
+                audioDurationSec: 4,
+                outputWidth: 2560,
+                outputHeight: 1440,
+            },
+            {
+                narrationSrc: './assets/narration.mp3',
+                gsapSrc: './assets/gsap.min.js',
+            }
+        );
+
+        expect(html).not.toContain('class="caption"');
+        expect(html.split(narration).length - 1).toBe(1);
+        expect(html).toContain('팬 반응 재점화');
+    });
 });

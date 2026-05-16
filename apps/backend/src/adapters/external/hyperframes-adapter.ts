@@ -169,13 +169,6 @@ export function buildLongformHyperframesHtml(
         font-weight: 950;
         letter-spacing: 0;
       }
-      .caption {
-        margin-top: 34px;
-        font-size: 38px;
-        line-height: 1.42;
-        color: rgba(255, 255, 255, 0.86);
-        font-weight: 750;
-      }
       .visual {
         min-height: 660px;
         border-radius: 42px;
@@ -320,7 +313,6 @@ function renderScene(scene: ReturnType<typeof buildSceneTimeline>[number]): stri
         <div>
           <div class="eyebrow">${escapeHtml(scene.kicker)}</div>
           <div class="headline">${escapeHtml(scene.title)}</div>
-          <div class="caption">${escapeHtml(scene.caption)}</div>
         </div>
         ${renderVisualPanel(scene)}
       </section>`;
@@ -472,12 +464,11 @@ function buildSceneTimeline(request: HyperframesRenderRequest, durationSec: numb
             durationSec: roundMillis(sceneDurationSec),
             kicker: `Chapter ${index + 1}`,
             title: normalizeText(scene.headline ?? scene.title) || `장면 ${index + 1}`,
-            caption:
-                normalizeText(cue?.text ?? scene.narration ?? scene.caption) || '핵심 내용을 시각적으로 정리합니다.',
+            caption: normalizeText(cue?.text ?? scene.narration ?? scene.caption),
             visualType: normalizeVisualType(scene.visualType ?? scene.layout),
             visualData: normalizeVisualData(scene),
             visualText:
-                normalizeText(scene.visualText ?? scene.objects?.[0]?.text ?? scene.subtitleDraft) ||
+                normalizeText(scene.visualText ?? scene.objects?.[0]?.text) ||
                 '자료, 비교, 타임라인을 한 화면에서 이해하게 구성합니다.',
             motionTypes,
             primaryMotion: primaryMotionType(motionTypes),
@@ -512,9 +503,7 @@ function normalizeVisualData(scene: HyperframesScene): Record<string, unknown> {
     const visualType = normalizeVisualType(scene.visualType ?? scene.layout);
     const title = normalizeText(explicit.title) || normalizeText(scene.headline ?? scene.title) || '핵심 장면';
     const objectTexts = (scene.objects ?? []).map(object => normalizeText(object.text)).filter(Boolean);
-    const fallbackItems = objectTexts.length
-        ? objectTexts
-        : [normalizeText(scene.visualText ?? scene.caption) || title];
+    const fallbackItems = objectTexts.length ? objectTexts : [normalizeText(scene.visualText) || title];
 
     if (Object.keys(explicit).length > 0) return { ...explicit, title };
     if (visualType === 'event-timeline') return { title, items: fallbackItems.slice(0, 5) };

@@ -74,6 +74,8 @@ interface WorkflowCanvasProps {
     initialData?: WorkflowState;
     /** Flow ID for syncing node changes to backend */
     flowId?: string | null;
+    /** Current or latest run ID for node execution logs */
+    activeRunId?: string | null;
     onNodeSelect?: (nodeId: string | null) => void;
     onChange?: () => void;
     /** Called when user clicks "Add Node" from empty state */
@@ -203,6 +205,7 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
             readOnly,
             initialData,
             flowId,
+            activeRunId,
             onNodeSelect,
             onChange,
             onOpenLibrary,
@@ -2783,7 +2786,14 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                         </div>
                     )}
 
-                    {logViewerNodeId && <LogModal nodeId={logViewerNodeId} onClose={() => setLogViewerNodeId(null)} />}
+                    {logViewerNodeId && (
+                        <LogModal
+                            nodeId={logViewerNodeId}
+                            runId={activeRunId}
+                            flowId={flowId}
+                            onClose={() => setLogViewerNodeId(null)}
+                        />
+                    )}
 
                     {isCustomNode(detailNode) ? (
                         <NodeConfigPanel
