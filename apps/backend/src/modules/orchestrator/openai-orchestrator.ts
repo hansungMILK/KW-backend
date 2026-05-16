@@ -15,10 +15,12 @@ import {
     estimateGptImage2CostUsd,
     roundUsd,
 } from '../image-generation/image-style';
+import { DEFAULT_WORKFLOW_PACK_REGISTRY } from '../workflow-packs';
 
 import type { AllowedBlockType, ClaudeProposalOutput } from './response-parser';
 import type { Orchestrator, ProposalResult } from './types';
 import type { ContentProfilePreferences } from '../content-profile/content-profile';
+import type { WorkflowRecipeManifest } from '../workflow-packs';
 
 const COST_ESTIMATES: Record<AllowedBlockType, number> = {
     'input-text': 0,
@@ -83,6 +85,29 @@ export const openaiOrchestrator: Orchestrator = {
         const startMs = Date.now();
 
         try {
+            const deterministicGenericWorkflow = buildDeterministicGenericWorkflow(userMessage);
+            if (deterministicGenericWorkflow) {
+                const contentProfile = buildContentProfilePreferences({
+                    userMessage,
+                    outputType: deterministicGenericWorkflow.plan.outputType,
+                    hasMediaImage: deterministicGenericWorkflow.blocks.some(block => block.type === 'media-image'),
+                    hasMediaVideo: deterministicGenericWorkflow.blocks.some(block => block.type === 'media-video'),
+                });
+                const proposal = buildProposalResult(deterministicGenericWorkflow, userMessage, contentProfile);
+                await traceService.record(flowId, null, 'TOOL_RESULT', 'Deterministic generic proposal generated', {
+                    promptVersion: PROMPT_VERSION,
+                    blockCount: proposal.proposedNodes.length,
+                    edgeCount: proposal.proposedEdges.length,
+                    estimatedCost: proposal.estimatedCost.total,
+                    contentProfileId: contentProfile.contentProfileId,
+                    scriptToneId: contentProfile.scriptToneId,
+                    reviewMode: contentProfile.reviewMode,
+                    plan: deterministicGenericWorkflow.plan,
+                    latencyMs: Date.now() - startMs,
+                });
+                return proposal;
+            }
+
             const deterministicContentProfile = enforceLongformGateAProfile(
                 buildContentProfilePreferences({
                     userMessage,
@@ -213,6 +238,117 @@ function buildFallbackProposal(errorMessage: string): ProposalResult {
         approvalRequired: false,
         assistantMessage: errorMessage,
     };
+}
+
+function buildDeterministicGenericWorkflow(userMessage: string): ClaudeProposalOutput | null {
+    const normalized = normalizeRequestText(userMessage);
+    const hasUrl = /https?:\/\/[^\s"'<>]+/i.test(userMessage);
+    const wantsVideo =
+        /쇼츠|shorts|릴스|reels|틱톡|tiktok|롱폼|longform|긴영상|영상|비디오|video|mp4|유튜브|youtube/.test(normalized);
+    const wantsImage = /이미지|그림|사진|일러스트|삽화|썸네일|image|picture|photo|illustration|thumbnail/.test(
+        normalized
+    );
+    const wantsTextWriting =
+        /블로그|글|본문|문서|아티클|포스트|설명문|요약문|blog|article|post|document|write/.test(normalized) ||
+        (hasUrl && /설명|요약|정리|분석|해설|읽어|explain|summarize|analyze|brief/.test(normalized));
+
+    if (wantsVideo) return null;
+
+    if (wantsImage && !wantsTextWriting) {
+        return buildWorkflowFromRecipe('image.single.v1', userMessage, {
+            summary: '요청한 이미지를 만들기 위해 프롬프트를 정리한 뒤 단일 이미지를 생성합니다.',
+            blockConfigOverrides: {
+                content: {
+                    topic: userMessage.trim() || '이미지 생성',
+                    scenes: 1,
+                },
+                'media-image': {
+                    count: 1,
+                },
+            },
+        });
+    }
+
+    if (wantsTextWriting) {
+        return buildWorkflowFromRecipe(hasUrl ? 'text.url-explainer.v1' : 'text.blog.v1', userMessage, {
+            summary: hasUrl
+                ? 'URL 원문을 수집한 뒤 블로그나 설명문으로 읽기 좋은 글을 생성합니다.'
+                : '요청한 주제로 블로그나 문서에 바로 쓸 수 있는 글을 생성합니다.',
+            blockConfigOverrides: hasUrl
+                ? {
+                      search: { query: userMessage.trim() || 'URL 설명' },
+                      content: { topic: userMessage.trim() || '글 작성' },
+                  }
+                : {
+                      content: { topic: userMessage.trim() || '글 작성' },
+                  },
+        });
+    }
+
+    return null;
+}
+
+function buildWorkflowFromRecipe(
+    recipeId: string,
+    userMessage: string,
+    options: {
+        summary: string;
+        blockConfigOverrides?: Record<string, Record<string, unknown>>;
+    }
+): ClaudeProposalOutput {
+    const recipe = DEFAULT_WORKFLOW_PACK_REGISTRY.getRecipe(recipeId);
+    if (!recipe) {
+        throw new Error(`Missing workflow recipe: ${recipeId}`);
+    }
+    const blocks = recipe.defaultBlocks.map(block => ({
+        type: block.blockType as AllowedBlockType,
+        label: block.label,
+        config: {
+            ...block.config,
+            ...(options.blockConfigOverrides?.[block.blockType] ?? {}),
+        },
+    }));
+
+    return {
+        plan: {
+            goal: buildRecipeGoal(recipe, userMessage),
+            outputType: recipe.outputType,
+            planType: 'pipeline',
+            requiredCapabilities: recipe.requiredCapabilities,
+            selectedBlocks: recipe.defaultBlocks.map(block => ({
+                blockType: block.blockType as AllowedBlockType,
+                reason: `${recipe.displayName} 레시피에 필요한 ${block.label} 단계`,
+            })),
+            rejectedBlocks: buildGenericRejectedBlocks(recipe),
+            assumptions: [recipe.description],
+        },
+        blocks,
+        edges: recipe.defaultEdges,
+        estimatedCostUsd: recipe.costPolicy?.estimatedCostUsd ?? 0,
+        summary: options.summary,
+    };
+}
+
+function buildRecipeGoal(recipe: WorkflowRecipeManifest, userMessage: string): string {
+    const topic = userMessage.trim();
+    if (topic) return `${topic} 요청을 ${recipe.displayName} 레시피로 처리한다`;
+    return recipe.description;
+}
+
+function buildGenericRejectedBlocks(recipe: WorkflowRecipeManifest): ClaudeProposalOutput['plan']['rejectedBlocks'] {
+    const selected = new Set(recipe.defaultBlocks.map(block => block.blockType));
+    const candidates: Array<{ blockType: AllowedBlockType; reason: string }> = [
+        { blockType: 'search', reason: '자료 수집이 필요하지 않은 요청이면 제외한다' },
+        { blockType: 'media-image', reason: '이미지 산출물이 아니면 제외한다' },
+        { blockType: 'media-tts', reason: '음성 산출물이 아니면 제외한다' },
+        { blockType: 'media-video', reason: '영상 산출물이 아니면 제외한다' },
+        { blockType: 'integration', reason: '배포 메타데이터가 필요하지 않으면 제외한다' },
+    ];
+    return candidates.filter(candidate => !selected.has(candidate.blockType));
+}
+
+function normalizeRequestText(text: string): string {
+    return text.toLowerCase().replace(/\s+/g, '');
 }
 
 function buildAiLongformContentProfile(

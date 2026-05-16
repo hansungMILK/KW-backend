@@ -1,4 +1,4 @@
-import { ORCHESTRATOR_BLOCK_CATALOG } from './block-catalog';
+import { DEFAULT_WORKFLOW_PACK_REGISTRY } from '../workflow-packs';
 
 import type { ClaudeProposalOutput } from './response-parser';
 
@@ -25,7 +25,7 @@ export function compileWorkflowPlan(data: ClaudeProposalOutput): CompileWorkflow
     }
 
     for (const block of data.blocks) {
-        const catalog = ORCHESTRATOR_BLOCK_CATALOG[block.type];
+        const catalog = DEFAULT_WORKFLOW_PACK_REGISTRY.orchestratorBlocks[block.type];
         if (!catalog) return fail(`unknown block type: ${block.type}`);
 
         if (block.type === 'media-video' && !VIDEO_OUTPUT_TYPES.has(data.plan.outputType)) {

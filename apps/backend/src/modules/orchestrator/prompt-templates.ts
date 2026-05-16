@@ -3,7 +3,7 @@
  * Versioned for trace/audit purposes.
  */
 
-import { getBlockCatalogPrompt } from './block-catalog';
+import { getWorkflowPackCatalogPrompt } from '../workflow-packs';
 
 export const PROMPT_VERSION = 'v3.0.0';
 
@@ -13,7 +13,7 @@ The product is not a Shorts-only tool. Shorts/video generation is one possible r
 
 ## Available Block Types
 
-${getBlockCatalogPrompt()}
+${getWorkflowPackCatalogPrompt()}
 
 ## Planning Rules
 - First decide the user's real requested outputType: text, data, image, audio, video, automation, or mixed.

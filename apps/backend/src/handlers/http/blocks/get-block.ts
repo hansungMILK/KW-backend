@@ -1,4 +1,5 @@
-import { findBlockByType, toSpecBlockDetail } from './_catalog';
+import { toSpecBlockDetail } from './_catalog';
+import { DEFAULT_WORKFLOW_PACK_REGISTRY } from '../../../modules/workflow-packs';
 import { getPathParam, withMiddleware } from '../../../utils/middleware';
 import { badRequest, notFound, ok } from '../../../utils/response';
 
@@ -13,7 +14,7 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
     const blockType = getPathParam(event, 'blockType');
     if (!blockType) return badRequest('Missing blockType');
 
-    const block = findBlockByType(blockType);
+    const block = DEFAULT_WORKFLOW_PACK_REGISTRY.getBlock(blockType)?.http;
     if (!block) return notFound(`Block ${blockType} not found`, 'BLOCK_NOT_FOUND');
 
     return ok(toSpecBlockDetail(block));

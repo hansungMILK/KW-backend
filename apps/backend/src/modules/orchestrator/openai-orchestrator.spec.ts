@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { openaiOrchestrator } from './openai-orchestrator';
 import { openaiAdapter } from '../../adapters/ai/openai-adapter';
+import { DEFAULT_WORKFLOW_PACK_REGISTRY } from '../workflow-packs';
 
 vi.mock('../../config/env', () => ({
     env: {
@@ -238,5 +239,70 @@ describe('openaiOrchestrator longform Gate A', () => {
                 systemPrompt: expect.stringContaining('Do not return executable workflow nodes'),
             })
         );
+    });
+
+    it('uses a standalone image recipe for explicit image generation requests without adding video blocks', async () => {
+        const proposal = await openaiOrchestrator.generateProposal('flow-image', '바나나가 춤추는 이미지 생성해줘');
+        const recipe = DEFAULT_WORKFLOW_PACK_REGISTRY.getRecipe('image.single.v1');
+
+        expect(proposal.proposedNodes.map(node => node.blockType)).toEqual(
+            recipe?.defaultBlocks.map(block => block.blockType)
+        );
+        expect(proposal.proposedEdges).toHaveLength(1);
+        expect(proposal.proposedNodes).toContainEqual(
+            expect.objectContaining({
+                blockType: 'media-image',
+                config: expect.objectContaining({
+                    count: 1,
+                    imageModel: 'gpt-image-2',
+                }),
+            })
+        );
+        expect(proposal.proposedNodes.map(node => node.blockType)).not.toContain('media-video');
+        expect(proposal.metadata?.['contentProfile']).toEqual(
+            expect.objectContaining({ contentProfileId: 'image.single.v1' })
+        );
+        expect(openaiAdapter.chatJson).not.toHaveBeenCalled();
+    });
+
+    it('uses a text writing recipe for blog article requests without adding media blocks', async () => {
+        const proposal = await openaiOrchestrator.generateProposal(
+            'flow-blog',
+            '블로그에 쓸 글 생성해줘. 주제는 토트넘 강등 위기'
+        );
+        const recipe = DEFAULT_WORKFLOW_PACK_REGISTRY.getRecipe('text.blog.v1');
+
+        expect(proposal.proposedNodes.map(node => node.blockType)).toEqual(
+            recipe?.defaultBlocks.map(block => block.blockType)
+        );
+        expect(proposal.proposedNodes.map(node => node.blockType)).not.toContain('media-image');
+        expect(proposal.proposedNodes.map(node => node.blockType)).not.toContain('media-tts');
+        expect(proposal.proposedNodes.map(node => node.blockType)).not.toContain('media-video');
+        expect(proposal.metadata?.['contentProfile']).toEqual(
+            expect.objectContaining({ contentProfileId: 'text.explainer.v1' })
+        );
+        expect(openaiAdapter.chatJson).not.toHaveBeenCalled();
+    });
+
+    it('uses URL collection plus text writing for URL explanation requests without video blocks', async () => {
+        const proposal = await openaiOrchestrator.generateProposal(
+            'flow-url-text',
+            '이 링크 내용 설명해줘 https://example.com/article'
+        );
+        const recipe = DEFAULT_WORKFLOW_PACK_REGISTRY.getRecipe('text.url-explainer.v1');
+
+        expect(proposal.proposedNodes.map(node => node.blockType)).toEqual(
+            recipe?.defaultBlocks.map(block => block.blockType)
+        );
+        expect(proposal.proposedNodes[0]).toEqual(
+            expect.objectContaining({
+                blockType: 'search',
+                config: expect.objectContaining({
+                    query: '이 링크 내용 설명해줘 https://example.com/article',
+                }),
+            })
+        );
+        expect(proposal.proposedNodes.map(node => node.blockType)).not.toContain('media-video');
+        expect(openaiAdapter.chatJson).not.toHaveBeenCalled();
     });
 });
