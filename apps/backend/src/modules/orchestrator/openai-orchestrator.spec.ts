@@ -284,6 +284,84 @@ describe('openaiOrchestrator longform Gate A', () => {
         expect(openaiAdapter.chatJson).not.toHaveBeenCalled();
     });
 
+    it('prioritizes explicit writing intent over incidental video words', async () => {
+        const proposal = await openaiOrchestrator.generateProposal(
+            'flow-blog-video-copy',
+            '주술회전 홍보 하는 블로그 영상 글 쓸려고 하는데 글 만들어 줘'
+        );
+        const recipe = DEFAULT_WORKFLOW_PACK_REGISTRY.getRecipe('text.blog.v1');
+
+        expect(proposal.proposedNodes.map(node => node.blockType)).toEqual(
+            recipe?.defaultBlocks.map(block => block.blockType)
+        );
+        expect(proposal.proposedNodes.map(node => node.blockType)).not.toContain('media-image');
+        expect(proposal.proposedNodes.map(node => node.blockType)).not.toContain('media-tts');
+        expect(proposal.proposedNodes.map(node => node.blockType)).not.toContain('media-video');
+        expect(proposal.metadata?.['contentProfile']).toEqual(
+            expect.objectContaining({ contentProfileId: 'text.explainer.v1' })
+        );
+        expect(openaiAdapter.chatJson).not.toHaveBeenCalled();
+    });
+
+    it('keeps platform or video-topic words as text when the requested output is writing', async () => {
+        const proposal = await openaiOrchestrator.generateProposal('flow-youtube-copy', '주술회전 유튜브 홍보글 써줘');
+        const recipe = DEFAULT_WORKFLOW_PACK_REGISTRY.getRecipe('text.blog.v1');
+
+        expect(proposal.proposedNodes.map(node => node.blockType)).toEqual(
+            recipe?.defaultBlocks.map(block => block.blockType)
+        );
+        expect(proposal.proposedNodes.map(node => node.blockType)).not.toContain('media-image');
+        expect(proposal.proposedNodes.map(node => node.blockType)).not.toContain('media-tts');
+        expect(proposal.proposedNodes.map(node => node.blockType)).not.toContain('media-video');
+        expect(openaiAdapter.chatJson).not.toHaveBeenCalled();
+    });
+
+    it('treats standalone script writing as text unless a production recipe is requested', async () => {
+        const proposal = await openaiOrchestrator.generateProposal(
+            'flow-script-copy',
+            '주술회전 회절옥절 소개 대본 써줘'
+        );
+        const recipe = DEFAULT_WORKFLOW_PACK_REGISTRY.getRecipe('text.blog.v1');
+
+        expect(proposal.proposedNodes.map(node => node.blockType)).toEqual(
+            recipe?.defaultBlocks.map(block => block.blockType)
+        );
+        expect(proposal.proposedNodes.map(node => node.blockType)).not.toContain('media-video');
+        expect(openaiAdapter.chatJson).not.toHaveBeenCalled();
+    });
+
+    it('keeps image text composition requests on the image recipe instead of treating 글자 as blog writing', async () => {
+        const proposal = await openaiOrchestrator.generateProposal(
+            'flow-image-text',
+            '주술회전 이미지에 큰 글자 넣어서 만들어줘'
+        );
+        const recipe = DEFAULT_WORKFLOW_PACK_REGISTRY.getRecipe('image.single.v1');
+
+        expect(proposal.proposedNodes.map(node => node.blockType)).toEqual(
+            recipe?.defaultBlocks.map(block => block.blockType)
+        );
+        expect(proposal.proposedNodes.map(node => node.blockType)).toContain('media-image');
+        expect(proposal.proposedNodes.map(node => node.blockType)).not.toContain('media-video');
+        expect(openaiAdapter.chatJson).not.toHaveBeenCalled();
+    });
+
+    it('does not downgrade explicit shortform production requests to text when writing words are present', async () => {
+        const proposal = await openaiOrchestrator.generateProposal(
+            'flow-shorts-writing',
+            '주술회전 회절옥절 쇼츠 대본 글 만들어줘'
+        );
+        const recipe = DEFAULT_WORKFLOW_PACK_REGISTRY.getRecipe('shorts.info.v1');
+
+        expect(proposal.proposedNodes.map(node => node.blockType)).toEqual(
+            recipe?.defaultBlocks.map(block => block.blockType)
+        );
+        expect(proposal.proposedNodes.map(node => node.blockType)).toContain('integration');
+        expect(proposal.metadata?.['contentProfile']).toEqual(
+            expect.objectContaining({ contentProfileId: 'shorts.info.v1' })
+        );
+        expect(openaiAdapter.chatJson).not.toHaveBeenCalled();
+    });
+
     it('uses URL collection plus text writing for URL explanation requests without video blocks', async () => {
         const proposal = await openaiOrchestrator.generateProposal(
             'flow-url-text',

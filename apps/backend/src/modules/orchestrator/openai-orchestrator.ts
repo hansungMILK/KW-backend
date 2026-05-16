@@ -241,20 +241,40 @@ function buildFallbackProposal(errorMessage: string): ProposalResult {
 }
 
 function buildDeterministicGenericWorkflow(userMessage: string): ClaudeProposalOutput | null {
-    const normalized = normalizeRequestText(userMessage);
-    const hasUrl = /https?:\/\/[^\s"'<>]+/i.test(userMessage);
-    const wantsVideo =
-        /쇼츠|shorts|릴스|reels|틱톡|tiktok|롱폼|longform|긴영상|영상|비디오|video|mp4|유튜브|youtube/.test(normalized);
-    const wantsImage = /이미지|그림|사진|일러스트|삽화|썸네일|image|picture|photo|illustration|thumbnail/.test(
-        normalized
-    );
-    const wantsTextWriting =
-        /블로그|글|본문|문서|아티클|포스트|설명문|요약문|blog|article|post|document|write/.test(normalized) ||
-        (hasUrl && /설명|요약|정리|분석|해설|읽어|explain|summarize|analyze|brief/.test(normalized));
+    const intent = classifyGenericRequestIntent(userMessage);
 
-    if (wantsVideo) return null;
+    if (intent.wantsLongformRecipe) return null;
 
-    if (wantsImage && !wantsTextWriting) {
+    if (intent.wantsShortformRecipe) {
+        return buildWorkflowFromRecipe('shorts.info.v1', userMessage, {
+            summary:
+                '요청한 주제를 자료 수집, 대본 작성, 장면 구성, 이미지와 음성 생성, 영상 합성, 메타데이터 생성까지 이어지는 쇼츠 제작 워크플로우로 처리합니다.',
+            blockConfigOverrides: {
+                search: { query: userMessage.trim() || '쇼츠 자료 수집' },
+                content: { topic: userMessage.trim() || '쇼츠 대본 생성' },
+            },
+        });
+    }
+
+    if (intent.wantsTextWriting) {
+        return buildWorkflowFromRecipe(intent.hasUrl ? 'text.url-explainer.v1' : 'text.blog.v1', userMessage, {
+            summary: intent.hasUrl
+                ? 'URL 원문을 수집한 뒤 블로그나 설명문으로 읽기 좋은 글을 생성합니다.'
+                : '요청한 주제로 블로그나 문서에 바로 쓸 수 있는 글을 생성합니다.',
+            blockConfigOverrides: intent.hasUrl
+                ? {
+                      search: { query: userMessage.trim() || 'URL 설명' },
+                      content: { topic: userMessage.trim() || '글 작성' },
+                  }
+                : {
+                      content: { topic: userMessage.trim() || '글 작성' },
+                  },
+        });
+    }
+
+    if (intent.wantsVideoOutput) return null;
+
+    if (intent.wantsImage) {
         return buildWorkflowFromRecipe('image.single.v1', userMessage, {
             summary: '요청한 이미지를 만들기 위해 프롬프트를 정리한 뒤 단일 이미지를 생성합니다.',
             blockConfigOverrides: {
@@ -269,23 +289,48 @@ function buildDeterministicGenericWorkflow(userMessage: string): ClaudeProposalO
         });
     }
 
-    if (wantsTextWriting) {
-        return buildWorkflowFromRecipe(hasUrl ? 'text.url-explainer.v1' : 'text.blog.v1', userMessage, {
-            summary: hasUrl
-                ? 'URL 원문을 수집한 뒤 블로그나 설명문으로 읽기 좋은 글을 생성합니다.'
-                : '요청한 주제로 블로그나 문서에 바로 쓸 수 있는 글을 생성합니다.',
-            blockConfigOverrides: hasUrl
-                ? {
-                      search: { query: userMessage.trim() || 'URL 설명' },
-                      content: { topic: userMessage.trim() || '글 작성' },
-                  }
-                : {
-                      content: { topic: userMessage.trim() || '글 작성' },
-                  },
-        });
-    }
-
     return null;
+}
+
+function classifyGenericRequestIntent(userMessage: string): {
+    hasUrl: boolean;
+    wantsImage: boolean;
+    wantsLongformRecipe: boolean;
+    wantsShortformRecipe: boolean;
+    wantsTextWriting: boolean;
+    wantsVideoOutput: boolean;
+} {
+    const normalized = normalizeRequestText(userMessage);
+    const hasUrl = /https?:\/\/[^\s"'<>]+/i.test(userMessage);
+    const wantsShortformRecipe = /쇼츠|shorts|릴스|reels|틱톡|tiktok/.test(normalized);
+    const wantsLongformRecipe = /롱폼|longform|긴영상/.test(normalized);
+    const mentionsVideoSurface = /영상|비디오|video|mp4|유튜브|youtube/.test(normalized);
+    const asksToProduce = /만들|제작|생성|합성|편집|렌더|produce|create|make|render|compose/.test(normalized);
+    const wantsVideoOutput = wantsShortformRecipe || wantsLongformRecipe || (mentionsVideoSurface && asksToProduce);
+    const wantsImage = /이미지|그림|사진|일러스트|삽화|썸네일|image|picture|photo|illustration|thumbnail/.test(
+        normalized
+    );
+    const wantsImageTextComposition = wantsImage && /글자|문구|텍스트|자막|caption|text/.test(normalized);
+    const mentionsTextDocument =
+        /블로그|홍보글|소개글|대본|본문|문서|아티클|포스트|설명문|요약문|blog|article|post|document|script|copy|write/.test(
+            normalized
+        );
+    const asksForWriting = /글.{0,8}(써|작성|만들|생성|쓰|쓸|정리)|(?:써|작성|만들|생성|write).{0,8}글/.test(
+        normalized
+    );
+    const wantsTextWriting =
+        mentionsTextDocument ||
+        (asksForWriting && !wantsImageTextComposition) ||
+        (hasUrl && /설명|요약|정리|분석|해설|읽어|explain|summarize|analyze|brief/.test(normalized));
+
+    return {
+        hasUrl,
+        wantsImage,
+        wantsLongformRecipe,
+        wantsShortformRecipe,
+        wantsTextWriting,
+        wantsVideoOutput,
+    };
 }
 
 function buildWorkflowFromRecipe(
