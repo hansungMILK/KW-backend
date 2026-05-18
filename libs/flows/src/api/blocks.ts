@@ -5,7 +5,6 @@ import { EXECUTE_FUNCTIONS } from './execute-functions';
 import type { BlockDefinitionWithFrontend, BlockSpec, BlockStereo, ConfigField } from '../types';
 
 const _log = console.log.bind(console, '[blocks-api]');
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /** @deprecated Fallback for servers without isFrontend flag. Remove when server is updated. */
 const LEGACY_BACKEND_PROCESSOR_TYPES = [
@@ -29,13 +28,8 @@ interface BlockSpecListResponse {
         inputSchema?: unknown[];
         outputSchema?: unknown[];
         estimatedCost?: number;
+        configFields?: unknown[];
     }>;
-}
-
-type BlockSpecListItem = BlockSpecListResponse['items'][number];
-
-interface BlockSpecDetailResponse extends BlockSpecListItem {
-    configFields?: unknown[];
 }
 
 const isConfigField = (input: unknown): input is ConfigField =>
@@ -60,16 +54,6 @@ const buildDefaultConfig = (fields: ConfigField[]): Record<string, unknown> =>
         else if (legacyDefault !== undefined) acc[field.key] = legacyDefault;
         return acc;
     }, {});
-
-const fetchBlockDetail = async (blockType: string): Promise<BlockSpecDetailResponse | null> => {
-    try {
-        const response = await api.get<BlockSpecDetailResponse>(`/blocks/${encodeURIComponent(blockType)}`);
-        return response.data;
-    } catch (error) {
-        console.warn(`[blocks-api] Failed to fetch block detail for ${blockType}; using summary only`, error);
-        return null;
-    }
-};
 
 /**
  * Check if a block definition requires backend processing
@@ -98,7 +82,6 @@ export const requiresBackendProcessing = (blockDef: BlockDefinitionWithFrontend)
  */
 export const listBlocks = async (): Promise<BlockDefinitionWithFrontend[]> => {
     _log('> listBlocks()');
-    await delay(500);
 
     const response = await withRetry(() => api.get<BlockSpecListResponse>('/blocks'), 3, 'listBlocks');
 
@@ -107,11 +90,8 @@ export const listBlocks = async (): Promise<BlockDefinitionWithFrontend[]> => {
         throw new Error('No block definitions returned from server');
     }
 
-    const detailResults = await Promise.all(rawList.map(item => fetchBlockDetail(item.blockType)));
-
-    const list = rawList.map((item, index): BlockDefinitionWithFrontend => {
-        const detail = detailResults[index];
-        const configFields = normalizeConfigFields(detail?.configFields);
+    const list = rawList.map((item): BlockDefinitionWithFrontend => {
+        const configFields = normalizeConfigFields(item.configFields);
         const isFrontend = FRONTEND_BLOCK_TYPES.includes(item.blockType as (typeof FRONTEND_BLOCK_TYPES)[number]);
         const definition: BlockDefinitionWithFrontend = {
             id: item.blockType,

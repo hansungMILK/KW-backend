@@ -47,7 +47,7 @@ export type BlockListResponse = z.infer<typeof BlockListResponseSchema>;
 
 // ============================================================================
 // GET /blocks  (spec)
-// Returns: { items: [{ blockType, name, description, category, inputSchema, outputSchema, estimatedCost }] }
+// Returns: { items: [{ blockType, name, description, category, inputSchema, outputSchema, estimatedCost, configFields }] }
 // ============================================================================
 
 export const BlockSpecSummarySchema = z.object({
@@ -58,6 +58,7 @@ export const BlockSpecSummarySchema = z.object({
     inputSchema: z.array(z.unknown()),
     outputSchema: z.array(z.unknown()),
     estimatedCost: z.number(),
+    configFields: z.array(z.unknown()).optional(),
 });
 
 export const BlockSpecListResponseSchema = z.object({
