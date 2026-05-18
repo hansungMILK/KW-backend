@@ -221,6 +221,13 @@ describe('mediaImageBlock', () => {
 
         expect(Date.now() - startedAt).toBeLessThan(1000);
         expect(imageAdapter.generate).toHaveBeenCalledTimes(2);
+
+        const failedSceneNumbers = traceRecord.mock.calls
+            .map(call => call[4] as { event?: string; sceneNumber?: number } | undefined)
+            .filter(event => event?.event === 'scene.failed')
+            .map(event => event?.sceneNumber);
+
+        expect(failedSceneNumbers).toEqual([2]);
     });
 
     it('records structured batch and scene traces for successful image generation', async () => {
@@ -344,6 +351,7 @@ describe('mediaImageBlock', () => {
                 }),
             ])
         );
+        expect(events.filter(event => event.event === 'scene.failed').map(event => event.sceneNumber)).toEqual([2]);
         expect(deleteUploadedObject).toHaveBeenCalledWith(expect.stringMatching(/scene-001\.png$/));
     });
 

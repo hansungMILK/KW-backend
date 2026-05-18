@@ -125,6 +125,7 @@ export const mediaImageBlock: BlockExecutor = {
             narration: string;
             durationSec: number;
             prompt: string;
+            safetyRemediated?: boolean;
             visualText?: string;
             sourceRefs?: unknown[];
             sourceLabel?: string;
@@ -165,6 +166,7 @@ export const mediaImageBlock: BlockExecutor = {
             width: number;
             height: number;
             prompt: string;
+            safetyRemediated?: boolean;
             caption?: string;
             narration?: string;
             durationSec?: number;
@@ -381,6 +383,7 @@ export const mediaImageBlock: BlockExecutor = {
                     width: generated.width,
                     height: generated.height,
                     prompt: scene.prompt,
+                    safetyRemediated: scene.safetyRemediated,
                     caption: scene.caption,
                     narration: scene.narration,
                     durationSec: scene.durationSec,
@@ -399,6 +402,7 @@ export const mediaImageBlock: BlockExecutor = {
                         width: generated.width,
                         height: generated.height,
                         prompt: scene.prompt,
+                        safetyRemediated: scene.safetyRemediated,
                         caption: scene.caption,
                         narration: scene.narration,
                         durationSec: scene.durationSec,
@@ -424,6 +428,9 @@ export const mediaImageBlock: BlockExecutor = {
                 if (isCancellationError(context, err)) {
                     throw new BlockCancelledError();
                 }
+                if (isBatchAbortError(err, scene.sceneNumber)) {
+                    throw abortReasonToError(err, 'media-image batch aborted');
+                }
 
                 const msg = err instanceof Error ? err.message : String(err);
                 const errorCode = classifyImageError(err);
@@ -448,6 +455,7 @@ export const mediaImageBlock: BlockExecutor = {
             parentSignal: AbortSignal
         ): Promise<{ image: ImageResult; asset: NonNullable<BlockExecutorResult['assets']>[number] }> => {
             let lastError: unknown;
+            let effectiveScene = scene;
 
             for (let attempt = 1; attempt <= IMAGE_SCENE_MAX_ATTEMPTS; attempt += 1) {
                 await throwIfCancelled(context);
@@ -457,7 +465,7 @@ export const mediaImageBlock: BlockExecutor = {
                 activeSceneAttempts.set(scene.sceneNumber, attemptId);
                 const { controller, cleanup } = createLinkedAbortController(parentSignal);
                 const attemptStart = Date.now();
-                const attemptPromise = generateSceneImage(scene, attemptId, attempt, controller.signal);
+                const attemptPromise = generateSceneImage(effectiveScene, attemptId, attempt, controller.signal);
                 const timeoutMessage = `media-image scene ${scene.sceneNumber} timed out after ${Math.round(
                     IMAGE_SCENE_TIMEOUT_MS / 1000
                 )} seconds`;
@@ -488,6 +496,26 @@ export const mediaImageBlock: BlockExecutor = {
                             Date.now() - attemptStart,
                             err instanceof Error ? err.message : String(err)
                         );
+                    }
+
+                    if (attempt < IMAGE_SCENE_MAX_ATTEMPTS && isImageSafetyRejectionError(err)) {
+                        effectiveScene = {
+                            ...scene,
+                            prompt: buildSafetyRemediatedScenePrompt(scene, imageStyle.promptPrefix),
+                            safetyRemediated: true,
+                        };
+                        await recordImageTrace('scene.safety_rewrite.queued', 'STATUS', {
+                            sceneNumber: scene.sceneNumber,
+                            attempt: attempt + 1,
+                            previousAttempt: attempt,
+                            errorCode: 'IMAGE_SAFETY_REJECTED',
+                            remediation: 'safe_prompt_rewrite',
+                        });
+                        await context?.onProgress?.(
+                            25 + (completedScenes / totalScenes) * 60,
+                            `이미지 scene ${scene.sceneNumber} 안전 필터 감지, 안전한 장면으로 재생성 중`
+                        );
+                        continue;
                     }
 
                     const shouldRetry = isRetryableSceneImageError(err);
@@ -546,7 +574,11 @@ export const mediaImageBlock: BlockExecutor = {
                         try {
                             return await generateSceneImageWithRetries(scene, batchController.signal);
                         } catch (err) {
-                            if (!isCancellationError(context, err) && !batchController.signal.aborted) {
+                            if (
+                                !isCancellationError(context, err) &&
+                                !isImageSafetyRejectionError(err) &&
+                                !batchController.signal.aborted
+                            ) {
                                 batchController.abort(err instanceof Error ? err : new Error(String(err)));
                             }
                             throw err;
@@ -605,6 +637,7 @@ export const mediaImageBlock: BlockExecutor = {
             asset: NonNullable<BlockExecutorResult['assets']>[number];
         }> = [];
         const failureMessages: string[] = [];
+        const failureCodes: string[] = [];
 
         settledResults.forEach((result, index) => {
             if (result.status === 'fulfilled') {
@@ -613,6 +646,7 @@ export const mediaImageBlock: BlockExecutor = {
                 throw new BlockCancelledError();
             } else {
                 failureMessages.push(`scene ${scenePrompts[index]?.sceneNumber ?? index + 1}: ${result.reason}`);
+                failureCodes.push(classifyImageError(result.reason));
             }
         });
 
@@ -620,12 +654,14 @@ export const mediaImageBlock: BlockExecutor = {
             const error = new Error(
                 `media-image failed after ${generatedResults.length}/${totalScenes} scenes: ${failureMessages.join('; ')}`
             );
+            const errorCode = selectBatchFailureCode(failureCodes);
             await cleanupUploadedKeys();
             await recordImageTrace('batch.failed', 'ERROR', {
                 durationMs: Date.now() - start,
-                errorCode: 'IMAGE_PROVIDER_ERROR',
+                errorCode,
                 errorMessage: error.message,
                 generatedSceneCount: generatedResults.length,
+                failedSceneCount: failureMessages.length,
             });
             throw error;
         }
@@ -675,6 +711,12 @@ function isCancellationError(context: BlockExecutorContext | undefined, err: unk
     return err instanceof Error && /cancelled/i.test(err.message);
 }
 
+function isBatchAbortError(err: unknown, currentSceneNumber: number): boolean {
+    if (!(err instanceof Error)) return false;
+    const failedScene = err.message.match(/media-image scene (\d+) failed:/)?.[1];
+    return Boolean(failedScene && Number(failedScene) !== currentSceneNumber);
+}
+
 function throwIfAborted(signal: AbortSignal): void {
     if (!signal.aborted) return;
     throw abortReasonToError(signal.reason, 'media-image batch aborted');
@@ -700,6 +742,7 @@ function abortReasonToError(reason: unknown, fallback: string): Error {
 function classifyImageError(err: unknown): string {
     if (err instanceof BlockCancelledError) return 'RUN_CANCELLED';
     if (err instanceof Error) {
+        if (isImageSafetyRejectionError(err)) return 'IMAGE_SAFETY_REJECTED';
         if (err.name === 'TimeoutError' || /timed out|timeout/i.test(err.message)) return 'IMAGE_TIMEOUT';
         if (/provider request budget exceeded/i.test(err.message)) return 'IMAGE_PROVIDER_REQUEST_BUDGET_EXCEEDED';
         const status = err.message.match(/OpenAI image API error (\d+)/)?.[1];
@@ -708,6 +751,62 @@ function classifyImageError(err: unknown): string {
         if (/cancelled|aborted/i.test(err.message)) return 'RUN_CANCELLED';
     }
     return 'IMAGE_PROVIDER_ERROR';
+}
+
+function isImageSafetyRejectionError(err: unknown): boolean {
+    if (!(err instanceof Error)) return false;
+    return (
+        /OpenAI image API error 400/i.test(err.message) &&
+        /safety system|image_generation_user_error|rejected/i.test(err.message)
+    );
+}
+
+function buildSafetyRemediatedScenePrompt(
+    scene: {
+        caption: string;
+        narration: string;
+        visualText?: string;
+        sourceLabel?: string;
+    },
+    stylePrompt: string
+): string {
+    const sceneMeaning = compactImagePromptText(
+        [
+            scene.caption,
+            scene.visualText,
+            scene.narration,
+            scene.sourceLabel ? `Source context: ${scene.sourceLabel}` : undefined,
+        ]
+            .filter(Boolean)
+            .join(' '),
+        520
+    );
+
+    return [
+        'Create a safe substitute vertical 9:16 image for the same video beat.',
+        `Visual style: ${stylePrompt}.`,
+        'Keep the scene non-graphic, PG-rated, symbolic, and suitable for general audiences.',
+        'Use fictional anonymous characters, silhouettes, symbolic objects, abstract energy, charts, or environmental tension instead of direct harm.',
+        'Avoid graphic violence, blood, gore, injury, weapons impact, explicit threat, hate symbols, sexual content, minors in danger, real-person likeness, exact copyrighted character likeness, logos, watermarks, URLs, and final-video subtitle/title bands.',
+        'Preserve the narrative meaning and emotional tension without showing physical contact or harm.',
+        `Scene meaning: ${sceneMeaning || 'safe Korean shorts visual beat'}.`,
+    ].join(' ');
+}
+
+function compactImagePromptText(value: string | undefined, maxLength: number): string {
+    if (!value) return '';
+    const compact = value.replace(/\s+/g, ' ').trim();
+    if (compact.length <= maxLength) return compact;
+    return `${compact.slice(0, maxLength - 1).trim()}...`;
+}
+
+function selectBatchFailureCode(failureCodes: string[]): string {
+    if (failureCodes.length === 0) return 'IMAGE_PROVIDER_ERROR';
+    const unique = [...new Set(failureCodes)];
+    if (unique.length === 1) return unique[0];
+    if (unique.includes('IMAGE_TIMEOUT')) return 'IMAGE_TIMEOUT';
+    if (unique.includes('IMAGE_SAFETY_REJECTED')) return 'IMAGE_SAFETY_REJECTED';
+    return unique[0] ?? 'IMAGE_PROVIDER_ERROR';
 }
 
 function isRetryableSceneImageError(err: unknown): boolean {
