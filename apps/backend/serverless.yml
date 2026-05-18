@@ -678,9 +678,8 @@ functions:
     # ── Workers ──
     runWorker:
         handler: src/workers/run-worker.main
-        memorySize: 4096
+        memorySize: 3008
         timeout: 900
-        reservedConcurrency: 2
         layers:
             - !Ref FfmpegLambdaLayer
         events:
@@ -1042,10 +1041,10 @@ resources:
                 TargetKeyId: !Ref SettingsKmsKey
 
     Outputs:
-        HttpApiUrl:
+        AppHttpApiUrl:
             Description: HTTP API endpoint for this stage
             Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com'
-        WebSocketApiUrl:
+        AppWebSocketApiUrl:
             Description: WebSocket endpoint for this stage
             Value: !Sub 'wss://${WebsocketsApi}.execute-api.${AWS::Region}.amazonaws.com/${self:provider.stage}'
         AssetsBucketName:
