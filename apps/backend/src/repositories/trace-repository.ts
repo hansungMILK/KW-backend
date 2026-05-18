@@ -1,5 +1,6 @@
 import { PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 
+import { stripRetentionTtl, withRetentionTtl } from './retention';
 import { TableNames, USE_REAL_DYNAMO, getDocClient, memDb } from '../adapters/aws/dynamodb';
 
 import type { Trace } from '@flows/contracts';
@@ -27,7 +28,7 @@ export const traceRepo = {
             memDb.put(TABLE, trace.traceId, item);
             return;
         }
-        await getDocClient().send(new PutCommand({ TableName: TABLE, Item: item }));
+        await getDocClient().send(new PutCommand({ TableName: TABLE, Item: withRetentionTtl(item, trace.occurredAt) }));
     },
 
     async listByRun(
@@ -63,7 +64,9 @@ export const traceRepo = {
                 ...(exclusiveStartKey ? { ExclusiveStartKey: exclusiveStartKey } : {}),
             })
         );
-        const items = (result.Items || []) as Trace[];
+        const items = (result.Items || []).map(item =>
+            stripRetentionTtl(item as Record<string, unknown>)
+        ) as unknown as Trace[];
         const nextCursor = result.LastEvaluatedKey
             ? Buffer.from(JSON.stringify(result.LastEvaluatedKey)).toString('base64')
             : null;
@@ -110,7 +113,9 @@ export const traceRepo = {
                 ...(exclusiveStartKey ? { ExclusiveStartKey: exclusiveStartKey } : {}),
             })
         );
-        const items = (result.Items || []) as Trace[];
+        const items = (result.Items || []).map(item =>
+            stripRetentionTtl(item as Record<string, unknown>)
+        ) as unknown as Trace[];
         const nextCursor = result.LastEvaluatedKey
             ? Buffer.from(JSON.stringify(result.LastEvaluatedKey)).toString('base64')
             : null;

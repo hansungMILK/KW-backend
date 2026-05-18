@@ -8,8 +8,10 @@ provider:
     stage: ${opt:stage, 'local'}
     timeout: 30
     memorySize: 512
+    logRetentionInDays: 14
     environment:
         STAGE: ${self:provider.stage}
+        DATA_RETENTION_DAYS: ${env:DATA_RETENTION_DAYS, '90'}
         DYNAMODB_ENDPOINT: ${env:DYNAMODB_ENDPOINT, ''}
         FLOWS_TABLE: ${self:service}-flows-${self:provider.stage}
         CONNECTIONS_TABLE: ${self:service}-connections-${self:provider.stage}
@@ -678,6 +680,7 @@ functions:
         handler: src/workers/run-worker.main
         memorySize: 4096
         timeout: 900
+        reservedConcurrency: 2
         layers:
             - !Ref FfmpegLambdaLayer
         events:
@@ -739,6 +742,13 @@ resources:
                           AllowedOrigins: ${self:custom.corsAllowedOrigins.${self:provider.stage}, self:custom.corsAllowedOrigins.local}
                           AllowedHeaders: ['*']
                           MaxAge: 3000
+                LifecycleConfiguration:
+                    Rules:
+                        - Id: ExpireGeneratedAssetsAfter75Days
+                          Status: Enabled
+                          ExpirationInDays: 75
+                          AbortIncompleteMultipartUpload:
+                              DaysAfterInitiation: 1
 
         AssetsOriginAccessControl:
             Type: AWS::CloudFront::OriginAccessControl
@@ -834,6 +844,9 @@ resources:
                 KeySchema:
                     - AttributeName: messageId
                       KeyType: HASH
+                TimeToLiveSpecification:
+                    AttributeName: ttl
+                    Enabled: true
                 GlobalSecondaryIndexes:
                     - IndexName: flowId-createdAt-index
                       KeySchema:
@@ -860,6 +873,9 @@ resources:
                 KeySchema:
                     - AttributeName: proposalId
                       KeyType: HASH
+                TimeToLiveSpecification:
+                    AttributeName: ttl
+                    Enabled: true
                 GlobalSecondaryIndexes:
                     - IndexName: flowId-createdAt-index
                       KeySchema:
@@ -887,6 +903,9 @@ resources:
                 KeySchema:
                     - AttributeName: runId
                       KeyType: HASH
+                TimeToLiveSpecification:
+                    AttributeName: ttl
+                    Enabled: true
                 GlobalSecondaryIndexes:
                     - IndexName: flowId-createdAt-index
                       KeySchema:
@@ -913,6 +932,9 @@ resources:
                       KeyType: HASH
                     - AttributeName: nodeId
                       KeyType: RANGE
+                TimeToLiveSpecification:
+                    AttributeName: ttl
+                    Enabled: true
 
         # ── Traces (PK=traceId, GSI1=runId+occurredAt, GSI2=runNodeKey+occurredAt sparse) ──
         TracesTable:
@@ -932,6 +954,9 @@ resources:
                 KeySchema:
                     - AttributeName: traceId
                       KeyType: HASH
+                TimeToLiveSpecification:
+                    AttributeName: ttl
+                    Enabled: true
                 GlobalSecondaryIndexes:
                     - IndexName: runId-occurredAt-index
                       KeySchema:
@@ -966,6 +991,9 @@ resources:
                 KeySchema:
                     - AttributeName: assetId
                       KeyType: HASH
+                TimeToLiveSpecification:
+                    AttributeName: ttl
+                    Enabled: true
                 GlobalSecondaryIndexes:
                     - IndexName: runId-createdAt-index
                       KeySchema:

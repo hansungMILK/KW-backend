@@ -1,5 +1,6 @@
 import { GetCommand, PutCommand, QueryCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
 
+import { stripRetentionTtl, withRetentionTtl } from './retention';
 import { TableNames, USE_REAL_DYNAMO, getDocClient, memDb } from '../adapters/aws/dynamodb';
 
 import type { Run, RunNode } from '@flows/contracts';
@@ -43,7 +44,12 @@ export const runRepo = {
             memDb.put(RUNS_TABLE, run.runId, run as unknown as Record<string, unknown>);
             return;
         }
-        await getDocClient().send(new PutCommand({ TableName: RUNS_TABLE, Item: run }));
+        await getDocClient().send(
+            new PutCommand({
+                TableName: RUNS_TABLE,
+                Item: withRetentionTtl(run as unknown as Record<string, unknown>, run.createdAt),
+            })
+        );
     },
 
     async getRun(runId: string): Promise<Run | null> {
@@ -51,7 +57,8 @@ export const runRepo = {
             return (memDb.get(RUNS_TABLE, runId) as unknown as Run) ?? null;
         }
         const result = await getDocClient().send(new GetCommand({ TableName: RUNS_TABLE, Key: { runId } }));
-        return (result.Item as Run) ?? null;
+        if (!result.Item) return null;
+        return stripRetentionTtl(result.Item as Record<string, unknown>) as unknown as Run;
     },
 
     async listByFlow(
@@ -91,7 +98,9 @@ export const runRepo = {
                 ...(exclusiveStartKey ? { ExclusiveStartKey: exclusiveStartKey } : {}),
             })
         );
-        const items = (result.Items || []) as Run[];
+        const items = (result.Items || []).map(item =>
+            stripRetentionTtl(item as Record<string, unknown>)
+        ) as unknown as Run[];
         const nextCursor = result.LastEvaluatedKey
             ? Buffer.from(JSON.stringify(result.LastEvaluatedKey)).toString('base64')
             : null;
@@ -140,7 +149,9 @@ export const runRepo = {
                     : {}),
             })
         );
-        const items = (result.Items || []) as Run[];
+        const items = (result.Items || []).map(item =>
+            stripRetentionTtl(item as Record<string, unknown>)
+        ) as unknown as Run[];
         items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
         const nextCursor = result.LastEvaluatedKey
             ? Buffer.from(JSON.stringify(result.LastEvaluatedKey)).toString('base64')
@@ -156,7 +167,12 @@ export const runRepo = {
             memDb.put(RUN_NODES_TABLE, key, node as unknown as Record<string, unknown>);
             return;
         }
-        await getDocClient().send(new PutCommand({ TableName: RUN_NODES_TABLE, Item: node }));
+        await getDocClient().send(
+            new PutCommand({
+                TableName: RUN_NODES_TABLE,
+                Item: withRetentionTtl(node as unknown as Record<string, unknown>, node.updatedAt),
+            })
+        );
     },
 
     async getRunNode(runId: string, nodeId: string): Promise<RunNode | null> {
@@ -170,7 +186,8 @@ export const runRepo = {
                 Key: { runId, nodeId },
             })
         );
-        return (result.Item as RunNode) ?? null;
+        if (!result.Item) return null;
+        return stripRetentionTtl(result.Item as Record<string, unknown>) as unknown as RunNode;
     },
 
     async listRunNodes(runId: string): Promise<RunNode[]> {
@@ -189,7 +206,9 @@ export const runRepo = {
                 ExpressionAttributeValues: { ':rid': runId },
             })
         );
-        return (result.Items || []) as RunNode[];
+        return (result.Items || []).map(item =>
+            stripRetentionTtl(item as Record<string, unknown>)
+        ) as unknown as RunNode[];
     },
 
     // ── Conditional status updates ────────────────────────────────────────────

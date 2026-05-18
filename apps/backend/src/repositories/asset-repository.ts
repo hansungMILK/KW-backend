@@ -1,5 +1,6 @@
 import { DeleteCommand, GetCommand, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 
+import { stripRetentionTtl, withRetentionTtl } from './retention';
 import { TableNames, USE_REAL_DYNAMO, getDocClient, memDb } from '../adapters/aws/dynamodb';
 
 import type { Asset } from '@flows/contracts';
@@ -12,7 +13,12 @@ export const assetRepo = {
             memDb.put(TABLE, asset.assetId, asset as unknown as Record<string, unknown>);
             return;
         }
-        await getDocClient().send(new PutCommand({ TableName: TABLE, Item: asset }));
+        await getDocClient().send(
+            new PutCommand({
+                TableName: TABLE,
+                Item: withRetentionTtl(asset as unknown as Record<string, unknown>, asset.createdAt),
+            })
+        );
     },
 
     async get(assetId: string): Promise<Asset | null> {
@@ -20,7 +26,8 @@ export const assetRepo = {
             return (memDb.get(TABLE, assetId) as unknown as Asset) ?? null;
         }
         const result = await getDocClient().send(new GetCommand({ TableName: TABLE, Key: { assetId } }));
-        return (result.Item as Asset) ?? null;
+        if (!result.Item) return null;
+        return stripRetentionTtl(result.Item as Record<string, unknown>) as unknown as Asset;
     },
 
     async delete(assetId: string): Promise<void> {
@@ -54,7 +61,9 @@ export const assetRepo = {
                     ScanIndexForward: true,
                 })
             );
-            all = (result.Items || []) as Asset[];
+            all = (result.Items || []).map(item =>
+                stripRetentionTtl(item as Record<string, unknown>)
+            ) as unknown as Asset[];
         }
         all.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
         return all;

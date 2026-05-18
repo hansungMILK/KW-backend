@@ -29,6 +29,7 @@ const readNumberEnv = (name: string, fallback: number, min = 0): number => {
 export const env = {
     stage: readEnv('STAGE', 'local'),
     awsRegion: readEnv('AWS_REGION', 'ap-northeast-2'),
+    dataRetentionDays: readIntEnv('DATA_RETENTION_DAYS', 90, 1),
     dynamodbEndpoint: readEnv('DYNAMODB_ENDPOINT'),
     flowsTable: readEnv('FLOWS_TABLE', 'eureka-flows-backend-flows-local'),
     connectionsTable: readEnv('CONNECTIONS_TABLE', 'eureka-flows-backend-connections-local'),
