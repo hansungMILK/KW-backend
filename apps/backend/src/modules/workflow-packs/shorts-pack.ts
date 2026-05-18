@@ -41,9 +41,10 @@ export const shortsPack: WorkflowPackManifest = {
     recipes: [
         {
             recipeId: 'shorts.info.v1',
-            displayName: '정보전달 쇼츠',
-            description: 'Source-grounded short-form explainer video.',
-            triggerHints: ['쇼츠', '정보전달', 'shorts', 'reels', 'tiktok'],
+            displayName: '쇼츠 제작',
+            description:
+                'Short-form video production. The planner decides whether the content mode is informational, story-driven, news, or creative simulation.',
+            triggerHints: ['쇼츠', 'shorts', 'reels', 'tiktok'],
             outputType: 'video',
             requiredCapabilities: [
                 'source.collect',

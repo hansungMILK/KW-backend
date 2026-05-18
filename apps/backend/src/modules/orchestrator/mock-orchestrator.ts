@@ -2,6 +2,7 @@ import { buildLongformGateAWorkflow, enforceLongformGateAProfile, isLongformCont
 import { generateNumericId } from '../../utils/id-generator';
 import { buildContentProfilePreferences, enrichContentProfileNodeConfig } from '../content-profile/content-profile';
 import { recommendImageStyleId } from '../image-generation/image-style';
+import { isImageGenerationRequestText } from '../request-intent';
 
 import type { Orchestrator, ProposalResult } from './types';
 
@@ -11,7 +12,7 @@ import type { Orchestrator, ProposalResult } from './types';
  */
 
 const SHORTS_BLOCKS = [
-    { type: 'search', label: '자료 수집', config: { query: '정보전달 쇼츠' } },
+    { type: 'search', label: '자료 수집', config: { query: '쇼츠 제작' } },
     { type: 'content', label: '스크립트 생성', config: { scenes: 12, durationSec: 60 } },
     { type: 'data', label: '데이터 정규화', config: {} },
     { type: 'analysis', label: '품질 검수', config: { mode: 'safety' } },
@@ -242,9 +243,6 @@ export const mockOrchestrator: Orchestrator = {
 
 function isImageOnlyRequest(message: string): boolean {
     const normalized = message.toLowerCase().replace(/\s+/g, '');
-    const hasImageTarget = ['이미지', '그림', '사진', '일러스트', 'image', 'picture', 'photo'].some(term =>
-        normalized.includes(term)
-    );
     const hasVideoTarget = ['쇼츠', '영상', '비디오', 'shorts', 'video'].some(term => normalized.includes(term));
-    return hasImageTarget && !hasVideoTarget;
+    return isImageGenerationRequestText(normalized) && !hasVideoTarget;
 }

@@ -91,16 +91,102 @@ const paidVideoPlan = {
     summary: '롱폼 영상 제작 파이프라인을 제안합니다.',
 };
 
-describe('openaiOrchestrator longform Gate A', () => {
-    beforeEach(() => {
-        vi.clearAllMocks();
-        vi.mocked(openaiAdapter.chatJson).mockResolvedValue({
-            content: JSON.stringify(paidVideoPlan),
+const genericDecision = (
+    recipeId:
+        | 'image.single.v1'
+        | 'text.blog.v1'
+        | 'text.url-explainer.v1'
+        | 'shorts.info.v1'
+        | 'longform.explainer.v1'
+        | null,
+    userMessage: string
+) => ({
+    intent:
+        recipeId === 'image.single.v1'
+            ? 'single-image'
+            : recipeId === 'text.blog.v1'
+              ? 'blog-post'
+              : recipeId === 'text.url-explainer.v1'
+                ? 'url-explainer'
+                : recipeId === 'shorts.info.v1'
+                  ? 'shorts'
+                  : recipeId === 'longform.explainer.v1'
+                    ? 'longform'
+                    : 'custom',
+    recipeId,
+    outputKind:
+        recipeId === 'image.single.v1'
+            ? 'image'
+            : recipeId === 'text.blog.v1' || recipeId === 'text.url-explainer.v1'
+              ? 'text'
+              : recipeId === 'shorts.info.v1' || recipeId === 'longform.explainer.v1'
+                ? 'video'
+                : 'unknown',
+    mode: recipeId === 'shorts.info.v1' ? 'informational' : 'unknown',
+    needsSearch: recipeId === 'shorts.info.v1' || recipeId === 'text.url-explainer.v1',
+    needsScript: recipeId === 'shorts.info.v1' || recipeId === 'longform.explainer.v1',
+    needsImagePrompt: recipeId === 'image.single.v1' || recipeId === 'shorts.info.v1',
+    scriptToneId: 'informative-reframe',
+    reason: 'AI planner가 요청에 맞는 레시피를 선택했습니다.',
+    confidence: 0.94,
+    understanding: {
+        surfaceTerms: [userMessage],
+        focusEntities: [userMessage],
+        actions: [],
+        constraints: [],
+        styleHints: [],
+    },
+});
+
+function inferGenericRecipeId(userMessage: string) {
+    if (/롱폼|longform|긴\s*영상/.test(userMessage)) return 'longform.explainer.v1' as const;
+    if (/쇼츠|shorts|릴스|reels|틱톡|tiktok/.test(userMessage)) return 'shorts.info.v1' as const;
+    if (/이미지|사진|그림|그려|draw|image/i.test(userMessage)) return 'image.single.v1' as const;
+    if (/https?:\/\//i.test(userMessage) && /설명|요약|정리|분석|해설|읽어/.test(userMessage)) {
+        return 'text.url-explainer.v1' as const;
+    }
+    if (/블로그|홍보글|소개글|대본|본문|문서|아티클|포스트|글|써|작성|write/i.test(userMessage)) {
+        return 'text.blog.v1' as const;
+    }
+    return null;
+}
+
+function mockPlannerResponses(longformDecision = paidVideoPlan) {
+    vi.mocked(openaiAdapter.chatJson).mockImplementation(async request => {
+        if (request.systemPrompt.includes('request intent and recipe planner')) {
+            const userMessage =
+                request.userMessage.match(/USER_REQUEST:\n([\s\S]*?)(?:\n\nCURRENT_CONTEXT:|$)/)?.[1] ?? '';
+            return {
+                content: JSON.stringify(genericDecision(inferGenericRecipeId(userMessage), userMessage)),
+                model: 'gpt-test',
+                inputTokens: 1,
+                outputTokens: 1,
+                latencyMs: 1,
+            };
+        }
+        return {
+            content: JSON.stringify(longformDecision),
             model: 'gpt-test',
             inputTokens: 1,
             outputTokens: 1,
             latencyMs: 1,
-        });
+        };
+    });
+}
+
+function expectGenericPlannerCalled() {
+    expect(openaiAdapter.chatJson).toHaveBeenCalledWith(
+        expect.objectContaining({
+            model: 'gpt-test',
+            systemPrompt: expect.stringContaining('request intent and recipe planner'),
+        })
+    );
+}
+
+describe('openaiOrchestrator longform Gate A', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        mockPlannerResponses();
     });
 
     it('converts longform model output into a user-facing production flow with paid media blocked until review', async () => {
@@ -197,18 +283,12 @@ describe('openaiOrchestrator longform Gate A', () => {
     });
 
     it('uses OpenAI only for compact longform intent judgment, not the executable graph JSON', async () => {
-        vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
-            content: JSON.stringify({
-                ...paidVideoPlan,
-                edges: [
-                    { from: 0, to: 1 },
-                    { from: 1, to: 6 },
-                ],
-            }),
-            model: 'gpt-test',
-            inputTokens: 1,
-            outputTokens: 1,
-            latencyMs: 1,
+        mockPlannerResponses({
+            ...paidVideoPlan,
+            edges: [
+                { from: 0, to: 1 },
+                { from: 1, to: 6 },
+            ],
         });
 
         const proposal = await openaiOrchestrator.generateProposal(
@@ -262,7 +342,158 @@ describe('openaiOrchestrator longform Gate A', () => {
         expect(proposal.metadata?.['contentProfile']).toEqual(
             expect.objectContaining({ contentProfileId: 'image.single.v1' })
         );
-        expect(openaiAdapter.chatJson).not.toHaveBeenCalled();
+        expect(proposal.metadata?.['imageGeneration']).toEqual(
+            expect.objectContaining({
+                format: 'single-image',
+                sceneCount: 1,
+                sceneCountOptions: [{ count: 1, label: '1장' }],
+            })
+        );
+        expectGenericPlannerCalled();
+    });
+
+    it('routes draw-action requests to the standalone image recipe without asking for prompt advice', async () => {
+        const proposal = await openaiOrchestrator.generateProposal(
+            'flow-draw-image',
+            '우주 고래가 도시 위를 나는 상황을 그려줘'
+        );
+        const recipe = DEFAULT_WORKFLOW_PACK_REGISTRY.getRecipe('image.single.v1');
+
+        expect(proposal.proposedNodes.map(node => node.blockType)).toEqual(
+            recipe?.defaultBlocks.map(block => block.blockType)
+        );
+        expect(proposal.proposedNodes.map(node => node.blockType)).toContain('media-image');
+        expect(proposal.proposedNodes.map(node => node.blockType)).not.toContain('media-video');
+        expect(proposal.metadata?.['contentProfile']).toEqual(
+            expect.objectContaining({ contentProfileId: 'image.single.v1' })
+        );
+        expect(proposal.assistantMessage).toContain('이미지');
+        expectGenericPlannerCalled();
+    });
+
+    it('trusts the AI recipe decision for ambiguous visual production language instead of local keyword parsing', async () => {
+        vi.mocked(openaiAdapter.chatJson).mockImplementation(async request => {
+            if (request.systemPrompt.includes('request intent and recipe planner')) {
+                return {
+                    content: JSON.stringify(
+                        genericDecision(
+                            'image.single.v1',
+                            '나루토와 주술회전 캐릭터들이 한곳에 모인 전투 포스터 느낌으로 연출해줘'
+                        )
+                    ),
+                    model: 'gpt-test',
+                    inputTokens: 1,
+                    outputTokens: 1,
+                    latencyMs: 1,
+                };
+            }
+            throw new Error('full workflow planner should not be called for an AI-selected known recipe');
+        });
+
+        const proposal = await openaiOrchestrator.generateProposal(
+            'flow-ai-routed-image',
+            '나루토와 주술회전 캐릭터들이 한곳에 모인 전투 포스터 느낌으로 연출해줘'
+        );
+
+        expect(proposal.proposedNodes.map(node => node.blockType)).toEqual(
+            DEFAULT_WORKFLOW_PACK_REGISTRY.getRecipe('image.single.v1')?.defaultBlocks.map(block => block.blockType)
+        );
+        expect(proposal.metadata?.['aiRequestDecision']).toEqual(
+            expect.objectContaining({
+                recipeId: 'image.single.v1',
+                intent: 'single-image',
+            })
+        );
+    });
+
+    it('carries AI creative-simulation mode into the shorts request contract instead of only showing a tone choice', async () => {
+        vi.mocked(openaiAdapter.chatJson).mockImplementation(async request => {
+            if (request.systemPrompt.includes('request intent and recipe planner')) {
+                return {
+                    content: JSON.stringify({
+                        ...genericDecision('shorts.info.v1', '고죠사토루와 나루토가 대결하는 장면을 쇼츠로 만들어줘'),
+                        mode: 'creative-simulation',
+                        reason: '가상 대결을 장면 단위로 시뮬레이션하는 쇼츠 요청입니다.',
+                        understanding: {
+                            surfaceTerms: ['고죠사토루와 나루토 대결'],
+                            focusEntities: ['고죠사토루', '나루토'],
+                            actions: ['대결', '풀전력 전투'],
+                            constraints: ['쇼츠', '가상 시뮬레이션'],
+                            styleHints: [],
+                        },
+                    }),
+                    model: 'gpt-test',
+                    inputTokens: 1,
+                    outputTokens: 1,
+                    latencyMs: 1,
+                };
+            }
+            throw new Error('full workflow planner should not be called for an AI-selected shorts recipe');
+        });
+
+        const proposal = await openaiOrchestrator.generateProposal(
+            'flow-simulation-shorts',
+            '고죠사토루와 나루토가 대결하는 장면을 쇼츠로 만들어줘'
+        );
+        const contentNode = proposal.proposedNodes.find(node => node.blockType === 'content');
+        const searchNode = proposal.proposedNodes.find(node => node.blockType === 'search');
+
+        expect(proposal.assistantMessage).toContain('쇼츠 제작');
+        expect(proposal.assistantMessage).not.toContain('정보전달 쇼츠');
+        expect(proposal.metadata?.['aiRequestDecision']).toEqual(
+            expect.objectContaining({ mode: 'creative-simulation' })
+        );
+        expect(contentNode?.config).toEqual(
+            expect.objectContaining({
+                requestMode: 'creative-simulation',
+                requestSpec: expect.objectContaining({
+                    contentMode: 'creative-simulation',
+                    understanding: expect.objectContaining({
+                        focusEntities: ['고죠사토루', '나루토'],
+                    }),
+                }),
+            })
+        );
+        expect(searchNode?.config).toEqual(
+            expect.objectContaining({
+                requestSpec: expect.objectContaining({ contentMode: 'creative-simulation' }),
+            })
+        );
+    });
+
+    it('honors requested image count for image-only requests while capping unsafe batch sizes', async () => {
+        const fourImages = await openaiOrchestrator.generateProposal('flow-four-images', '바나나 이미지 4장 생성해줘');
+        const hugeBatch = await openaiOrchestrator.generateProposal(
+            'flow-huge-images',
+            '바나나 이미지 10,000장 생성해줘'
+        );
+
+        expect(fourImages.proposedNodes).toContainEqual(
+            expect.objectContaining({
+                blockType: 'media-image',
+                config: expect.objectContaining({ count: 4 }),
+            })
+        );
+        expect(fourImages.metadata?.['imageGeneration']).toEqual(
+            expect.objectContaining({
+                format: 'single-image',
+                sceneCount: 4,
+                sceneCountOptions: [{ count: 4, label: '4장' }],
+            })
+        );
+        expect(hugeBatch.proposedNodes).toContainEqual(
+            expect.objectContaining({
+                blockType: 'media-image',
+                config: expect.objectContaining({ count: 24 }),
+            })
+        );
+        expect(hugeBatch.metadata?.['imageGeneration']).toEqual(
+            expect.objectContaining({
+                format: 'single-image',
+                sceneCount: 24,
+                sceneCountOptions: [{ count: 24, label: '24장' }],
+            })
+        );
     });
 
     it('uses a text writing recipe for blog article requests without adding media blocks', async () => {
@@ -281,7 +512,7 @@ describe('openaiOrchestrator longform Gate A', () => {
         expect(proposal.metadata?.['contentProfile']).toEqual(
             expect.objectContaining({ contentProfileId: 'text.explainer.v1' })
         );
-        expect(openaiAdapter.chatJson).not.toHaveBeenCalled();
+        expectGenericPlannerCalled();
     });
 
     it('prioritizes explicit writing intent over incidental video words', async () => {
@@ -300,7 +531,7 @@ describe('openaiOrchestrator longform Gate A', () => {
         expect(proposal.metadata?.['contentProfile']).toEqual(
             expect.objectContaining({ contentProfileId: 'text.explainer.v1' })
         );
-        expect(openaiAdapter.chatJson).not.toHaveBeenCalled();
+        expectGenericPlannerCalled();
     });
 
     it('keeps platform or video-topic words as text when the requested output is writing', async () => {
@@ -313,7 +544,7 @@ describe('openaiOrchestrator longform Gate A', () => {
         expect(proposal.proposedNodes.map(node => node.blockType)).not.toContain('media-image');
         expect(proposal.proposedNodes.map(node => node.blockType)).not.toContain('media-tts');
         expect(proposal.proposedNodes.map(node => node.blockType)).not.toContain('media-video');
-        expect(openaiAdapter.chatJson).not.toHaveBeenCalled();
+        expectGenericPlannerCalled();
     });
 
     it('treats standalone script writing as text unless a production recipe is requested', async () => {
@@ -327,7 +558,7 @@ describe('openaiOrchestrator longform Gate A', () => {
             recipe?.defaultBlocks.map(block => block.blockType)
         );
         expect(proposal.proposedNodes.map(node => node.blockType)).not.toContain('media-video');
-        expect(openaiAdapter.chatJson).not.toHaveBeenCalled();
+        expectGenericPlannerCalled();
     });
 
     it('keeps image text composition requests on the image recipe instead of treating 글자 as blog writing', async () => {
@@ -342,7 +573,7 @@ describe('openaiOrchestrator longform Gate A', () => {
         );
         expect(proposal.proposedNodes.map(node => node.blockType)).toContain('media-image');
         expect(proposal.proposedNodes.map(node => node.blockType)).not.toContain('media-video');
-        expect(openaiAdapter.chatJson).not.toHaveBeenCalled();
+        expectGenericPlannerCalled();
     });
 
     it('does not downgrade explicit shortform production requests to text when writing words are present', async () => {
@@ -359,7 +590,7 @@ describe('openaiOrchestrator longform Gate A', () => {
         expect(proposal.metadata?.['contentProfile']).toEqual(
             expect.objectContaining({ contentProfileId: 'shorts.info.v1' })
         );
-        expect(openaiAdapter.chatJson).not.toHaveBeenCalled();
+        expectGenericPlannerCalled();
     });
 
     it('uses URL collection plus text writing for URL explanation requests without video blocks', async () => {
@@ -381,6 +612,6 @@ describe('openaiOrchestrator longform Gate A', () => {
             })
         );
         expect(proposal.proposedNodes.map(node => node.blockType)).not.toContain('media-video');
-        expect(openaiAdapter.chatJson).not.toHaveBeenCalled();
+        expectGenericPlannerCalled();
     });
 });

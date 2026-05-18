@@ -899,6 +899,23 @@ const buildLongformDraft = (value: Record<string, unknown>): string => {
     return buildScriptDraft(asRecordArray(value.scenes));
 };
 
+const isSingleImagePromptRecord = (value: Record<string, unknown>): boolean => {
+    const style = isRecordValue(value.style) ? value.style : {};
+    const promptPlan = isRecordValue(value.promptPlan) ? value.promptPlan : {};
+    return (
+        value.mode === 'single-image' ||
+        value.outputKind === 'image-prompt' ||
+        style.format === 'single-image' ||
+        typeof promptPlan.imagePrompt === 'string'
+    );
+};
+
+const getSingleImagePromptText = (value: Record<string, unknown>): string => {
+    const promptPlan = isRecordValue(value.promptPlan) ? value.promptPlan : {};
+    const firstScene = asRecordArray(value.scenes)[0] ?? {};
+    return firstStringValue(promptPlan.imagePrompt, firstScene.imagePrompt, value.imagePrompt) ?? '';
+};
+
 const applyScriptDraft = (value: Record<string, unknown>, draft: string): Record<string, unknown> => {
     const lines = draft.split('\n').map(line => line.trim());
     const scenes = asRecordArray(value.scenes).map((scene, index) => {
@@ -909,6 +926,23 @@ const applyScriptDraft = (value: Record<string, unknown>, draft: string): Record
 
     return {
         ...value,
+        scenes,
+        reviewedAt: new Date().toISOString(),
+    };
+};
+
+const applySingleImagePromptDraft = (value: Record<string, unknown>, draft: string): Record<string, unknown> => {
+    const promptPlan = isRecordValue(value.promptPlan) ? value.promptPlan : {};
+    const scenes = asRecordArray(value.scenes).map((scene, index) =>
+        index === 0 ? { ...scene, imagePrompt: draft } : scene
+    );
+
+    return {
+        ...value,
+        promptPlan: {
+            ...promptPlan,
+            imagePrompt: draft,
+        },
         scenes,
         reviewedAt: new Date().toISOString(),
     };
@@ -958,6 +992,7 @@ const getPreferredNodeWidth = (node: NodeData, definition: BlockDefinitionWithFr
     if (getVideoPreviewRecord(value)) return Math.max(baseWidth, 360);
     if (asRecordArray(value.images).length > 0) return Math.max(baseWidth, 340);
     if (isLongformGateARecord(value)) return Math.max(baseWidth, 360);
+    if (isSingleImagePromptRecord(value)) return Math.max(baseWidth, 340);
     if (isRecordValue(value.script) || asRecordArray(value.scenes).length > 0) return Math.max(baseWidth, 340);
     return baseWidth;
 };
@@ -1026,7 +1061,9 @@ const FriendlyOutputPreview: React.FC<{
     const initialDraft = recordValue
         ? isLongformGateARecord(recordValue)
             ? buildLongformDraft(recordValue)
-            : buildScriptDraft(scenes) || firstStringValue(recordValue.fullScriptDraft) || ''
+            : isSingleImagePromptRecord(recordValue)
+              ? getSingleImagePromptText(recordValue)
+              : buildScriptDraft(scenes) || firstStringValue(recordValue.fullScriptDraft) || ''
         : '';
     const [draft, setDraft] = useState(initialDraft);
     const [isApproving, setIsApproving] = useState(false);
@@ -1713,14 +1750,76 @@ const FriendlyOutputPreview: React.FC<{
         );
     }
 
+    if (isSingleImagePromptRecord(recordValue)) {
+        const promptPlan = isRecordValue(recordValue.promptPlan) ? recordValue.promptPlan : {};
+        const firstScene = scenes[0] ?? {};
+        const title = firstStringValue(promptPlan.title, recordValue.title, firstScene.topTitle) ?? '이미지 프롬프트';
+        const caption = firstStringValue(promptPlan.caption, firstScene.caption, recordValue.hook);
+        const imagePrompt = firstStringValue(promptPlan.imagePrompt, firstScene.imagePrompt) ?? '';
+        const aspectRatio = firstStringValue(promptPlan.aspectRatio, recordValue.aspectRatio);
+
+        return withModal(
+            <div
+                className="p-2.5 bg-sky-500/10 rounded-lg border border-sky-500/30 overflow-auto"
+                style={{ maxHeight }}
+            >
+                <div className="flex items-start justify-between gap-2">
+                    <div>
+                        <div className="text-[10px] font-semibold text-sky-200">이미지 프롬프트</div>
+                        <div className="mt-0.5 text-[11px] font-semibold text-foreground line-clamp-2">{title}</div>
+                    </div>
+                    <button
+                        type="button"
+                        className="shrink-0 rounded border border-sky-400/40 px-2 py-0.5 text-[10px] text-sky-100 hover:bg-sky-500/15"
+                        onClick={event => {
+                            event.stopPropagation();
+                            setModalContent({ value: recordValue, type: 'image-prompt' });
+                        }}
+                    >
+                        프롬프트 크게 보기
+                    </button>
+                </div>
+                {caption && <div className="mt-2 text-[10px] text-foreground/75 line-clamp-2">{caption}</div>}
+                {aspectRatio && <div className="mt-1 text-[10px] text-muted-foreground">비율: {aspectRatio}</div>}
+                {imagePrompt && (
+                    <div className="mt-2 rounded border border-sky-400/20 bg-background/40 p-2 text-[10px] leading-relaxed text-foreground/85 line-clamp-5">
+                        {imagePrompt}
+                    </div>
+                )}
+                {reviewEnabled && imagePrompt && (
+                    <div className="mt-2 space-y-1.5">
+                        <textarea
+                            className="min-h-20 w-full resize-y rounded border border-border bg-background/80 p-2 text-[10px] text-foreground outline-none focus:border-primary"
+                            value={draft}
+                            onChange={event => setDraft(event.target.value)}
+                            onWheel={event => event.stopPropagation()}
+                            aria-label="이미지 프롬프트 검수본"
+                        />
+                        <button
+                            type="button"
+                            className="w-full rounded bg-primary px-2 py-1.5 text-[10px] font-medium text-primary-foreground hover:bg-primary/90"
+                            onClick={event => {
+                                event.stopPropagation();
+                                onReviewedOutputSave?.(applySingleImagePromptDraft(recordValue, draft));
+                            }}
+                        >
+                            {reviewedOutputSaved ? '프롬프트 검수본 다시 저장' : '프롬프트 검수본 저장'}
+                        </button>
+                    </div>
+                )}
+            </div>
+        );
+    }
+
     const script = isRecordValue(recordValue.script) ? recordValue.script : undefined;
     if (script || scenes.length > 0 || recordValue.title || recordValue.hook) {
         const title = firstStringValue(recordValue.title, script?.hook, recordValue.hook) ?? '생성된 대본';
         const angle = firstStringValue(script?.angle, recordValue.angle);
         const cta = firstStringValue(script?.cta, recordValue.cta);
-        const lines = scenes
-            .map(scene => firstStringValue(scene.narration, scene.caption, scene.topTitle))
-            .filter((line): line is string => Boolean(line))
+        const lines = draft
+            .split('\n')
+            .map(line => line.trim())
+            .filter(Boolean)
             .slice(0, 4);
 
         return withModal(
@@ -1741,7 +1840,12 @@ const FriendlyOutputPreview: React.FC<{
                         대본 크게 보기
                     </button>
                 </div>
-                {angle && <div className="mt-1 text-[10px] text-foreground/70 line-clamp-2">{angle}</div>}
+                {angle && !reviewEnabled && (
+                    <div className="mt-1 text-[10px] text-foreground/70 line-clamp-2">{angle}</div>
+                )}
+                {reviewEnabled && (
+                    <div className="mt-1 text-[10px] text-muted-foreground">검수 대상: 아래 나레이션 전체</div>
+                )}
                 {lines.length > 0 && (
                     <div className="mt-2 space-y-1">
                         {lines.map((line, index) => (

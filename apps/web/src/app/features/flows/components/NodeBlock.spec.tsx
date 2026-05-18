@@ -76,6 +76,73 @@ const renderNode = (node: NodeData) =>
     );
 
 describe('NodeBlock longform previews', () => {
+    it('shows the same narration draft in the script preview and review editor', () => {
+        testState.registry = {
+            content: makeDefinition('content', '스크립트 생성'),
+        };
+
+        renderNode(
+            makeNode('content', {
+                title: '고죠 vs 나루토 풀전력 쇼츠',
+                script: {
+                    angle: '이건 설정 싸움이 아니라 판을 잡는 가상 대결입니다.',
+                    cta: '누가 먼저 무너질지 댓글로 남겨주세요.',
+                },
+                scenes: [
+                    {
+                        sceneNumber: 1,
+                        narration: '처음부터 풀전력이면 시작부터 숨이 막혀.',
+                        caption: '풀전력 시작',
+                    },
+                    {
+                        sceneNumber: 2,
+                        narration: '고죠는 미동도 없고 나루토는 바로 압박해.',
+                        caption: '압박 시작',
+                    },
+                ],
+            })
+        );
+
+        expect(screen.getByText('검수 대상: 아래 나레이션 전체')).toBeTruthy();
+        expect(screen.getByText('1. 처음부터 풀전력이면 시작부터 숨이 막혀.')).toBeTruthy();
+        expect(screen.getByDisplayValue(/처음부터 풀전력이면 시작부터 숨이 막혀/)).toBeTruthy();
+        expect(screen.queryByText(/이건 설정 싸움/)).toBeNull();
+    });
+
+    it('shows single-image prompt planning as an image prompt, not a script review card', () => {
+        testState.registry = {
+            content: makeDefinition('content', '이미지 프롬프트 구성'),
+        };
+
+        renderNode(
+            makeNode('content', {
+                mode: 'single-image',
+                outputKind: 'image-prompt',
+                title: '바나나 댄스',
+                promptPlan: {
+                    title: '바나나 댄스',
+                    imagePrompt:
+                        'A cheerful banana dancing under colorful stage lights, playful studio backdrop, dynamic pose, polished 3D character illustration',
+                },
+                style: { format: 'single-image', aspectRatio: '9:16', sceneCount: 1 },
+                scenes: [
+                    {
+                        sceneNumber: 1,
+                        storyBeat: 'single-image',
+                        caption: '춤추는 바나나',
+                        narration: '바나나가 무대 위에서 춤추는 장면입니다.',
+                        imagePrompt:
+                            'A cheerful banana dancing under colorful stage lights, playful studio backdrop, dynamic pose, polished 3D character illustration',
+                    },
+                ],
+            })
+        );
+
+        expect(screen.getByText('이미지 프롬프트')).toBeTruthy();
+        expect(screen.getByText('프롬프트 크게 보기')).toBeTruthy();
+        expect(screen.queryByText('대본 크게 보기')).toBeNull();
+    });
+
     it('shows the longform render node as a video result instead of repeating upstream planning text', () => {
         testState.registry = {
             'longform-render': makeDefinition('longform-render', '롱폼 2K 렌더'),

@@ -18,6 +18,7 @@ import {
 
 import type { AllowedBlockType } from './response-parser';
 import type { Orchestrator, ProposalResult } from './types';
+import type { ContentProfilePreferences } from '../content-profile/content-profile';
 
 const MODEL = env.anthropicDefaultModel;
 
@@ -135,6 +136,7 @@ export const claudeOrchestrator: Orchestrator = {
                       sceneCount,
                       imageQuality: mediaImageBlock.config?.['imageQuality'] ?? env.openaiImageQuality,
                       imageStyleId: mediaImageBlock.config?.['imageStyleId'] ?? mediaImageBlock.config?.['style'],
+                      format: resolveImageGenerationFormat(enforcedContentProfile, mediaImageBlock.config),
                       textAndOtherEstimatedCostUsd,
                   })
                 : undefined;
@@ -247,15 +249,25 @@ function resolveProposalSceneCount(
 }
 
 function detectRequestedSceneCount(userMessage: string): number | undefined {
-    const match = userMessage.match(/(\d{1,2})\s*(?:장|컷|씬|scene|scenes|images?)/i);
+    const match = userMessage.match(/([\d,]{1,7})\s*(?:장|컷|씬|scene|scenes|images?)/i);
     if (!match) return undefined;
-    const count = Number(match[1]);
+    const count = Number(match[1].replace(/,/g, ''));
     return Number.isFinite(count) && count > 0 ? Math.min(24, Math.floor(count)) : undefined;
 }
 
 function getMediaImageSceneCount(config: Record<string, unknown> | undefined): number {
     const count = Number(config?.['count'] ?? config?.['scenes'] ?? config?.['sceneCount'] ?? config?.['frameCount']);
     return Number.isFinite(count) && count > 0 ? Math.floor(count) : DEFAULT_SHORTS_SCENE_COUNT;
+}
+
+function resolveImageGenerationFormat(
+    contentProfile: ContentProfilePreferences,
+    imageConfig: Record<string, unknown> | undefined
+): 'single-image' | 'shorts-frame' {
+    if (contentProfile.contentProfileId === 'image.single.v1') return 'single-image';
+    if (imageConfig?.['style'] === 'single-image') return 'single-image';
+    if (imageConfig?.['format'] === 'single-image') return 'single-image';
+    return 'shorts-frame';
 }
 
 function estimateNonImageCostUsd(blocks: Array<{ type: AllowedBlockType }>): number {

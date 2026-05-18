@@ -1,14 +1,17 @@
+import { buildOutputContract, buildRequestSpec, classifySourceCoverage } from './request-contract';
 import { extractTopic } from './search-block';
 import { ContentOutputSchema } from './types';
 import { openaiAdapter } from '../../adapters/ai/openai-adapter';
 import { env } from '../../config/env';
 import { log } from '../../utils/logger';
 import { buildCombinedPrompt } from '../shorts/rulepacks/base-shorts-rulepack';
+import { CREATIVE_SIMULATION_SHORTS_RULES } from '../shorts/rulepacks/creative-simulation-rulepack';
 import { buildContentPreferencePrompt, buildScriptTonePrompt } from '../shorts/rulepacks/script-tone-rulepack';
 import { SCRIPT_OUTPUT_RULES, SCRIPT_WRITER_RULES } from '../shorts/rulepacks/script-writer-rulepack';
 import { DIRECTOR_OUTPUT_RULES, SHORTS_DIRECTOR_RULES } from '../shorts/rulepacks/shorts-director-rulepack';
 import { selectShortsRulepack } from '../shorts/topic-router';
 
+import type { OutputKind, RequestSpec, SourceCoverage } from './request-contract';
 import type { BlockExecutor, BlockExecutorResult } from './types';
 
 // ── Prompts ──────────────────────────────────────────────────────────────────
@@ -18,6 +21,9 @@ Given keywords and/or article summaries, generate a complete 10–15 scene, one-
 
 Requirements:
 - If the user message contains "PRIMARY SOURCE", treat that source as the main brief. Supporting sources may verify or add caveats, but must not replace the primary source's angle.
+- Do not broaden a specific requested subject into its parent topic. If the request names an episode, case, product, person, URL, article, or named event, the script must explain that exact subject, not only the broader category.
+- If available sources are broad or explicitly say they do not cover the requested subject, mark unsupported details as uncertainty and do not fill the gap with generic background.
+- SourceCoverage status direct/supporting/unrelated is advisory but binding for factual scope: direct sources can ground factual claims, supporting sources can provide background only, and unrelated sources must not drive the script.
 - Preserve concrete numbers, conditions, warnings, and key claims from the PRIMARY SOURCE in factual scenes.
 - If no source ids are available, do not mark scenes as claimType "fact"; use opinion or hypothetical unless the scene cites a real sourceRef.
 - For URL/article requests, build the script from the article's factual spine: who/what/when, the triggering claim, the disputed action, the response/apology, and what viewers should take away.
@@ -65,9 +71,12 @@ const SINGLE_IMAGE_SYSTEM_PROMPT = `You are an AI image prompt planner.
 Given a user's image request, produce exactly one scene that can be passed to GPT-image-2.
 
 Requirements:
+- mode: "single-image"
+- outputKind: "image-prompt"
 - title: a compact Korean title for the image, max 16 Korean characters
 - hook: one short Korean phrase describing the image intent
-- script: { hook, angle, cta }
+- promptPlan: { title, imagePrompt, aspectRatio, styleNotes?, safetyNotes? }
+- script: { hook, angle, cta } only for backward compatibility; do not write a video script
 - style: { format: "single-image", aspectRatio: "9:16", sceneCount: 1 }
 - scenes: exactly 1 scene with:
   - sceneNumber: 1
@@ -222,6 +231,14 @@ function buildUserMessage(input: unknown): string {
     if (typeof input === 'object' && !Array.isArray(input)) {
         const obj = input as Record<string, unknown>;
         const parts: string[] = [];
+        const requestedSubject = extractRequestedSubject(obj);
+        const requestSpec = readRequestSpec(obj) ?? buildRequestSpec(obj);
+
+        if (requestedSubject) {
+            parts.push(`REQUESTED SUBJECT:\n${requestedSubject}`);
+        }
+
+        parts.push(`REQUEST SPEC:\n${JSON.stringify(requestSpec)}`);
 
         if (Array.isArray(obj['keywords']) && (obj['keywords'] as unknown[]).length > 0) {
             parts.push(`키워드: ${(obj['keywords'] as unknown[]).map(k => String(k)).join(', ')}`);
@@ -261,6 +278,14 @@ function buildUserMessage(input: unknown): string {
                     return `- ${String(a['id'] ?? '')} ${String(a['title'] ?? '')} (${String(a['source'] ?? '')}, ${String(a['publishedAt'] ?? 'date unknown')}, ${String(a['sourceType'] ?? 'other')}, confidence=${String(a['confidence'] ?? 'unknown')}, ${sourceFlags})\n  URL: ${String(a['url'] ?? '')}\n  Summary: ${String(a['summary'] ?? '')}`;
                 })
                 .join('\n');
+            const coverageSummary = articles
+                .slice(0, 5)
+                .map(article => {
+                    const coverage = readSourceCoverage(article) ?? classifySourceCoverage(article, requestSpec);
+                    return `- ${String(article['id'] ?? '') || String(article['title'] ?? '')}: ${coverage.status}; missing=${coverage.missingTerms.join(', ') || 'none'}; reason=${coverage.reason}`;
+                })
+                .join('\n');
+            parts.push(`SOURCE COVERAGE:\n${coverageSummary}`);
             parts.push(`관련 출처:\n${summaries}`);
         }
 
@@ -268,7 +293,23 @@ function buildUserMessage(input: unknown): string {
     }
 
     // Fallback: use topic extraction
-    return `주제: ${extractTopic(input)}`;
+    return `REQUESTED SUBJECT:\n${extractTopic(input)}`;
+}
+
+function extractRequestedSubject(input: Record<string, unknown>): string | undefined {
+    const directKeys = ['requestTopic', 'userRequest', 'originalRequest', 'topic', 'query', 'content', 'text'];
+    for (const key of directKeys) {
+        const value = input[key];
+        if (typeof value === 'string' && value.trim().length > 0) return value.trim().slice(0, 500);
+    }
+
+    const out = input['out'];
+    if (isRecord(out)) {
+        const value = out['value'];
+        if (typeof value === 'string' && value.trim().length > 0) return value.trim().slice(0, 500);
+    }
+
+    return undefined;
 }
 
 // ── Executor ──────────────────────────────────────────────────────────────────
@@ -282,6 +323,7 @@ export const contentBlock: BlockExecutor = {
 
         const start = Date.now();
         const userMessage = buildUserMessage(input);
+        const requestSpec = readRequestSpec(input) ?? readRequestSpec(config) ?? buildRequestSpec(input);
         const rulepack = selectShortsRulepack(input);
         const longformGateAMode = isLongformGateAMode(input, config);
         const reviewedOutput = parseReviewedOutput(config?.['reviewedOutput']);
@@ -291,7 +333,10 @@ export const contentBlock: BlockExecutor = {
                 log.info('[content-block] Using reviewed longform Gate A output');
                 return { output: normalized, durationMs: Date.now() - start };
             }
-            const normalized = normalizeContentOutput(reviewedOutput, input, rulepack.id);
+            const singleImageMode = isSingleImageMode(input, config);
+            const normalized = singleImageMode
+                ? normalizeSingleImageOutput(reviewedOutput, input, rulepack.id)
+                : normalizeContentOutput(reviewedOutput, input, rulepack.id);
             const validated = ContentOutputSchema.safeParse(normalized);
             if (!validated.success) {
                 throw new Error(`[content-block] Reviewed output schema validation failed: ${validated.error.message}`);
@@ -304,6 +349,11 @@ export const contentBlock: BlockExecutor = {
 
         const singleImageMode = isSingleImageMode(input, config);
         const genericTextMode = isGenericTextMode(input, config);
+        const creativeSimulationMode =
+            !longformGateAMode &&
+            !singleImageMode &&
+            !genericTextMode &&
+            requestSpec.contentMode === 'creative-simulation';
         const requestedShortsSceneCount =
             !longformGateAMode && !singleImageMode && !genericTextMode ? resolveShortsSceneCount(config) : undefined;
 
@@ -316,7 +366,9 @@ export const contentBlock: BlockExecutor = {
                   ? 'single-image'
                   : genericTextMode
                     ? 'text'
-                    : 'shorts',
+                    : creativeSimulationMode
+                      ? 'creative-simulation-shorts'
+                      : 'shorts',
         });
 
         const directorPrompt = `${SCRIPT_WRITER_RULES}\n\n${SCRIPT_OUTPUT_RULES}\n\n${SHORTS_DIRECTOR_RULES}\n\n${DIRECTOR_OUTPUT_RULES}`;
@@ -327,14 +379,16 @@ export const contentBlock: BlockExecutor = {
             systemPrompt: longformGateAMode
                 ? `${LONGFORM_GATE_A_SYSTEM_PROMPT}\n\n${contentPreferencePrompt}\n\n${scriptTonePrompt}`
                 : singleImageMode
-                  ? `${SINGLE_IMAGE_SYSTEM_PROMPT}\n\n${contentPreferencePrompt}\n\n${directorPrompt}\n\n${rulepack.imagePrompt}`
+                  ? SINGLE_IMAGE_SYSTEM_PROMPT
                   : genericTextMode
                     ? `${GENERIC_TEXT_SYSTEM_PROMPT}\n\n${contentPreferencePrompt}`
                     : `${buildShortsSystemPrompt(requestedShortsSceneCount)}\n\n${
                           requestedShortsSceneCount
                               ? `HARD SCENE COUNT: produce exactly ${requestedShortsSceneCount} scenes. Ignore any generic 10-15 scene defaults from reusable rulepacks.`
                               : ''
-                      }\n\n${buildCombinedPrompt(rulepack, 'contentPrompt')}\n\n${scriptTonePrompt}\n\n${directorPrompt}\n\n${rulepack.sourcePolicy}`,
+                      }\n\n${buildCombinedPrompt(rulepack, 'contentPrompt')}\n\n${
+                          creativeSimulationMode ? `${CREATIVE_SIMULATION_SHORTS_RULES}\n\n` : ''
+                      }${scriptTonePrompt}\n\n${directorPrompt}\n\n${rulepack.sourcePolicy}`,
             userMessage,
             maxTokens: 4096,
         });
@@ -365,7 +419,9 @@ export const contentBlock: BlockExecutor = {
             return { output: normalizedText, durationMs: Date.now() - start };
         }
 
-        const normalized = normalizeContentOutput(parsed, input, rulepack.id);
+        const normalized = singleImageMode
+            ? normalizeSingleImageOutput(parsed, input, rulepack.id)
+            : normalizeContentOutput(parsed, input, rulepack.id);
         const validated = ContentOutputSchema.safeParse(normalized);
         if (!validated.success) {
             throw new Error(`[content-block] Output schema validation failed: ${validated.error.message}`);
@@ -481,6 +537,8 @@ function isLongformGateAMode(input: unknown, config?: Record<string, unknown>): 
 
 function normalizeGenericTextOutput(parsed: unknown, input: unknown): Record<string, unknown> {
     const obj = isRecord(parsed) ? parsed : {};
+    const requestSpec = readRequestSpec(input) ?? buildRequestSpec(input);
+    const outputContract = buildOutputContract(requestSpec, 'text');
     const text =
         typeof obj['text'] === 'string'
             ? obj['text']
@@ -499,6 +557,9 @@ function normalizeGenericTextOutput(parsed: unknown, input: unknown): Record<str
         content: typeof obj['content'] === 'string' ? obj['content'] : text,
         value: typeof obj['value'] === 'string' ? obj['value'] : text,
         mode: typeof obj['mode'] === 'string' ? obj['mode'] : 'text',
+        requestTopic: typeof obj['requestTopic'] === 'string' ? obj['requestTopic'] : requestSpec.userRequest,
+        requestSpec,
+        outputContract,
         sources: Array.isArray(obj['sources']) && obj['sources'].length > 0 ? obj['sources'] : sources,
     };
 }
@@ -566,6 +627,13 @@ function buildSourceDigest(input: unknown): string[] {
 function normalizeContentOutput(parsed: unknown, input: unknown, presetId: string): unknown {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return parsed;
     const obj = parsed as Record<string, unknown>;
+    const requestSpec = readRequestSpec(input) ?? buildRequestSpec(input);
+    const requestTopic =
+        input && typeof input === 'object' && !Array.isArray(input)
+            ? extractRequestedSubject(input as Record<string, unknown>)
+            : requestSpec.userRequest;
+    const outputKind = inferOutputKind(requestSpec, obj);
+    const outputContract = buildOutputContract(requestSpec, outputKind);
     const sources = normalizeSources(extractSources(input));
     const parsedSources = Array.isArray(obj['sources']) ? normalizeSources(obj['sources']) : [];
     const defaultSourceRefs = sourceIds(parsedSources.length > 0 ? parsedSources : sources);
@@ -587,6 +655,10 @@ function normalizeContentOutput(parsed: unknown, input: unknown, presetId: strin
 
     return {
         ...obj,
+        requestTopic: typeof obj['requestTopic'] === 'string' ? obj['requestTopic'] : requestTopic,
+        requestSpec: isRecord(obj['requestSpec']) ? obj['requestSpec'] : requestSpec,
+        outputContract: isRecord(obj['outputContract']) ? obj['outputContract'] : outputContract,
+        sourceCoverage: buildSourceCoverageList(input, requestSpec),
         title,
         hook: compactSpokenLine(hook, 32),
         script: {
@@ -599,6 +671,49 @@ function normalizeContentOutput(parsed: unknown, input: unknown, presetId: strin
         cta: compactSpokenLine(cta, 32),
         sources: parsedSources.length > 0 ? parsedSources : sources,
         presetId,
+    };
+}
+
+function normalizeSingleImageOutput(parsed: unknown, input: unknown, presetId: string): unknown {
+    const normalized = normalizeContentOutput(parsed, input, presetId);
+    if (!isRecord(normalized)) return normalized;
+
+    const scenes = Array.isArray(normalized['scenes']) ? (normalized['scenes'] as unknown[]) : [];
+    const firstScene = isRecord(scenes[0]) ? scenes[0] : {};
+    const existingPromptPlan = isRecord(normalized['promptPlan']) ? normalized['promptPlan'] : {};
+    const style = isRecord(normalized['style']) ? normalized['style'] : {};
+    const title =
+        optionalString(existingPromptPlan['title']) ??
+        optionalString(normalized['title']) ??
+        optionalString(firstScene['topTitle']) ??
+        '이미지 프롬프트';
+    const imagePrompt =
+        optionalString(existingPromptPlan['imagePrompt']) ?? optionalString(firstScene['imagePrompt']) ?? '';
+    const aspectRatio =
+        optionalString(existingPromptPlan['aspectRatio']) ?? optionalString(style['aspectRatio']) ?? '9:16';
+
+    return {
+        ...normalized,
+        mode: 'single-image',
+        outputKind: 'image-prompt',
+        style: {
+            ...style,
+            format: 'single-image',
+            aspectRatio,
+            sceneCount: 1,
+        },
+        promptPlan: {
+            ...existingPromptPlan,
+            title,
+            imagePrompt,
+            aspectRatio,
+            caption:
+                optionalString(existingPromptPlan['caption']) ??
+                optionalString(firstScene['caption']) ??
+                optionalString(normalized['hook']) ??
+                title,
+        },
+        totalDurationSec: typeof normalized['totalDurationSec'] === 'number' ? normalized['totalDurationSec'] : 5,
     };
 }
 
@@ -693,6 +808,97 @@ function isQuestionOnlyScene(scene: Record<string, unknown>): boolean {
 
 function isRecord(input: unknown): input is Record<string, unknown> {
     return input != null && typeof input === 'object' && !Array.isArray(input);
+}
+
+function readRequestSpec(input: unknown): RequestSpec | undefined {
+    if (!isRecord(input)) return undefined;
+    const requestSpec = input['requestSpec'];
+    if (!isRecord(requestSpec)) return undefined;
+    const userRequest = optionalString(requestSpec['userRequest']);
+    if (!userRequest) return undefined;
+    const focusTerms = Array.isArray(requestSpec['focusTerms']) ? requestSpec['focusTerms'].map(String) : [];
+    const fallbackSpec = buildRequestSpec(userRequest);
+    const understanding = isRecord(requestSpec['understanding'])
+        ? {
+              surfaceTerms: Array.isArray(requestSpec['understanding']['surfaceTerms'])
+                  ? requestSpec['understanding']['surfaceTerms'].map(String)
+                  : fallbackSpec.understanding.surfaceTerms,
+              focusEntities: Array.isArray(requestSpec['understanding']['focusEntities'])
+                  ? requestSpec['understanding']['focusEntities'].map(String)
+                  : focusTerms,
+              actions: Array.isArray(requestSpec['understanding']['actions'])
+                  ? requestSpec['understanding']['actions'].map(String)
+                  : fallbackSpec.understanding.actions,
+              constraints: Array.isArray(requestSpec['understanding']['constraints'])
+                  ? requestSpec['understanding']['constraints'].map(String)
+                  : fallbackSpec.understanding.constraints,
+              styleHints: Array.isArray(requestSpec['understanding']['styleHints'])
+                  ? requestSpec['understanding']['styleHints'].map(String)
+                  : fallbackSpec.understanding.styleHints,
+          }
+        : {
+              ...fallbackSpec.understanding,
+              focusEntities: focusTerms.length > 0 ? focusTerms : fallbackSpec.understanding.focusEntities,
+          };
+    return {
+        userRequest,
+        contentIntent:
+            requestSpec['contentIntent'] === 'single-image' ||
+            requestSpec['contentIntent'] === 'blog-post' ||
+            requestSpec['contentIntent'] === 'shorts' ||
+            requestSpec['contentIntent'] === 'longform' ||
+            requestSpec['contentIntent'] === 'explanation' ||
+            requestSpec['contentIntent'] === 'research' ||
+            requestSpec['contentIntent'] === 'unknown'
+                ? requestSpec['contentIntent']
+                : 'unknown',
+        outputKind: readOutputKind(requestSpec['outputKind']),
+        ...(requestSpec['contentMode'] === 'creative-simulation' ? { contentMode: requestSpec['contentMode'] } : {}),
+        understanding,
+        focusTerms: focusTerms.length > 0 ? focusTerms : understanding.focusEntities,
+        exactSubjectRequired:
+            typeof requestSpec['exactSubjectRequired'] === 'boolean' ? requestSpec['exactSubjectRequired'] : true,
+    };
+}
+
+function readSourceCoverage(input: Record<string, unknown>): SourceCoverage | undefined {
+    const coverage = input['coverage'];
+    if (!isRecord(coverage)) return undefined;
+    const status = coverage['status'];
+    if (status !== 'direct' && status !== 'supporting' && status !== 'unrelated') return undefined;
+    return {
+        status,
+        matchedTerms: Array.isArray(coverage['matchedTerms']) ? coverage['matchedTerms'].map(String) : [],
+        missingTerms: Array.isArray(coverage['missingTerms']) ? coverage['missingTerms'].map(String) : [],
+        reason: optionalString(coverage['reason']) ?? '',
+    };
+}
+
+function buildSourceCoverageList(input: unknown, requestSpec: RequestSpec): Array<Record<string, unknown>> {
+    return extractSources(input).map(source => ({
+        id: source['id'],
+        title: source['title'],
+        ...(readSourceCoverage(source) ?? classifySourceCoverage(source, requestSpec)),
+    }));
+}
+
+function inferOutputKind(requestSpec: RequestSpec, parsed: Record<string, unknown>): OutputKind {
+    if (requestSpec.outputKind !== 'unknown') return requestSpec.outputKind;
+    const style = isRecord(parsed['style']) ? parsed['style'] : {};
+    if (style['format'] === 'single-image') return 'image';
+    if (style['format'] === 'vertical-shorts') return 'video';
+    return requestSpec.outputKind;
+}
+
+function readOutputKind(input: unknown): OutputKind {
+    return input === 'text' ||
+        input === 'image' ||
+        input === 'audio' ||
+        input === 'video' ||
+        input === 'data' ||
+        input === 'unknown'
+        ? input
+        : 'unknown';
 }
 
 function compactSpokenLine(value: string, maxChars: number): string {

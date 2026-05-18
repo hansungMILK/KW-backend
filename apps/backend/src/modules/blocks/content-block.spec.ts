@@ -142,6 +142,74 @@ describe('contentBlock', () => {
         expect(result.output['style']).toMatchObject({ sceneCount: 8 });
     });
 
+    it('plans a single image as an image prompt artifact without Shorts script instructions', async () => {
+        vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
+            content: JSON.stringify({
+                title: '바나나 댄스',
+                hook: '춤추는 바나나',
+                script: {
+                    hook: '춤추는 바나나',
+                    angle: '단일 이미지 프롬프트',
+                    cta: '',
+                },
+                style: { format: 'single-image', aspectRatio: '9:16', sceneCount: 1 },
+                scenes: [
+                    {
+                        sceneNumber: 1,
+                        imageSlot: '[Image #1]',
+                        storyBeat: 'single-image',
+                        topTitle: '바나나 댄스',
+                        caption: '춤추는 바나나',
+                        narration: '바나나가 무대 위에서 춤추는 장면입니다.',
+                        imagePrompt:
+                            'A cheerful banana dancing under colorful stage lights, playful studio backdrop, dynamic pose, polished 3D character illustration',
+                        visualText: '춤추는 바나나',
+                        visual: { topTitle: '바나나 댄스', mainCaption: '춤추는 바나나' },
+                        claimType: 'opinion',
+                        sourceRefs: [],
+                        durationSec: 5,
+                    },
+                ],
+                cta: '',
+                totalDurationSec: 5,
+                sources: [],
+            }),
+            model: 'gpt-test',
+            inputTokens: 1,
+            outputTokens: 1,
+            latencyMs: 1,
+        });
+
+        const result = await contentBlock.execute(
+            {
+                requestTopic: '바나나가 춤추는 이미지 생성해줘',
+                requestSpec: {
+                    userRequest: '바나나가 춤추는 이미지 생성해줘',
+                    contentIntent: 'single-image',
+                    outputKind: 'image',
+                    focusTerms: ['바나나', '춤'],
+                    exactSubjectRequired: true,
+                },
+            },
+            { mode: 'single-image' }
+        );
+
+        const request = vi.mocked(openaiAdapter.chatJson).mock.calls[0]?.[0];
+        expect(request?.systemPrompt).toContain('image prompt planner');
+        expect(request?.systemPrompt).not.toContain('Shorts Director');
+        expect(request?.systemPrompt).not.toContain('YouTube Shorts');
+        expect(result.output).toMatchObject({
+            mode: 'single-image',
+            outputKind: 'image-prompt',
+            promptPlan: {
+                title: '바나나 댄스',
+                imagePrompt:
+                    'A cheerful banana dancing under colorful stage lights, playful studio backdrop, dynamic pose, polished 3D character illustration',
+            },
+            style: { format: 'single-image', sceneCount: 1 },
+        });
+    });
+
     it('normalizes nullable source URLs from AI shorts output instead of failing generic topic runs', async () => {
         vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
             content: JSON.stringify({
@@ -349,6 +417,66 @@ describe('contentBlock', () => {
         expect(request?.userMessage).toContain('primarySource=true');
     });
 
+    it('passes the exact requested subject into shorts writing even when web search returns broad sources', async () => {
+        vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
+            content: JSON.stringify({
+                title: '무한도전 YES or NO',
+                hook: 'YES or NO 왜 떴지?',
+                script: {
+                    hook: 'YES or NO 왜 떴지?',
+                    angle: '요청한 특정 편을 설명한다',
+                    cta: '다음 편도 확인하세요',
+                },
+                scenes: Array.from({ length: 10 }, (_, index) => ({
+                    sceneNumber: index + 1,
+                    imageSlot: `[Image #${index + 1}]`,
+                    storyBeat: index === 0 ? 'hook' : 'setup',
+                    topTitle: 'YES or NO 편',
+                    caption: '선택 구조',
+                    narration: 'YES or NO 편의 선택 구조를 설명합니다.',
+                    imagePrompt: 'variety show yes or no decision board',
+                    visualText: '선택 구조',
+                    visual: { topTitle: 'YES or NO 편', mainCaption: '선택 구조' },
+                    claimType: 'opinion',
+                    sourceRefs: [],
+                    durationSec: 5,
+                })),
+                cta: '다음 편도 확인하세요',
+                totalDurationSec: 50,
+            }),
+            model: 'gpt-test',
+            inputTokens: 1,
+            outputTokens: 1,
+            latencyMs: 1,
+        });
+
+        await contentBlock.execute(
+            {
+                requestTopic: '쇼츠생성해줘. 무한도전 yes or no 편 설명',
+                keywords: ['무한도전 yes or no', '무한도전 레전드 편'],
+                articles: [
+                    {
+                        id: 'source-1',
+                        title: "'무한도전', 웹툰 연재에 도전",
+                        url: 'https://blog.mbc.co.kr/1759',
+                        source: 'MBC 블로그',
+                        summary:
+                            "특정 'yes or no' 편 자체를 설명하진 않지만, 무한도전의 실험적 포맷을 이해하는 참고 근거입니다.",
+                    },
+                ],
+            },
+            { topic: '쇼츠생성해줘. 무한도전 yes or no 편 설명', scenes: 10 }
+        );
+
+        const request = vi.mocked(openaiAdapter.chatJson).mock.calls[0]?.[0];
+        expect(request?.userMessage).toContain('REQUESTED SUBJECT');
+        expect(request?.userMessage).toContain('REQUEST SPEC');
+        expect(request?.userMessage).toContain('SOURCE COVERAGE');
+        expect(request?.userMessage).toContain('무한도전 yes or no 편 설명');
+        expect(request?.systemPrompt).toContain('Do not broaden a specific requested subject into its parent topic');
+        expect(request?.systemPrompt).toContain('SourceCoverage');
+    });
+
     it('passes multiple primary URL full texts to the script writer in source priority order', async () => {
         vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
             content: JSON.stringify({
@@ -413,6 +541,81 @@ describe('contentBlock', () => {
         expect(request?.userMessage).toContain('국산 하네스 엔지니어링 사례');
         expect(request?.userMessage).toContain('sourcePriority=2');
         expect(request?.userMessage).toContain('개발자 커뮤니티 반응');
+    });
+
+    it('uses creative simulation rules for hypothetical battle Shorts instead of generic explainer writing', async () => {
+        vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
+            content: JSON.stringify({
+                title: '나루토 VS 고죠',
+                hook: '처음부터 풀전력',
+                script: {
+                    hook: '처음부터 풀전력',
+                    angle: '가상 전투를 액션 비트로 전개',
+                    cta: '다음 대결도 남겨줘',
+                },
+                style: { format: 'vertical-shorts', aspectRatio: '9:16', sceneCount: 10 },
+                scenes: Array.from({ length: 10 }, (_, index) => ({
+                    sceneNumber: index + 1,
+                    imageSlot: `[Image #${index + 1}]`,
+                    storyBeat: index === 0 ? 'opening-condition' : 'combat-beat',
+                    topTitle: '나루토 VS 고죠',
+                    caption: index === 0 ? '풀전력 시작' : `공방 ${index + 1}`,
+                    narration:
+                        index === 0
+                            ? '나루토가 처음부터 쿠라마 모드로 전장을 밀어붙입니다.'
+                            : index === 4
+                              ? '하지만 마지막 거리에서 공격은 끝없이 느려집니다.'
+                              : `가상 전투의 ${index + 1}번째 공방이 이어집니다.`,
+                    imagePrompt:
+                        index === 4
+                            ? 'A high-energy fictional crossover battle beat where a glowing warrior charge stops inches before a calm sorcerer, invisible space distortion between them'
+                            : `A cinematic fictional crossover battle beat ${index + 1}, two powerful fighters testing distance and timing`,
+                    visualText: index === 0 ? '풀전력 시작' : `공방 ${index + 1}`,
+                    visual: {
+                        topTitle: '나루토 VS 고죠',
+                        mainCaption: index === 0 ? '풀전력 시작' : `공방 ${index + 1}`,
+                    },
+                    claimType: 'hypothetical',
+                    sourceRefs: [],
+                    durationSec: 5,
+                })),
+                cta: '다음 대결도 남겨줘',
+                totalDurationSec: 50,
+                sources: [],
+            }),
+            model: 'gpt-test',
+            inputTokens: 1,
+            outputTokens: 1,
+            latencyMs: 1,
+        });
+
+        const result = await contentBlock.execute({
+            requestTopic: '나루토와 주술회전의 고죠 사토루가 싸우면 누가 이길까? 그걸 그린 쇼츠를 만들어줘',
+            requestSpec: {
+                userRequest: '나루토와 주술회전의 고죠 사토루가 싸우면 누가 이길까? 그걸 그린 쇼츠를 만들어줘',
+                contentIntent: 'shorts',
+                outputKind: 'video',
+                contentMode: 'creative-simulation',
+                focusTerms: ['나루토', '고죠', '사토루'],
+                exactSubjectRequired: true,
+            },
+        });
+
+        const request = vi.mocked(openaiAdapter.chatJson).mock.calls[0]?.[0];
+        expect(request?.systemPrompt).toContain('Creative Simulation Shorts Rulepack');
+        expect(request?.systemPrompt).toContain('simulation beat');
+        expect(request?.systemPrompt).toContain('Image Prompt Rules');
+        expect(request?.systemPrompt).toContain('Do not stop the sequence to lecture');
+        expect(request?.systemPrompt).toContain('Each scene must change the fight state');
+        expect(request?.systemPrompt).toContain('Avoid absolute winner wording');
+        expect(request?.systemPrompt).toContain('claimType: hypothetical');
+        expect(result.output).toMatchObject({
+            requestSpec: expect.objectContaining({ contentMode: 'creative-simulation' }),
+        });
+        expect((result.output['scenes'] as Array<Record<string, unknown>>)[0]).toMatchObject({
+            claimType: 'hypothetical',
+            sourceRefs: [],
+        });
     });
 
     it('injects selected script tone rules into the Shorts writer prompt', async () => {

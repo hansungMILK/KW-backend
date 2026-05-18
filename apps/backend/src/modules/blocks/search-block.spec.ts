@@ -195,7 +195,54 @@ describe('searchBlock', () => {
         expect(openaiAdapter.webSearchJson).toHaveBeenCalledTimes(1);
         expect(result.output).toMatchObject({
             collectionMode: 'web_search',
+            requestTopic: 'KTX 예매가 어려워진 이유',
+            requestSpec: expect.objectContaining({
+                userRequest: 'KTX 예매가 어려워진 이유',
+                outputKind: 'unknown',
+                focusTerms: expect.arrayContaining(['ktx', '예매', '어려워진', '이유']),
+                understanding: expect.objectContaining({
+                    surfaceTerms: expect.arrayContaining(['KTX 예매가 어려워진 이유']),
+                    focusEntities: expect.arrayContaining(['ktx', '예매', '어려워진', '이유']),
+                }),
+            }),
             articles: [expect.objectContaining({ title: 'KTX 최신 이슈' })],
+        });
+    });
+
+    it('marks broad search hits as supporting when they do not cover the exact requested subject', async () => {
+        vi.mocked(openaiAdapter.webSearchJson).mockResolvedValueOnce({
+            content: JSON.stringify({
+                keywords: ['무한도전 yes or no', '무한도전 레전드 편'],
+                articles: [
+                    {
+                        title: "'무한도전', 웹툰 연재에 도전",
+                        url: 'https://blog.mbc.co.kr/1759',
+                        source: 'MBC 블로그',
+                        sourceType: 'blog',
+                        confidence: 0.7,
+                        summary:
+                            "특정 'yes or no' 편 자체를 설명하진 않지만, 무한도전의 실험적 포맷을 이해하는 참고 근거입니다.",
+                    },
+                ],
+                trendScore: 60,
+            }),
+            model: 'gpt-test-search',
+            inputTokens: 1,
+            outputTokens: 1,
+            latencyMs: 1,
+        });
+
+        const result = await searchBlock.execute({ query: '쇼츠생성해줘. 무한도전 yes or no 편 설명' });
+        const article = (result.output['articles'] as Array<Record<string, unknown>>)[0];
+
+        expect(result.output['requestSpec']).toMatchObject({
+            contentIntent: 'shorts',
+            outputKind: 'video',
+            focusTerms: expect.arrayContaining(['무한도전', 'yes', 'no']),
+        });
+        expect(article['coverage']).toMatchObject({
+            status: 'supporting',
+            missingTerms: expect.arrayContaining(['yes', 'no']),
         });
     });
 });

@@ -549,6 +549,7 @@ function getApprovalRenderCostConfig(
 
 type ImageGenerationMetadata = {
     model?: string;
+    format?: 'shorts-frame' | 'single-image';
     imageStyleId?: string;
     imageStyleLabel?: string;
     recommendedStyleId?: string;

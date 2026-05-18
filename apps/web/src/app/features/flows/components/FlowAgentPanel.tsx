@@ -37,6 +37,7 @@ type ImageStyleOption = {
 type ImageGenerationMetadata = {
     imageGeneration?: {
         model?: string;
+        format?: 'shorts-frame' | 'single-image';
         recommendedStyleId?: ImageStyleId;
         imageStyleId?: ImageStyleId;
         imageStyleLabel?: string;
@@ -85,6 +86,16 @@ type ContentProfileMetadata = {
         intensityOptions?: ContentProfileOption<ScriptToneIntensity>[];
         reviewModeOptions?: ContentProfileOption<ReviewMode>[];
         profileOptions?: ContentProfileOption<ContentProfileId>[];
+    };
+};
+
+type AiRequestDecisionMetadata = {
+    aiRequestDecision?: {
+        intent?: string;
+        recipeId?: string | null;
+        outputKind?: string;
+        mode?: string;
+        reason?: string;
     };
 };
 
@@ -143,6 +154,13 @@ const contentProfileFamily = (value: unknown): string | undefined => {
 };
 
 const isLongformContentProfileId = (value: unknown): boolean => contentProfileFamily(value) === 'longform';
+const isImageContentProfileId = (value: unknown): boolean => contentProfileFamily(value) === 'image';
+const isShortsContentProfileId = (value: unknown): boolean => contentProfileFamily(value) === 'shorts';
+
+const isSingleImageGeneration = (
+    imageGeneration: ImageGenerationMetadata['imageGeneration'] | undefined,
+    contentProfileId: unknown
+): boolean => imageGeneration?.format === 'single-image' || isImageContentProfileId(contentProfileId);
 
 const filterProfileOptionsByFamily = (
     options: ContentProfileOption<ContentProfileId>[] | undefined,
@@ -151,6 +169,30 @@ const filterProfileOptionsByFamily = (
     const selectedFamily = contentProfileFamily(selectedContentProfileId);
     if (!selectedFamily) return options ?? [];
     return (options ?? []).filter(option => contentProfileFamily(option.id) === selectedFamily);
+};
+
+const asAiRequestDecisionMetadata = (metadata: unknown): AiRequestDecisionMetadata['aiRequestDecision'] | undefined => {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return undefined;
+    const aiRequestDecision = (metadata as AiRequestDecisionMetadata).aiRequestDecision;
+    if (!aiRequestDecision || typeof aiRequestDecision !== 'object' || Array.isArray(aiRequestDecision)) {
+        return undefined;
+    }
+    return aiRequestDecision;
+};
+
+const describeAiContentDecision = (
+    contentProfileId: unknown,
+    aiRequestDecision: AiRequestDecisionMetadata['aiRequestDecision'] | undefined
+): string => {
+    if (isShortsContentProfileId(contentProfileId)) {
+        if (aiRequestDecision?.mode === 'creative-simulation') return '시뮬레이션 쇼츠';
+        if (aiRequestDecision?.mode === 'story') return '이야기형 쇼츠';
+        if (aiRequestDecision?.mode === 'news') return '뉴스형 쇼츠';
+        return '쇼츠 제작';
+    }
+    if (isLongformContentProfileId(contentProfileId)) return '롱폼 제작';
+    if (isImageContentProfileId(contentProfileId)) return '이미지 생성';
+    return '콘텐츠 제작';
 };
 
 const toUserVisibleAgentError = (error: unknown): string => {
@@ -321,11 +363,17 @@ export const FlowAgentPanel = ({
             const imageGeneration = asImageGenerationMetadata(proposal.metadata);
             const contentProfile = asContentProfileMetadata(proposal.metadata);
             const selectedContentProfileId = proposalContentProfiles[proposal.id] ?? contentProfile?.contentProfileId;
+            const isImageProposal = isSingleImageGeneration(imageGeneration, selectedContentProfileId);
             const approvalOptions = {
-                scriptToneId: proposalScriptTones[proposal.id] ?? contentProfile?.scriptToneId,
-                scriptToneIntensity: proposalScriptToneIntensities[proposal.id] ?? contentProfile?.scriptToneIntensity,
-                reviewMode: proposalReviewModes[proposal.id] ?? contentProfile?.reviewMode,
                 contentProfileId: selectedContentProfileId,
+                ...(!isImageProposal
+                    ? {
+                          scriptToneId: proposalScriptTones[proposal.id] ?? contentProfile?.scriptToneId,
+                          scriptToneIntensity:
+                              proposalScriptToneIntensities[proposal.id] ?? contentProfile?.scriptToneIntensity,
+                          reviewMode: proposalReviewModes[proposal.id] ?? contentProfile?.reviewMode,
+                      }
+                    : {}),
                 ...(!isLongformContentProfileId(selectedContentProfileId)
                     ? {
                           imageStyleId: proposalImageStyles[proposal.id] ?? imageGeneration?.imageStyleId,
@@ -445,7 +493,7 @@ export const FlowAgentPanel = ({
                         <div className="mb-2 font-semibold text-foreground">무엇을 만들까요?</div>
                         <div>자연어로 요청하면 필요한 블록을 제안하고, 승인 후 캔버스에 배치합니다.</div>
                         <div className="mt-2 space-y-1">
-                            <div>예: 최신 이슈를 정보전달 쇼츠로 제작해줘</div>
+                            <div>예: 최신 이슈를 쇼츠로 제작해줘</div>
                             <div>예: 바나나가 춤추는 이미지 생성해줘</div>
                             <div>예: 리뷰 요약 자동화 만들어줘</div>
                         </div>
@@ -474,6 +522,7 @@ export const FlowAgentPanel = ({
                         const proposal = msg.proposal;
                         const imageGeneration = asImageGenerationMetadata(proposal.metadata);
                         const contentProfile = asContentProfileMetadata(proposal.metadata);
+                        const aiRequestDecision = asAiRequestDecisionMetadata(proposal.metadata);
                         const selectedScriptToneId =
                             proposalScriptTones[proposal.id] ?? contentProfile?.scriptToneId ?? 'informative-reframe';
                         const selectedScriptToneIntensity =
@@ -491,6 +540,8 @@ export const FlowAgentPanel = ({
                             selectedContentProfileId
                         );
                         const isLongformProposal = isLongformContentProfileId(selectedContentProfileId);
+                        const isImageProposal = isSingleImageGeneration(imageGeneration, selectedContentProfileId);
+                        const isShortsProposal = isShortsContentProfileId(selectedContentProfileId);
                         const selectedStyleId =
                             proposalImageStyles[proposal.id] ??
                             imageGeneration?.imageStyleId ??
@@ -519,6 +570,9 @@ export const FlowAgentPanel = ({
                                   { count: 16, label: '16장' },
                               ];
                         const shouldShowImageGeneration = Boolean(imageGeneration) && !isLongformProposal;
+                        const shouldShowContentProfile = Boolean(contentProfile) && !isImageProposal;
+                        const shouldShowProfileChoices = !isShortsProposal && visibleProfileOptions.length > 1;
+                        const shouldShowSceneCountChoices = !isImageProposal && sceneCountOptions.length > 1;
                         const isApproving = Boolean(approvingProposalIds[proposal.id]);
                         const isApproved = Boolean(approvedProposalIds[proposal.id]);
                         return (
@@ -536,12 +590,28 @@ export const FlowAgentPanel = ({
                                             <div key={i}>{b.label}</div>
                                         ))}
                                     </div>
-                                    {contentProfile && (
+                                    {shouldShowContentProfile && contentProfile && (
                                         <div className="rounded-md border border-border bg-background/40 p-2 space-y-2">
                                             <div className="text-[11px] font-semibold text-foreground">
                                                 대본/콘텐츠 설정
                                             </div>
-                                            {visibleProfileOptions.length ? (
+                                            <div className="rounded-md border border-border/70 bg-muted/25 px-2 py-1.5">
+                                                <div className="text-[10px] font-medium text-muted-foreground">
+                                                    AI 콘텐츠 판단
+                                                </div>
+                                                <div className="mt-0.5 text-[11px] font-semibold text-foreground">
+                                                    {describeAiContentDecision(
+                                                        selectedContentProfileId,
+                                                        aiRequestDecision
+                                                    )}
+                                                </div>
+                                                {aiRequestDecision?.reason ? (
+                                                    <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                                                        {aiRequestDecision.reason}
+                                                    </div>
+                                                ) : null}
+                                            </div>
+                                            {shouldShowProfileChoices ? (
                                                 <div className="space-y-1">
                                                     <div className="text-[10px] font-medium text-muted-foreground">
                                                         콘텐츠 종류
@@ -672,31 +742,33 @@ export const FlowAgentPanel = ({
                                         <div className="rounded-md border border-border bg-background/40 p-2 space-y-2">
                                             <div className="text-[11px] font-semibold text-foreground">이미지 설정</div>
                                             <div className="text-[10px] text-muted-foreground">
-                                                모델: {imageGeneration.model ?? 'gpt-image-2'} · 장면:{' '}
-                                                {selectedSceneCount}장
+                                                모델: {imageGeneration.model ?? 'gpt-image-2'} ·{' '}
+                                                {isImageProposal ? '이미지 수' : '장면'}: {selectedSceneCount}장
                                             </div>
-                                            <div className="flex flex-wrap gap-1">
-                                                {sceneCountOptions.map(option => (
-                                                    <button
-                                                        key={option.count}
-                                                        type="button"
-                                                        className={`rounded-md border px-2 py-1 text-[10px] transition-colors ${
-                                                            selectedSceneCount === option.count
-                                                                ? 'border-primary bg-primary/20 text-primary'
-                                                                : 'border-border bg-muted/30 text-muted-foreground hover:text-foreground'
-                                                        }`}
-                                                        disabled={isApproved}
-                                                        onClick={() =>
-                                                            setProposalSceneCounts(prev => ({
-                                                                ...prev,
-                                                                [proposal.id]: option.count,
-                                                            }))
-                                                        }
-                                                    >
-                                                        {option.label}
-                                                    </button>
-                                                ))}
-                                            </div>
+                                            {shouldShowSceneCountChoices && (
+                                                <div className="flex flex-wrap gap-1">
+                                                    {sceneCountOptions.map(option => (
+                                                        <button
+                                                            key={option.count}
+                                                            type="button"
+                                                            className={`rounded-md border px-2 py-1 text-[10px] transition-colors ${
+                                                                selectedSceneCount === option.count
+                                                                    ? 'border-primary bg-primary/20 text-primary'
+                                                                    : 'border-border bg-muted/30 text-muted-foreground hover:text-foreground'
+                                                            }`}
+                                                            disabled={isApproved}
+                                                            onClick={() =>
+                                                                setProposalSceneCounts(prev => ({
+                                                                    ...prev,
+                                                                    [proposal.id]: option.count,
+                                                                }))
+                                                            }
+                                                        >
+                                                            {option.label}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
                                             <div className="flex flex-wrap gap-1">
                                                 {imageGeneration.styleOptions?.map(option => (
                                                     <button

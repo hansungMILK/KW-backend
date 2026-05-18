@@ -290,6 +290,20 @@ describe('compileWorkflowPlan', () => {
         expect(prefs.sceneCountOptions.map(option => option.count)).toEqual([8, 12, 16]);
     });
 
+    it('uses fixed image-count metadata for standalone image requests', () => {
+        const prefs = buildImageGenerationPreferences({
+            userMessage: '바나나가 춤추는 이미지 생성해줘',
+            sceneCount: 1,
+            imageQuality: 'medium',
+            format: 'single-image',
+        });
+
+        expect(prefs.format).toBe('single-image');
+        expect(prefs.sceneCount).toBe(1);
+        expect(prefs.sceneCountOptions).toEqual([{ count: 1, label: '1장' }]);
+        expect(prefs.imageEstimatedCostUsd).toBe(0.041);
+    });
+
     it('lets the user requested visual style override planner defaults', () => {
         const prefs = buildImageGenerationPreferences({
             userMessage: '쇼츠 만들어줘. 실사 그림풍으로, 아이폰으로 찍은 것처럼.',

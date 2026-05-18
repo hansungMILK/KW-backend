@@ -165,6 +165,135 @@ describe('analysisBlock', () => {
         expect(JSON.stringify(result.output['issues'])).not.toContain('금지 키워드 "사기"');
     });
 
+    it('does not treat fictional creative simulation combat wording as real-world violence', async () => {
+        const normalizedScenes = Array.from({ length: 12 }, (_, index) => ({
+            sceneNumber: index + 1,
+            caption: index === 0 ? '가상 대치' : `공방 ${index + 1}`,
+            narration:
+                index === 0
+                    ? '가상 시뮬레이션에서 두 캐릭터의 폭력적인 첫 충돌이 시작됩니다.'
+                    : `가상 전투의 ${index + 1}번째 공방이 이어집니다.`,
+            imagePrompt:
+                index === 0
+                    ? 'A fictional stylized character battle simulation opening beat with explosive energy'
+                    : `A fictional character duel simulation beat ${index + 1}`,
+            visual: {
+                topTitle: '가상 대결',
+                mainCaption: index === 0 ? '가상 대치' : `공방 ${index + 1}`,
+            },
+            claimType: 'hypothetical',
+            sourceRefs: [],
+            durationSec: 5,
+        }));
+
+        const result = await analysisBlock.execute({
+            normalizedScenes,
+            metadata: {
+                title: '가상 대결',
+                presetId: 'general-shorts',
+                requestSpec: {
+                    userRequest: '두 캐릭터가 맞붙는 가상 상황을 쇼츠로 구성해줘',
+                    contentIntent: 'shorts',
+                    outputKind: 'video',
+                    contentMode: 'creative-simulation',
+                    focusTerms: ['캐릭터'],
+                    exactSubjectRequired: true,
+                },
+            },
+        });
+
+        expect(result.output['approved']).toBe(true);
+        expect(JSON.stringify(result.output['issues'])).not.toContain('금지 키워드 "폭력"');
+    });
+
+    it('repairs creative simulation pacing and verdict issues once before rejecting the workflow', async () => {
+        vi.mocked(openaiAdapter.chatJson)
+            .mockResolvedValueOnce({
+                content: JSON.stringify({
+                    suggestedIssues: [
+                        {
+                            severity: 'high',
+                            message:
+                                '유사한 문장이 여러 씬에서 반복되어 템포가 느려질 수 있습니다. 핵심 근거만 남기고 압축하면 더 좋습니다.',
+                        },
+                        {
+                            severity: 'high',
+                            message:
+                                "'무한이 걸립니다', '끝입니다', '훨씬 유리합니다'처럼 단정적인 표현은 대결 해석형 콘텐츠에서는 조금 더 완곡하게 다듬는 편이 좋습니다.",
+                        },
+                    ],
+                }),
+            })
+            .mockResolvedValueOnce({
+                content: JSON.stringify({
+                    scenes: Array.from({ length: 12 }, (_, index) => ({
+                        sceneNumber: index + 1,
+                        caption:
+                            index === 0 ? '풀전력 돌입' : index === 4 ? '닿지 않는 거리' : `전황 변화 ${index + 1}`,
+                        narration:
+                            index === 0
+                                ? '나루토가 처음부터 쿠라마 모드로 전장을 넓히며 압박합니다.'
+                                : index === 4
+                                  ? '고죠 사토루 앞에서 마지막 거리가 접히지 않으며 돌진이 멈춰 보입니다.'
+                                  : index === 8
+                                    ? '이 가상 전개에서는 접촉을 막는 쪽이 상성상 더 유리해 보입니다.'
+                                    : `두 인물의 전투 흐름이 ${index + 1}번째 장면에서 새 국면으로 바뀝니다.`,
+                        imagePrompt: `A cinematic fictional battle simulation beat ${index + 1}`,
+                        visual: {
+                            topTitle: '나루토 VS 고죠',
+                            mainCaption:
+                                index === 0 ? '풀전력 돌입' : index === 4 ? '닿지 않는 거리' : `전황 변화 ${index + 1}`,
+                        },
+                        claimType: 'hypothetical',
+                        sourceRefs: [],
+                        durationSec: 5,
+                    })),
+                }),
+            });
+
+        const normalizedScenes = Array.from({ length: 12 }, (_, index) => ({
+            sceneNumber: index + 1,
+            caption: index === 0 ? '전투 시작' : `비슷한 공방 ${index + 1}`,
+            narration:
+                index === 0
+                    ? '고죠사토루와 나루토가 맞붙으면 무한이 걸립니다.'
+                    : '공격합니다. 막힙니다. 다시 공격합니다. 끝입니다.',
+            imagePrompt: 'A repetitive fictional battle scene.',
+            visual: {
+                topTitle: '나루토 VS 고죠',
+                mainCaption: index === 0 ? '전투 시작' : `비슷한 공방 ${index + 1}`,
+            },
+            claimType: 'hypothetical',
+            sourceRefs: [],
+            durationSec: 5,
+        }));
+
+        const result = await analysisBlock.execute({
+            normalizedScenes,
+            metadata: {
+                title: '나루토 VS 고죠',
+                presetId: 'general-shorts',
+                requestSpec: {
+                    userRequest: '고죠사토루 vs 나루토 싸우면 어떻게 되는지 쇼츠로 만들어줘',
+                    contentIntent: 'shorts',
+                    outputKind: 'video',
+                    contentMode: 'creative-simulation',
+                    focusTerms: ['고죠사토루', '나루토'],
+                    exactSubjectRequired: true,
+                },
+            },
+        });
+
+        expect(openaiAdapter.chatJson).toHaveBeenCalledTimes(2);
+        expect(result.output['approved']).toBe(true);
+        expect(JSON.stringify(result.output['autoRemediations'])).toContain('rewrite-creative-simulation-scenes');
+        expect(JSON.stringify(result.output['issues'])).not.toContain('유사한 문장');
+
+        const repairedScenes = result.output['normalizedScenes'] as Array<{ narration: string }>;
+        expect(repairedScenes[4]?.narration).toContain('고죠 사토루');
+        expect(repairedScenes[8]?.narration).toContain('유리해 보입니다');
+    });
+
     it('approves complete longform Gate A artifacts and keeps paid execution blocked', async () => {
         const result = await analysisBlock.execute(
             {
@@ -214,5 +343,46 @@ describe('analysisBlock', () => {
         expect(openaiAdapter.chatJson).toHaveBeenCalledTimes(1);
         expect(result.output).toHaveProperty('normalizedScenes');
         expect(result.output['mode']).toBeUndefined();
+    });
+
+    it('blocks generic shorts scripts that do not cover the exact requested subject', async () => {
+        const normalizedScenes = Array.from({ length: 12 }, (_, index) => ({
+            sceneNumber: index + 1,
+            caption:
+                index === 0 ? '왜 아직도 레전드?' : index === 1 ? '무한도전은 실험 예능' : `일반 장면 ${index + 1}`,
+            narration:
+                index === 0
+                    ? '이 편, 왜 아직도 레전드야?'
+                    : index === 1
+                      ? '무한도전은 매번 형식을 바꾸는 실험형 예능이었어.'
+                      : `무한도전의 일반적인 매력을 설명하는 장면입니다 ${index + 1}`,
+            imagePrompt: 'A generic Korean variety show explainer scene.',
+            visual: {
+                topTitle: '무한도전 YES or NO',
+                mainCaption: index === 1 ? '무한도전은 실험 예능' : `일반 장면 ${index + 1}`,
+            },
+            claimType: index === 1 ? 'fact' : 'opinion',
+            sourceRefs: index === 1 ? ['source-1'] : [],
+            durationSec: 5,
+        }));
+
+        const result = await analysisBlock.execute({
+            normalizedScenes,
+            metadata: {
+                requestTopic: '쇼츠생성해줘. 무한도전 yes or no 편 설명',
+                outputContract: {
+                    requestTopic: '쇼츠생성해줘. 무한도전 yes or no 편 설명',
+                    outputKind: 'video',
+                    requiredCoverageTerms: ['무한도전', 'yes', 'no'],
+                    exactSubjectRequired: true,
+                },
+                title: '무한도전 YES or NO',
+                presetId: 'general-shorts',
+            },
+        });
+
+        expect(result.output['approved']).toBe(false);
+        expect(JSON.stringify(result.output['issues'])).toContain('요청한 핵심 주제');
+        expect(JSON.stringify(result.output['issues'])).toContain('yes');
     });
 });

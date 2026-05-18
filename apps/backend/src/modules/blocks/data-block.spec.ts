@@ -157,4 +157,78 @@ describe('dataBlock', () => {
         expect(result.output).toHaveProperty('normalizedScenes');
         expect(result.output['mode']).toBeUndefined();
     });
+
+    it('carries the exact requested topic into metadata for downstream quality checks', async () => {
+        const result = await dataBlock.execute({
+            requestTopic: '쇼츠생성해줘. 무한도전 yes or no 편 설명',
+            requestSpec: {
+                userRequest: '쇼츠생성해줘. 무한도전 yes or no 편 설명',
+                contentIntent: 'shorts',
+                outputKind: 'video',
+                focusTerms: ['무한도전', 'yes', 'no'],
+                exactSubjectRequired: true,
+            },
+            title: '무한도전 YES or NO',
+            scenes: [
+                {
+                    sceneNumber: 1,
+                    caption: '왜 레전드?',
+                    narration: '무한도전의 일반 포맷을 설명합니다.',
+                    imagePrompt: 'generic variety show board',
+                    claimType: 'opinion',
+                    sourceRefs: [],
+                    durationSec: 5,
+                },
+            ],
+        });
+
+        expect(result.output['metadata']).toMatchObject({
+            requestTopic: '쇼츠생성해줘. 무한도전 yes or no 편 설명',
+            requestSpec: expect.objectContaining({
+                contentIntent: 'shorts',
+                outputKind: 'video',
+                focusTerms: ['무한도전', 'yes', 'no'],
+            }),
+            outputContract: expect.objectContaining({
+                outputKind: 'video',
+                requiredCoverageTerms: ['무한도전', 'yes', 'no'],
+                exactSubjectRequired: true,
+            }),
+        });
+    });
+
+    it('preserves creative simulation mode for downstream analysis and media blocks', async () => {
+        const result = await dataBlock.execute({
+            requestTopic: '두 캐릭터가 맞붙는 가상 상황을 쇼츠로 구성해줘',
+            requestSpec: {
+                userRequest: '두 캐릭터가 맞붙는 가상 상황을 쇼츠로 구성해줘',
+                contentIntent: 'shorts',
+                outputKind: 'video',
+                contentMode: 'creative-simulation',
+                focusTerms: ['캐릭터'],
+                exactSubjectRequired: true,
+            },
+            title: '가상 대결',
+            scenes: [
+                {
+                    sceneNumber: 1,
+                    caption: '첫 충돌',
+                    narration: '두 캐릭터가 첫 합을 겨루는 가상 장면입니다.',
+                    imagePrompt: 'A fictional character duel opening beat.',
+                    claimType: 'hypothetical',
+                    sourceRefs: [],
+                    durationSec: 5,
+                },
+            ],
+        });
+
+        expect(result.output['metadata']).toMatchObject({
+            requestSpec: expect.objectContaining({
+                contentMode: 'creative-simulation',
+            }),
+            outputContract: expect.objectContaining({
+                contentMode: 'creative-simulation',
+            }),
+        });
+    });
 });

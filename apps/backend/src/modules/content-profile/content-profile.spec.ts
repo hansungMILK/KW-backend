@@ -31,7 +31,7 @@ describe('content profile preferences', () => {
         expect(prefs.reviewMode).toBe('direct-run');
         expect(prefs.toneOptions.map(option => option.id)).toContain('news-anchor');
         expect(prefs.reviewModeOptions.map(option => option.id)).toEqual(['direct-run', 'script-first']);
-        expect(prefs.profileOptions.map(option => option.id)).toEqual(['shorts.info.v1', 'shorts.story.v1']);
+        expect(prefs.profileOptions.map(option => option.id)).toEqual(['shorts.info.v1']);
     });
 
     it('classifies natural language, URL, single-image, Shorts, and longform requests by output intent', () => {

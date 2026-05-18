@@ -1,3 +1,4 @@
+import { extractFocusTerms } from './request-contract';
 import { AnalysisOutputSchema } from './types';
 import { openaiAdapter } from '../../adapters/ai/openai-adapter';
 import { env } from '../../config/env';
@@ -49,7 +50,7 @@ interface Issue {
 
 interface AutoRemediation {
     sceneNumber: number;
-    action: 'soften-factual-wording';
+    action: 'soften-factual-wording' | 'rewrite-creative-simulation-scenes';
     before: string;
     after: string;
     reason: string;
@@ -66,6 +67,7 @@ interface NormalizedScene {
     claimType?: unknown;
     sourceRefs?: unknown;
     keywords?: unknown;
+    durationSec?: unknown;
 }
 
 // ── Dummy (mock mode) ─────────────────────────────────────────────────────────
@@ -85,7 +87,9 @@ function dummyAnalysis(): BlockExecutorResult {
 
 function runRuleChecks(
     scenes: NormalizedScene[],
-    presetId: string
+    presetId: string,
+    requestTopic?: string,
+    outputContract?: unknown
 ): {
     safetyScore: number;
     qualityScore: number;
@@ -94,6 +98,7 @@ function runRuleChecks(
     const issues: Issue[] = [];
     let safetyDeductions = 0;
     let qualityDeductions = 0;
+    const creativeSimulationMode = isCreativeSimulationContract(outputContract);
 
     // 1. Scene count check
     if (scenes.length < MIN_SCENE_COUNT || scenes.length > MAX_SCENE_COUNT) {
@@ -176,7 +181,7 @@ function runRuleChecks(
             .toLowerCase();
 
         for (const banned of BANNED_KEYWORDS) {
-            if (hasBannedKeyword(combinedText, banned, presetId)) {
+            if (hasBannedKeyword(combinedText, banned, presetId, creativeSimulationMode, claimType)) {
                 if (isSourceBackedNewsContext(combinedText, banned, claimType, sourceRefs)) {
                     continue;
                 }
@@ -282,13 +287,84 @@ function runRuleChecks(
         qualityDeductions += emptyNarrations * 8;
     }
 
+    const missingTopicTerms = getMissingRequestedTopicTerms(requestTopic, scenes, outputContract);
+    if (missingTopicTerms.length > 0) {
+        issues.push({
+            severity: 'high',
+            message: `요청한 핵심 주제(${missingTopicTerms.join(', ')})가 대본 본문/자막에 충분히 반영되지 않았습니다.`,
+        });
+        qualityDeductions += 20;
+    }
+
     const safetyScore = Math.max(0, Math.min(100, 100 - safetyDeductions));
     const qualityScore = Math.max(0, Math.min(100, 100 - qualityDeductions));
 
     return { safetyScore, qualityScore, issues };
 }
 
-function hasBannedKeyword(text: string, banned: string, presetId: string): boolean {
+function getMissingRequestedTopicTerms(
+    requestTopic: unknown,
+    scenes: NormalizedScene[],
+    outputContract?: unknown
+): string[] {
+    const contract = isRecord(outputContract) ? outputContract : {};
+    if (contract['exactSubjectRequired'] === false) return [];
+    const contractTerms = Array.isArray(contract['requiredCoverageTerms'])
+        ? contract['requiredCoverageTerms'].map(String).filter(Boolean)
+        : [];
+    if (typeof requestTopic !== 'string' && contractTerms.length === 0) return [];
+    const focusTerms = contractTerms.length > 0 ? contractTerms : extractRequestedFocusTerms(String(requestTopic));
+    if (focusTerms.length < 2) return [];
+
+    const bodyText = normalizeTopicText(
+        scenes
+            .flatMap(scene => {
+                const visual = isRecord(scene.visual) ? scene.visual : {};
+                return [scene.caption, scene.narration, scene.visualText, visual['mainCaption']];
+            })
+            .filter((value): value is string => typeof value === 'string')
+            .join(' ')
+    );
+    const compactBodyText = compactTopicText(bodyText);
+
+    return focusTerms.filter(term => {
+        const normalizedTerm = normalizeTopicText(term);
+        return !bodyText.includes(normalizedTerm) && !compactBodyText.includes(compactTopicText(normalizedTerm));
+    });
+}
+
+function extractRequestedFocusTerms(requestTopic: string): string[] {
+    return extractFocusTerms(requestTopic).slice(0, 8);
+}
+
+function normalizeTopicText(input: string): string {
+    return input
+        .toLowerCase()
+        .replace(/(^|\s)예스(?=\s|$)/g, '$1yes')
+        .replace(/(^|\s)오어(?=\s|$)/g, '$1or')
+        .replace(/(^|\s)노(?=\s|$)/g, '$1no')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function compactTopicText(input: string): string {
+    return normalizeTopicText(input).replace(/\s+/g, '');
+}
+
+function hasBannedKeyword(
+    text: string,
+    banned: string,
+    presetId: string,
+    creativeSimulationMode: boolean,
+    claimType: string | undefined
+): boolean {
+    if (
+        creativeSimulationMode &&
+        banned === '폭력' &&
+        (claimType === 'hypothetical' || claimType === 'opinion' || claimType === 'joke')
+    ) {
+        return false;
+    }
     if (banned === '폭력' && presetId === 'education-admission') {
         const normalized = ADMISSION_SAFE_VIOLENCE_TERMS.reduce(
             (current, safeTerm) => current.replaceAll(safeTerm, ''),
@@ -297,6 +373,35 @@ function hasBannedKeyword(text: string, banned: string, presetId: string): boole
         return normalized.includes(banned);
     }
     return text.includes(banned);
+}
+
+function isCreativeSimulationContract(input: unknown): boolean {
+    if (!isRecord(input)) return false;
+    if (input['contentMode'] === 'creative-simulation') return true;
+    const requestSpec = input['requestSpec'];
+    return isRecord(requestSpec) && requestSpec['contentMode'] === 'creative-simulation';
+}
+
+function buildAnalysisContract(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+    if (!metadata) return undefined;
+    const outputContract = isRecord(metadata['outputContract']) ? metadata['outputContract'] : undefined;
+    const requestSpec = isRecord(metadata['requestSpec']) ? metadata['requestSpec'] : undefined;
+    if (outputContract) {
+        return {
+            ...outputContract,
+            ...(requestSpec ? { requestSpec } : {}),
+        };
+    }
+    if (!requestSpec) return undefined;
+    return {
+        requestTopic: requestSpec['userRequest'],
+        outputKind: requestSpec['outputKind'],
+        contentMode: requestSpec['contentMode'],
+        requiredCoverageTerms: Array.isArray(requestSpec['focusTerms']) ? requestSpec['focusTerms'] : [],
+        exactSubjectRequired:
+            typeof requestSpec['exactSubjectRequired'] === 'boolean' ? requestSpec['exactSubjectRequired'] : true,
+        requestSpec,
+    };
 }
 
 function isSourceBackedNewsContext(
@@ -440,11 +545,47 @@ export const analysisBlock: BlockExecutor = {
         }
 
         // Rule-based checks (always run)
-        const { safetyScore, qualityScore, issues: ruleIssues } = runRuleChecks(scenes, rulepack.id);
+        const analysisContract = buildAnalysisContract(metadata);
+        let {
+            safetyScore,
+            qualityScore,
+            issues: ruleIssues,
+        } = runRuleChecks(
+            scenes,
+            rulepack.id,
+            typeof metadata?.['requestTopic'] === 'string' ? metadata['requestTopic'] : undefined,
+            analysisContract
+        );
 
         // AI enhancement in real provider mode; non-fatal if it fails.
         const allIssues = await runAIReview(scenes, ruleIssues, rulepack.analysisPrompt);
-        const remediated = autoRemediateSourceBackedFactualCautions(scenes, allIssues);
+        let remediated = autoRemediateSourceBackedFactualCautions(scenes, allIssues);
+        const creativeRepair = await maybeRepairCreativeSimulationScenes({
+            analysisContract,
+            scenes: remediated.scenes,
+            issues: remediated.issues,
+            requestTopic: typeof metadata?.['requestTopic'] === 'string' ? metadata['requestTopic'] : undefined,
+            rulepackId: rulepack.id,
+        });
+        if (creativeRepair) {
+            const rerun = runRuleChecks(
+                creativeRepair.scenes,
+                rulepack.id,
+                typeof metadata?.['requestTopic'] === 'string' ? metadata['requestTopic'] : undefined,
+                analysisContract
+            );
+            safetyScore = rerun.safetyScore;
+            qualityScore = rerun.qualityScore;
+            ruleIssues = rerun.issues;
+            remediated = {
+                scenes: creativeRepair.scenes,
+                issues: mergeIssues(
+                    ruleIssues,
+                    remediated.issues.filter(issue => !isRepairableCreativeSimulationIssue(issue))
+                ),
+                autoRemediations: [...remediated.autoRemediations, creativeRepair.autoRemediation],
+            };
+        }
 
         const blockingIssues = remediated.issues.filter(
             issue => issue.severity === 'high' || issue.severity === 'critical'
@@ -483,6 +624,225 @@ export const analysisBlock: BlockExecutor = {
         };
     },
 };
+
+async function maybeRepairCreativeSimulationScenes(params: {
+    analysisContract: Record<string, unknown> | undefined;
+    scenes: NormalizedScene[];
+    issues: Issue[];
+    requestTopic?: string;
+    rulepackId: string;
+}): Promise<{ scenes: NormalizedScene[]; autoRemediation: AutoRemediation } | undefined> {
+    if (!isCreativeSimulationContract(params.analysisContract)) return undefined;
+    if (!shouldAttemptCreativeSimulationRepair(params.issues)) return undefined;
+
+    const requestSpec = isRecord(params.analysisContract?.['requestSpec'])
+        ? params.analysisContract?.['requestSpec']
+        : undefined;
+    const requestText =
+        (typeof params.analysisContract?.['requestTopic'] === 'string'
+            ? params.analysisContract['requestTopic']
+            : undefined) ??
+        (typeof requestSpec?.['userRequest'] === 'string' ? requestSpec['userRequest'] : undefined) ??
+        params.requestTopic ??
+        '';
+
+    let response;
+    try {
+        response = await openaiAdapter.chatJson({
+            systemPrompt: [
+                'You rewrite Korean creative-simulation Shorts scenes after a quality review.',
+                'Return JSON only with { "scenes": [...] }.',
+                'Keep the same number of scenes and preserve sceneNumber order.',
+                'Preserve the user named participants, starting condition, and matchup premise.',
+                'Each scene must change the simulated fight state: initiative, distance, constraint, counter, escalation, damage, or verdict tension.',
+                'Do not write generic explanations or repeated attack/block loops.',
+                'Avoid absolute winner wording. Use interpretation-safe phrasing for verdict scenes.',
+                'Use claimType "hypothetical" or "opinion" unless the scene cites a real source.',
+                'sourceRefs may be [] for pure fictional simulation scenes.',
+                'imagePrompt must be a drawable current-scene action beat, not a summary paragraph.',
+            ].join('\n'),
+            userMessage: [
+                `User request: ${requestText}`,
+                `Rulepack: ${params.rulepackId}`,
+                'Review issues to fix:',
+                JSON.stringify(params.issues.filter(isRepairableCreativeSimulationIssue), null, 2),
+                'Current scenes:',
+                JSON.stringify(params.scenes, null, 2),
+            ].join('\n\n'),
+            maxTokens: 3200,
+        });
+    } catch (err) {
+        log.warn('[analysis-block] creative simulation repair failed (non-fatal)', {
+            error: err instanceof Error ? err.message : String(err),
+        });
+        return undefined;
+    }
+
+    const repairedScenes = parseCreativeSimulationRepair(response.content, params.scenes);
+    if (!repairedScenes) return undefined;
+
+    return {
+        scenes: repairedScenes,
+        autoRemediation: {
+            sceneNumber: 0,
+            action: 'rewrite-creative-simulation-scenes',
+            before: summarizeScenesForRemediation(params.scenes),
+            after: summarizeScenesForRemediation(repairedScenes),
+            reason: params.issues
+                .filter(isRepairableCreativeSimulationIssue)
+                .map(issue => issue.message)
+                .join(' / '),
+        },
+    };
+}
+
+function shouldAttemptCreativeSimulationRepair(issues: Issue[]): boolean {
+    const blockingIssues = issues.filter(issue => issue.severity === 'high' || issue.severity === 'critical');
+    if (blockingIssues.length === 0) return false;
+    return blockingIssues.every(isRepairableCreativeSimulationIssue);
+}
+
+function isRepairableCreativeSimulationIssue(issue: Issue): boolean {
+    if (issue.severity !== 'high' && issue.severity !== 'critical') return false;
+    const message = issue.message;
+    if (/sourceRefs?|출처|금지\s*키워드|혐오|불법|마약|음란|도박|성인|사기|보장\/과장/.test(message)) {
+        return false;
+    }
+    return /핵심\s*주제|유사한\s*문장|반복|템포|단정|완곡|대결|해석형|시뮬레이션|흐름|상성|설명/.test(message);
+}
+
+function parseCreativeSimulationRepair(
+    content: string,
+    originalScenes: NormalizedScene[]
+): NormalizedScene[] | undefined {
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(content);
+    } catch {
+        log.warn('[analysis-block] creative simulation repair returned non-JSON');
+        return undefined;
+    }
+
+    const rawScenes = isRecord(parsed) && Array.isArray(parsed['scenes']) ? parsed['scenes'] : undefined;
+    if (!rawScenes || rawScenes.length !== originalScenes.length) {
+        log.warn('[analysis-block] creative simulation repair scene count mismatch', {
+            expected: originalScenes.length,
+            actual: rawScenes?.length,
+        });
+        return undefined;
+    }
+
+    return rawScenes.map((raw, index) => normalizeCreativeRepairScene(raw, originalScenes[index], index));
+}
+
+function normalizeCreativeRepairScene(
+    raw: unknown,
+    original: NormalizedScene | undefined,
+    index: number
+): NormalizedScene {
+    const record = isRecord(raw) ? raw : {};
+    const originalVisual = isRecord(original?.visual) ? original?.visual : {};
+    const visual = isRecord(record['visual']) ? record['visual'] : {};
+    const caption =
+        typeof record['caption'] === 'string'
+            ? record['caption']
+            : typeof visual['mainCaption'] === 'string'
+              ? visual['mainCaption']
+              : typeof original?.caption === 'string'
+                ? original.caption
+                : `전황 ${index + 1}`;
+    const topTitle =
+        typeof record['topTitle'] === 'string'
+            ? record['topTitle']
+            : typeof visual['topTitle'] === 'string'
+              ? visual['topTitle']
+              : typeof original?.topTitle === 'string'
+                ? original.topTitle
+                : typeof originalVisual['topTitle'] === 'string'
+                  ? originalVisual['topTitle']
+                  : '';
+    const mainCaption =
+        typeof visual['mainCaption'] === 'string'
+            ? visual['mainCaption']
+            : typeof record['visualText'] === 'string'
+              ? record['visualText']
+              : caption;
+
+    return {
+        ...original,
+        ...record,
+        sceneNumber: typeof record['sceneNumber'] === 'number' ? record['sceneNumber'] : index + 1,
+        caption,
+        narration:
+            typeof record['narration'] === 'string'
+                ? record['narration']
+                : typeof original?.narration === 'string'
+                  ? original.narration
+                  : '',
+        imagePrompt:
+            typeof record['imagePrompt'] === 'string'
+                ? record['imagePrompt']
+                : typeof original?.imagePrompt === 'string'
+                  ? original.imagePrompt
+                  : 'A cinematic fictional matchup simulation beat.',
+        visualText:
+            typeof record['visualText'] === 'string'
+                ? record['visualText']
+                : typeof original?.visualText === 'string'
+                  ? original.visualText
+                  : mainCaption,
+        visual: {
+            ...originalVisual,
+            ...visual,
+            ...(topTitle ? { topTitle } : {}),
+            mainCaption,
+        },
+        claimType:
+            record['claimType'] === 'fact' ||
+            record['claimType'] === 'hypothetical' ||
+            record['claimType'] === 'opinion' ||
+            record['claimType'] === 'joke'
+                ? record['claimType']
+                : original?.claimType === 'fact' ||
+                    original?.claimType === 'hypothetical' ||
+                    original?.claimType === 'opinion' ||
+                    original?.claimType === 'joke'
+                  ? original.claimType
+                  : 'hypothetical',
+        sourceRefs: Array.isArray(record['sourceRefs'])
+            ? record['sourceRefs']
+            : Array.isArray(original?.sourceRefs)
+              ? original.sourceRefs
+              : [],
+        durationSec:
+            typeof record['durationSec'] === 'number'
+                ? record['durationSec']
+                : typeof original?.durationSec === 'number'
+                  ? original.durationSec
+                  : 5,
+    };
+}
+
+function summarizeScenesForRemediation(scenes: NormalizedScene[]): string {
+    return scenes
+        .slice(0, 4)
+        .map(scene => `${String(scene.sceneNumber ?? '?')}: ${String(scene.narration ?? '')}`)
+        .join(' / ');
+}
+
+function mergeIssues(first: Issue[], second: Issue[]): Issue[] {
+    const merged: Issue[] = [...first];
+    for (const issue of second) {
+        const duplicate = merged.some(
+            existing =>
+                existing.severity === issue.severity &&
+                existing.sceneNumber === issue.sceneNumber &&
+                existing.message === issue.message
+        );
+        if (!duplicate) merged.push(issue);
+    }
+    return merged;
+}
 
 function autoRemediateSourceBackedFactualCautions(
     scenes: NormalizedScene[],

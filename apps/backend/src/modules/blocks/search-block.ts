@@ -1,8 +1,10 @@
+import { buildRequestSpec, classifySourceCoverage } from './request-contract';
 import { SearchOutputSchema } from './types';
 import { openaiAdapter } from '../../adapters/ai/openai-adapter';
 import { env } from '../../config/env';
 import { log } from '../../utils/logger';
 
+import type { RequestSpec } from './request-contract';
 import type { BlockExecutor, BlockExecutorResult } from './types';
 
 // ── Prompts ──────────────────────────────────────────────────────────────────
@@ -15,6 +17,7 @@ Given a user topic, identify:
 
 Use web search results. Do not invent articles, source names, statistics, or URLs.
 Prefer primary or official sources when relevant, then reputable news, then specialist blogs or community posts with lower confidence.
+If the user asks about a specific episode, case, product, person, article, or named event, do not substitute broad parent-topic sources. Return sources that directly cover the exact requested subject. If only broader sources are available, make that limitation explicit in the summary and keep confidence low.
 
 Respond with JSON only — no markdown fences, no extra text:
 {
@@ -116,18 +119,19 @@ function dummySearch(): BlockExecutorResult {
 export const searchBlock: BlockExecutor = {
     blockType: 'search',
 
-    async execute(input: unknown, _config?: Record<string, unknown>): Promise<BlockExecutorResult> {
+    async execute(input: unknown, config?: Record<string, unknown>): Promise<BlockExecutorResult> {
         const mode = env.orchestratorMode;
         if (mode === 'mock') return dummySearch();
 
         const start = Date.now();
         const topic = extractTopic(input);
+        const requestSpec = readRequestSpec(config) ?? buildRequestSpec(input);
         const primaryUrls = extractUrls(topic);
 
         if (primaryUrls.length > 0) {
             try {
                 log.info('[search-block] Starting primary URL fetch', { urls: primaryUrls });
-                const directOutput = await collectPrimaryUrls(primaryUrls, topic);
+                const directOutput = await collectPrimaryUrls(primaryUrls, topic, requestSpec);
                 const validated = SearchOutputSchema.safeParse(directOutput);
                 if (!validated.success) {
                     throw new Error(`[search-block] URL output schema validation failed: ${validated.error.message}`);
@@ -165,7 +169,7 @@ export const searchBlock: BlockExecutor = {
             throw new Error(`[search-block] OpenAI returned non-JSON response (length=${response.content.length})`);
         }
 
-        const normalized = normalizeSearchOutput(parsed);
+        const normalized = normalizeSearchOutput(parsed, topic, requestSpec);
         const validated = SearchOutputSchema.safeParse(normalized);
         if (!validated.success) {
             throw new Error(`[search-block] Output schema validation failed: ${validated.error.message}`);
@@ -182,10 +186,14 @@ export const searchBlock: BlockExecutor = {
     },
 };
 
-async function collectPrimaryUrls(urls: string[], topic: string): Promise<Record<string, unknown>> {
+async function collectPrimaryUrls(
+    urls: string[],
+    topic: string,
+    requestSpec: RequestSpec
+): Promise<Record<string, unknown>> {
     const articles = [];
     for (const [index, url] of urls.slice(0, 5).entries()) {
-        articles.push(await collectPrimaryUrl(url, topic, index));
+        articles.push(await collectPrimaryUrl(url, topic, index, requestSpec));
     }
 
     const joinedText = articles
@@ -195,6 +203,8 @@ async function collectPrimaryUrls(urls: string[], topic: string): Promise<Record
     return {
         collectionMode: 'url',
         primaryUrl: urls[0],
+        requestTopic: topic,
+        requestSpec,
         keywords: deriveKeywords(`${topic} ${joinedText}`),
         articles,
         trendScore: undefined,
@@ -202,7 +212,12 @@ async function collectPrimaryUrls(urls: string[], topic: string): Promise<Record
     };
 }
 
-async function collectPrimaryUrl(url: string, topic: string, index: number): Promise<Record<string, unknown>> {
+async function collectPrimaryUrl(
+    url: string,
+    topic: string,
+    index: number,
+    requestSpec: RequestSpec
+): Promise<Record<string, unknown>> {
     const response = await fetch(url, {
         headers: {
             accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7',
@@ -223,7 +238,7 @@ async function collectPrimaryUrl(url: string, topic: string, index: number): Pro
     const source = extractHtmlMeta(raw, 'og:site_name') || sourceFromUrl(url);
     const keyClaims = extractKeyClaims(text);
 
-    return {
+    const article = {
         id: `source-${index + 1}`,
         title,
         url,
@@ -237,32 +252,42 @@ async function collectPrimaryUrl(url: string, topic: string, index: number): Pro
         primarySource: true,
         sourcePriority: index + 1,
     };
+    return {
+        ...article,
+        coverage: {
+            ...classifySourceCoverage(article, requestSpec),
+            status: 'direct',
+            reason: '사용자가 직접 제공한 URL 원문입니다.',
+        },
+    };
 }
 
-function normalizeSearchOutput(input: unknown): unknown {
+function normalizeSearchOutput(input: unknown, requestTopic: string, requestSpec: RequestSpec): unknown {
     if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
     const obj = input as Record<string, unknown>;
     const articles = Array.isArray(obj['articles']) ? obj['articles'] : [];
     return {
         ...obj,
+        requestTopic: typeof obj['requestTopic'] === 'string' ? obj['requestTopic'] : requestTopic,
+        requestSpec: isRecord(obj['requestSpec']) ? obj['requestSpec'] : requestSpec,
         collectionMode:
             obj['collectionMode'] === 'url' ||
             obj['collectionMode'] === 'web_search' ||
             obj['collectionMode'] === 'url_fallback_web_search'
                 ? obj['collectionMode']
                 : 'web_search',
-        articles: articles.map((article, index) => normalizeArticle(article, index)),
+        articles: articles.map((article, index) => normalizeArticle(article, index, requestSpec)),
         retrievedAt: typeof obj['retrievedAt'] === 'string' ? obj['retrievedAt'] : new Date().toISOString(),
     };
 }
 
-function normalizeArticle(article: unknown, index: number): Record<string, unknown> {
+function normalizeArticle(article: unknown, index: number, requestSpec: RequestSpec): Record<string, unknown> {
     const obj =
         article && typeof article === 'object' && !Array.isArray(article) ? (article as Record<string, unknown>) : {};
     const url = typeof obj['url'] === 'string' ? obj['url'] : '';
     const sourceType = normalizeSourceType(obj['sourceType'], url);
     const confidence = typeof obj['confidence'] === 'number' ? Math.max(0, Math.min(1, obj['confidence'])) : undefined;
-    return {
+    const normalized = {
         ...obj,
         id: typeof obj['id'] === 'string' ? obj['id'] : `source-${index + 1}`,
         title: typeof obj['title'] === 'string' ? obj['title'] : '',
@@ -276,6 +301,77 @@ function normalizeArticle(article: unknown, index: number): Record<string, unkno
         primarySource: typeof obj['primarySource'] === 'boolean' ? obj['primarySource'] : undefined,
         sourcePriority: typeof obj['sourcePriority'] === 'number' ? obj['sourcePriority'] : undefined,
     };
+    return {
+        ...normalized,
+        coverage: isRecord(obj['coverage']) ? obj['coverage'] : classifySourceCoverage(normalized, requestSpec),
+    };
+}
+
+function readRequestSpec(input: unknown): RequestSpec | undefined {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined;
+    const requestSpec = (input as Record<string, unknown>)['requestSpec'];
+    if (!requestSpec || typeof requestSpec !== 'object' || Array.isArray(requestSpec)) return undefined;
+    const record = requestSpec as Record<string, unknown>;
+    if (typeof record['userRequest'] !== 'string') return undefined;
+    const fallback = buildRequestSpec(record['userRequest']);
+    const understanding =
+        record['understanding'] &&
+        typeof record['understanding'] === 'object' &&
+        !Array.isArray(record['understanding'])
+            ? (record['understanding'] as Record<string, unknown>)
+            : undefined;
+    const focusTerms = Array.isArray(record['focusTerms']) ? record['focusTerms'].map(String) : [];
+    const focusEntities = Array.isArray(understanding?.['focusEntities'])
+        ? understanding['focusEntities'].map(String)
+        : focusTerms.length > 0
+          ? focusTerms
+          : fallback.understanding.focusEntities;
+
+    return {
+        userRequest: record['userRequest'],
+        contentIntent:
+            record['contentIntent'] === 'single-image' ||
+            record['contentIntent'] === 'blog-post' ||
+            record['contentIntent'] === 'shorts' ||
+            record['contentIntent'] === 'longform' ||
+            record['contentIntent'] === 'explanation' ||
+            record['contentIntent'] === 'research' ||
+            record['contentIntent'] === 'unknown'
+                ? record['contentIntent']
+                : fallback.contentIntent,
+        outputKind:
+            record['outputKind'] === 'text' ||
+            record['outputKind'] === 'image' ||
+            record['outputKind'] === 'audio' ||
+            record['outputKind'] === 'video' ||
+            record['outputKind'] === 'data' ||
+            record['outputKind'] === 'unknown'
+                ? record['outputKind']
+                : fallback.outputKind,
+        ...(record['contentMode'] === 'creative-simulation' ? { contentMode: record['contentMode'] } : {}),
+        understanding: {
+            surfaceTerms: Array.isArray(understanding?.['surfaceTerms'])
+                ? understanding['surfaceTerms'].map(String)
+                : fallback.understanding.surfaceTerms,
+            focusEntities,
+            actions: Array.isArray(understanding?.['actions'])
+                ? understanding['actions'].map(String)
+                : fallback.understanding.actions,
+            constraints: Array.isArray(understanding?.['constraints'])
+                ? understanding['constraints'].map(String)
+                : fallback.understanding.constraints,
+            styleHints: Array.isArray(understanding?.['styleHints'])
+                ? understanding['styleHints'].map(String)
+                : fallback.understanding.styleHints,
+        },
+        focusTerms: focusTerms.length > 0 ? focusTerms : focusEntities,
+        exactSubjectRequired:
+            typeof record['exactSubjectRequired'] === 'boolean' ? record['exactSubjectRequired'] : true,
+    };
+}
+
+function isRecord(input: unknown): input is Record<string, unknown> {
+    return input != null && typeof input === 'object' && !Array.isArray(input);
 }
 
 function normalizeSourceType(value: unknown, url: string): 'official' | 'news' | 'blog' | 'other' {

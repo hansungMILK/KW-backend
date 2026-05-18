@@ -1,7 +1,9 @@
+import { buildOutputContract, buildRequestSpec } from './request-contract';
 import { DataOutputSchema } from './types';
 import { env } from '../../config/env';
 import { log } from '../../utils/logger';
 
+import type { RequestSpec } from './request-contract';
 import type { BlockExecutor, BlockExecutorResult } from './types';
 
 // ── Dummy (mock mode) ─────────────────────────────────────────────────────────
@@ -107,6 +109,9 @@ function normalizeContent(input: unknown): BlockExecutorResult {
     let style: unknown;
     let sources: unknown[] = [];
     let presetId = '';
+    let requestTopic: string | undefined;
+    let requestSpec: RequestSpec | undefined;
+    let outputContract: Record<string, unknown> | undefined;
 
     if (input != null && typeof input === 'object' && !Array.isArray(input)) {
         const obj = input as Record<string, unknown>;
@@ -119,6 +124,11 @@ function normalizeContent(input: unknown): BlockExecutorResult {
         if (typeof obj['totalDurationSec'] === 'number') totalDurationSec = obj['totalDurationSec'];
         if (Array.isArray(obj['sources'])) sources = obj['sources'];
         if (typeof obj['presetId'] === 'string') presetId = obj['presetId'];
+        requestTopic = extractRequestTopic(obj);
+        requestSpec = readRequestSpec(obj) ?? buildRequestSpec(obj);
+        outputContract = isRecord(obj['outputContract'])
+            ? obj['outputContract']
+            : { ...buildOutputContract(requestSpec, requestSpec.outputKind) };
 
         if (Array.isArray(obj['scenes'])) {
             rawScenes = obj['scenes'] as RawScene[];
@@ -209,6 +219,9 @@ function normalizeContent(input: unknown): BlockExecutorResult {
             style,
             sources,
             presetId: presetId || undefined,
+            requestTopic,
+            requestSpec,
+            outputContract,
         },
     };
 
@@ -246,6 +259,75 @@ export const dataBlock: BlockExecutor = {
 
 function isRecord(input: unknown): input is Record<string, unknown> {
     return input != null && typeof input === 'object' && !Array.isArray(input);
+}
+
+function extractRequestTopic(input: Record<string, unknown>): string | undefined {
+    const keys = ['requestTopic', 'userRequest', 'originalRequest', 'topic', 'query'];
+    for (const key of keys) {
+        const value = input[key];
+        if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+    }
+    const requestSpec = input['requestSpec'];
+    if (isRecord(requestSpec) && typeof requestSpec['userRequest'] === 'string') {
+        return requestSpec['userRequest'].trim();
+    }
+    return undefined;
+}
+
+function readRequestSpec(input: Record<string, unknown>): RequestSpec | undefined {
+    const requestSpec = input['requestSpec'];
+    if (!isRecord(requestSpec) || typeof requestSpec['userRequest'] !== 'string') return undefined;
+    const fallbackSpec = buildRequestSpec(requestSpec['userRequest']);
+    const focusTerms = Array.isArray(requestSpec['focusTerms']) ? requestSpec['focusTerms'].map(String) : [];
+    const understanding = isRecord(requestSpec['understanding'])
+        ? {
+              surfaceTerms: Array.isArray(requestSpec['understanding']['surfaceTerms'])
+                  ? requestSpec['understanding']['surfaceTerms'].map(String)
+                  : fallbackSpec.understanding.surfaceTerms,
+              focusEntities: Array.isArray(requestSpec['understanding']['focusEntities'])
+                  ? requestSpec['understanding']['focusEntities'].map(String)
+                  : focusTerms,
+              actions: Array.isArray(requestSpec['understanding']['actions'])
+                  ? requestSpec['understanding']['actions'].map(String)
+                  : fallbackSpec.understanding.actions,
+              constraints: Array.isArray(requestSpec['understanding']['constraints'])
+                  ? requestSpec['understanding']['constraints'].map(String)
+                  : fallbackSpec.understanding.constraints,
+              styleHints: Array.isArray(requestSpec['understanding']['styleHints'])
+                  ? requestSpec['understanding']['styleHints'].map(String)
+                  : fallbackSpec.understanding.styleHints,
+          }
+        : {
+              ...fallbackSpec.understanding,
+              focusEntities: focusTerms.length > 0 ? focusTerms : fallbackSpec.understanding.focusEntities,
+          };
+    return {
+        userRequest: requestSpec['userRequest'],
+        contentIntent:
+            requestSpec['contentIntent'] === 'single-image' ||
+            requestSpec['contentIntent'] === 'blog-post' ||
+            requestSpec['contentIntent'] === 'shorts' ||
+            requestSpec['contentIntent'] === 'longform' ||
+            requestSpec['contentIntent'] === 'explanation' ||
+            requestSpec['contentIntent'] === 'research' ||
+            requestSpec['contentIntent'] === 'unknown'
+                ? requestSpec['contentIntent']
+                : 'unknown',
+        outputKind:
+            requestSpec['outputKind'] === 'text' ||
+            requestSpec['outputKind'] === 'image' ||
+            requestSpec['outputKind'] === 'audio' ||
+            requestSpec['outputKind'] === 'video' ||
+            requestSpec['outputKind'] === 'data' ||
+            requestSpec['outputKind'] === 'unknown'
+                ? requestSpec['outputKind']
+                : 'unknown',
+        ...(requestSpec['contentMode'] === 'creative-simulation' ? { contentMode: requestSpec['contentMode'] } : {}),
+        understanding,
+        focusTerms: focusTerms.length > 0 ? focusTerms : understanding.focusEntities,
+        exactSubjectRequired:
+            typeof requestSpec['exactSubjectRequired'] === 'boolean' ? requestSpec['exactSubjectRequired'] : true,
+    };
 }
 
 function isClaimType(input: unknown): input is 'fact' | 'hypothetical' | 'opinion' | 'joke' {

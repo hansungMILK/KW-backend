@@ -22,7 +22,16 @@ import {
 import { tryParseJson } from '../utils';
 import { S3Image } from './S3Image';
 
-type ContentType = 'image' | 'image-gallery' | 'script' | 'video' | 'audio' | 'json' | 'markdown' | 'text';
+type ContentType =
+    | 'image'
+    | 'image-gallery'
+    | 'image-prompt'
+    | 'script'
+    | 'video'
+    | 'audio'
+    | 'json'
+    | 'markdown'
+    | 'text';
 
 /** Props for ContentPreviewModal */
 export interface ContentPreviewModalProps {
@@ -37,6 +46,7 @@ const getContentTypeIcon = (type: ContentType): React.ReactNode => {
     switch (type) {
         case 'image':
         case 'image-gallery':
+        case 'image-prompt':
             return <FileImage className={iconClass} />;
         case 'script':
             return <FileText className={iconClass} />;
@@ -103,6 +113,7 @@ const getMediaUrl = (value: unknown): string | undefined => {
 const detectContentType = (value: unknown, explicitType?: string): ContentType => {
     if (explicitType === 'image') return 'image';
     if (explicitType === 'image-gallery') return 'image-gallery';
+    if (explicitType === 'image-prompt') return 'image-prompt';
     if (explicitType === 'script') return 'script';
 
     const mediaUrl = getMediaUrl(value);
@@ -295,26 +306,20 @@ const ScriptPreview: React.FC<{ value: unknown }> = ({ value }) => {
     const script = isRecordValue(recordValue.script) ? recordValue.script : {};
     const scenes = asRecordArray(recordValue.scenes);
     const title = firstStringValue(recordValue.title, script.hook, recordValue.hook) ?? '생성된 대본';
-    const hook = firstStringValue(recordValue.hook, script.hook);
-    const angle = firstStringValue(script.angle, recordValue.angle);
     const cta = firstStringValue(script.cta, recordValue.cta);
-    const bodyText = [
-        title,
-        hook,
-        angle,
-        ...scenes.map(scene => firstStringValue(scene.narration, scene.caption, scene.visualText)).filter(Boolean),
-        cta,
-    ]
-        .filter(Boolean)
-        .join('\n\n');
+    const narrationLines = scenes
+        .map(scene => firstStringValue(scene.narration, scene.caption, scene.visualText))
+        .filter(Boolean);
+    const bodyText = [...narrationLines, cta].filter(Boolean).join('\n\n');
 
     return (
         <article className="mx-auto max-w-3xl">
             <div className="border-b border-border pb-5">
                 <div className="text-sm font-semibold text-amber-600">대본 문서</div>
                 <h2 className="mt-2 text-2xl font-bold leading-tight text-foreground">{title}</h2>
-                {hook && <p className="mt-3 text-base leading-relaxed text-foreground/80">{hook}</p>}
-                {angle && <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{angle}</p>}
+                <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                    실제 영상에 읽히는 나레이션만 표시합니다.
+                </p>
             </div>
             <div className="mt-5 space-y-4">
                 {scenes.map((scene, index) => {
@@ -340,6 +345,42 @@ const ScriptPreview: React.FC<{ value: unknown }> = ({ value }) => {
             )}
             <div className="mt-5 flex justify-end">
                 <CopyButton value={bodyText} />
+            </div>
+        </article>
+    );
+};
+
+const ImagePromptPreview: React.FC<{ value: unknown }> = ({ value }) => {
+    const recordValue = isRecordValue(value) ? value : {};
+    const promptPlan = isRecordValue(recordValue.promptPlan) ? recordValue.promptPlan : {};
+    const scenes = asRecordArray(recordValue.scenes);
+    const firstScene = scenes[0] ?? {};
+    const title = firstStringValue(promptPlan.title, recordValue.title, firstScene.topTitle) ?? '이미지 프롬프트';
+    const caption = firstStringValue(promptPlan.caption, firstScene.caption, recordValue.hook);
+    const imagePrompt = firstStringValue(promptPlan.imagePrompt, firstScene.imagePrompt) ?? '';
+    const aspectRatio = firstStringValue(promptPlan.aspectRatio, recordValue.aspectRatio);
+    const styleNotes = firstStringValue(promptPlan.styleNotes);
+    const copyText = [title, caption, imagePrompt, styleNotes].filter(Boolean).join('\n\n');
+
+    return (
+        <article className="mx-auto max-w-3xl">
+            <div className="border-b border-border pb-5">
+                <div className="text-sm font-semibold text-sky-600">이미지 프롬프트</div>
+                <h2 className="mt-2 text-2xl font-bold leading-tight text-foreground">{title}</h2>
+                {caption && <p className="mt-3 text-base leading-relaxed text-foreground/80">{caption}</p>}
+                {aspectRatio && <p className="mt-2 text-sm text-muted-foreground">비율: {aspectRatio}</p>}
+            </div>
+            <div className="mt-5 rounded-2xl border border-sky-400/30 bg-sky-500/10 p-4">
+                <div className="text-xs font-semibold uppercase tracking-wide text-sky-300">Prompt</div>
+                <p className="mt-3 whitespace-pre-wrap text-base leading-8 text-foreground">{imagePrompt}</p>
+            </div>
+            {styleNotes && (
+                <div className="mt-4 rounded-xl bg-muted/30 px-4 py-3 text-sm leading-relaxed text-foreground/80">
+                    {styleNotes}
+                </div>
+            )}
+            <div className="mt-5 flex justify-end">
+                <CopyButton value={copyText} />
             </div>
         </article>
     );
@@ -424,6 +465,8 @@ export const ContentPreviewModal: React.FC<ContentPreviewModalProps> = ({ open, 
                 return t('preview.types.image');
             case 'image-gallery':
                 return '이미지 갤러리';
+            case 'image-prompt':
+                return '이미지 프롬프트';
             case 'script':
                 return '대본';
             case 'video':
@@ -449,6 +492,9 @@ export const ContentPreviewModal: React.FC<ContentPreviewModalProps> = ({ open, 
 
             case 'image-gallery':
                 return <ImageGalleryPreview value={content.value} />;
+
+            case 'image-prompt':
+                return <ImagePromptPreview value={content.value} />;
 
             case 'script':
                 return <ScriptPreview value={content.value} />;

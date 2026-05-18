@@ -11,6 +11,7 @@ export type ImageStyleId =
     | 'icon-design';
 
 export type ImageQuality = 'low' | 'medium' | 'high';
+export type ImageGenerationFormat = 'shorts-frame' | 'single-image';
 
 export type ImageStylePreset = {
     id: ImageStyleId;
@@ -21,6 +22,7 @@ export type ImageStylePreset = {
 
 export type ImageGenerationPreferences = {
     model: 'gpt-image-2';
+    format: ImageGenerationFormat;
     recommendedStyleId: ImageStyleId;
     imageStyleId: ImageStyleId;
     imageStyleLabel: string;
@@ -171,8 +173,10 @@ export const buildImageGenerationPreferences = (params: {
     sceneCount: number;
     imageQuality?: unknown;
     imageStyleId?: unknown;
+    format?: ImageGenerationFormat;
     textAndOtherEstimatedCostUsd?: number;
 }): ImageGenerationPreferences => {
+    const format = params.format ?? 'shorts-frame';
     const imageQuality = normalizeImageQuality(params.imageQuality);
     const recommendedStyleId = recommendImageStyleId(params.userMessage, params.imageStyleId);
     const preset = getImageStylePreset(recommendedStyleId);
@@ -182,6 +186,7 @@ export const buildImageGenerationPreferences = (params: {
 
     return {
         model: GPT_IMAGE_MODEL,
+        format,
         recommendedStyleId,
         imageStyleId: recommendedStyleId,
         imageStyleLabel: preset.label,
@@ -195,10 +200,13 @@ export const buildImageGenerationPreferences = (params: {
             label: style.label,
             description: style.description,
         })),
-        sceneCountOptions: SHORTS_SCENE_COUNT_OPTIONS.map(count => ({
-            count,
-            label: `${count}장`,
-        })),
+        sceneCountOptions:
+            format === 'single-image'
+                ? [{ count: sceneCount, label: `${sceneCount}장` }]
+                : SHORTS_SCENE_COUNT_OPTIONS.map(count => ({
+                      count,
+                      label: `${count}장`,
+                  })),
         qualityOptions: (['low', 'medium', 'high'] as ImageQuality[]).map(quality => ({
             id: quality,
             label: quality,

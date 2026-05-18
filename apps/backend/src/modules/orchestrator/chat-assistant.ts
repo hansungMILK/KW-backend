@@ -1,5 +1,6 @@
 import { openaiAdapter } from '../../adapters/ai/openai-adapter';
 import { env } from '../../config/env';
+import { isImageGenerationRequestText, normalizeIntentText } from '../request-intent';
 
 import type { Message } from '@flows/contracts';
 
@@ -109,8 +110,6 @@ const URL_SOURCE_TERMS = [
 
 const LONGFORM_TARGET_TERMS = ['롱폼', '긴영상', '유튜브', 'longform', 'youtube'] as const;
 
-const normalizeIntentText = (text: string): string => text.toLowerCase().replace(/\s+/g, '');
-
 const hasAnyTerm = (normalizedText: string, terms: readonly string[]): boolean =>
     terms.some(term => normalizedText.includes(term.toLowerCase()));
 
@@ -130,6 +129,10 @@ const getDeterministicProposalReason = (text: string): string | undefined => {
         return '롱폼 제작 워크플로우 요청';
     }
 
+    if (isImageGenerationRequestText(text)) {
+        return '이미지 생성 워크플로우 요청';
+    }
+
     return undefined;
 };
 
@@ -138,6 +141,14 @@ const hasWorkflowProposalSignal = (text: string): boolean => {
     const hasAction = hasAnyTerm(normalized, WORKFLOW_ACTION_TERMS);
     const hasTarget = hasAnyTerm(normalized, WORKFLOW_TARGET_TERMS);
     return Boolean(getDeterministicProposalReason(text)) || (hasAction && hasTarget);
+};
+
+const isObviousChatMessage = (text: string): boolean => {
+    const normalized = normalizeIntentText(text).replace(/[?!?.。！？]+$/g, '');
+    return (
+        /^(ㅎㅇ|하이|안녕|안녕하세요|hi|hello|hey)$/.test(normalized) ||
+        /^(뭐할수있어|무엇을할수있어|기능이뭐야|사용법|도움말|help)$/.test(normalized)
+    );
 };
 
 const AVAILABLE_BLOCKS = [
@@ -171,6 +182,7 @@ Only choose "proposal" when the workflow/video/image/automation creation intent 
 If the message is a greeting, reaction, short phrase, vague topic, or casual chat without an explicit make/create/run/design request, choose "chat".
 If a workflow creation request is explicit but missing details, choose "proposal"; the orchestrator will use sensible defaults and surface assumptions.
 If the message contains a URL and asks to explain, summarize, make a video, make Shorts, make longform, or write a script from that URL, choose "proposal"; URL source collection is handled by workflow blocks.
+If the user asks to draw, paint, sketch, illustrate, make a logo, make an image-like visual, or create a scene visually, choose "proposal" even if the word "image" is not present.
 Do not choose "chat" just to ask audience/tone/detail questions when the user clearly says "make/create/build/generate".
 Choose "chat" for greetings, small talk, questions about capabilities, vague messages, troubleshooting, or when you need to explain/clarify before creating a workflow.
 
@@ -181,7 +193,9 @@ const INTENT_ROUTER_EXAMPLES = `Examples:
 - "ㅎㅇ" -> {"action":"chat","reason":"인사"}
 - "뭐 할 수 있어?" -> {"action":"chat","reason":"기능 질문"}
 - "바나나가 춤추는 이미지 생성해줘" -> {"action":"proposal","reason":"이미지 생성 워크플로우 요청"}
-- "최신 이슈를 정보전달 쇼츠로 만들어줘" -> {"action":"proposal","reason":"쇼츠 제작 요청"}
+- "캐릭터들이 서로 대치하는 상황을 그려줘" -> {"action":"proposal","reason":"이미지 생성 워크플로우 요청"}
+- "신규 서비스 로고 하나 뽑아줘" -> {"action":"proposal","reason":"이미지 생성 워크플로우 요청"}
+- "최신 이슈를 쇼츠로 만들어줘" -> {"action":"proposal","reason":"쇼츠 제작 요청"}
 - "뉴스 요약 영상 생성해줘" -> {"action":"proposal","reason":"영상 워크플로우 생성 요청"}
 - "이 링크 내용 설명해줘 https://example.com/post" -> {"action":"proposal","reason":"URL 원문 기반 설명 요청"}
 - "롱폼만들어줘. 주제는 이 링크 설명해주기 https://example.com/post" -> {"action":"proposal","reason":"URL 원문 기반 롱폼 제작 요청"}
@@ -218,12 +232,14 @@ export async function classifyMessageIntent(
         return { action: 'proposal', reason: deterministicProposalReason };
     }
 
-    if (!hasWorkflowProposalSignal(userMessage)) {
+    if (isObviousChatMessage(userMessage)) {
         return { action: 'chat', reason: '워크플로우 생성/실행 의도가 명시되지 않음' };
     }
 
     if (env.orchestratorMode === 'mock') {
-        return { action: 'proposal', reason: 'mock orchestrator mode' };
+        return hasWorkflowProposalSignal(userMessage)
+            ? { action: 'proposal', reason: 'mock orchestrator mode' }
+            : { action: 'chat', reason: 'mock orchestrator mode: 워크플로우 의도 불명확' };
     }
 
     const response = await openaiAdapter.chatJson({

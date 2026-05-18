@@ -19,7 +19,9 @@ import { DEFAULT_WORKFLOW_PACK_REGISTRY } from '../workflow-packs';
 
 import type { AllowedBlockType, ClaudeProposalOutput } from './response-parser';
 import type { Orchestrator, ProposalResult } from './types';
+import type { RequestSpec } from '../blocks/request-contract';
 import type { ContentProfilePreferences } from '../content-profile/content-profile';
+import type { WorkflowOutputKind } from '../workflow-packs';
 import type { WorkflowRecipeManifest } from '../workflow-packs';
 
 const COST_ESTIMATES: Record<AllowedBlockType, number> = {
@@ -76,6 +78,43 @@ Return compact JSON only:
   "assumptions": ["short assumption"]
 }`;
 
+const GENERIC_REQUEST_DECISION_SYSTEM_PROMPT = `You are the request intent and recipe planner for a node-based automation product.
+Read the user's Korean or multilingual natural-language request and decide what kind of output they actually want.
+
+Do not return executable workflow nodes. The backend compiler owns node IDs, graph shape, paid execution guards, and provider safety.
+Choose a recipe only from this registry:
+{{RECIPES}}
+
+Return compact JSON only:
+{
+  "intent": "single-image|blog-post|url-explainer|shorts|longform|custom|chat",
+  "recipeId": "image.single.v1|text.blog.v1|text.url-explainer.v1|shorts.info.v1|longform.explainer.v1|null",
+  "outputKind": "text|image|audio|video|data|unknown",
+  "mode": "informational|creative-simulation|story|news|explanation|unknown",
+  "needsSearch": true,
+  "needsScript": false,
+  "needsImagePrompt": false,
+  "scriptToneId": "informative-reframe|mz-viral|news-anchor|story-dialogue|calm-explainer",
+  "reason": "short Korean reason",
+  "confidence": 0.0,
+  "understanding": {
+    "surfaceTerms": ["user-visible phrase to preserve"],
+    "focusEntities": ["named subjects, characters, products, topics"],
+    "actions": ["requested actions or scene dynamics"],
+    "constraints": ["style, count, format, source, matchup rules"],
+    "styleHints": ["visual or tone hints"]
+  }
+}
+
+Rules:
+- If the user asks to draw, generate, make, or visualize an image, choose image.single.v1 even if they phrase it casually.
+- If the user asks for Shorts/Reels/TikTok production, choose shorts.info.v1. Creative simulations and VS matchups are still shorts when the requested surface is short-form video.
+- If the user asks for longform or a long YouTube video, choose longform.explainer.v1.
+- If the user asks for blog/article/post/copy/text writing, choose text.blog.v1 unless a URL is the primary source, then choose text.url-explainer.v1.
+- If the request is outside the known recipes but still automation-worthy, set recipeId null and intent custom so the full workflow planner can decide.
+- If it is obvious small talk or a product question without an output request, set recipeId null and intent chat.
+- Preserve the user's real subject in understanding.surfaceTerms. Do not replace it with generic words like "content" or "topic".`;
+
 export const openaiOrchestrator: Orchestrator = {
     async generateProposal(
         flowId: string,
@@ -85,16 +124,74 @@ export const openaiOrchestrator: Orchestrator = {
         const startMs = Date.now();
 
         try {
-            const deterministicGenericWorkflow = buildDeterministicGenericWorkflow(userMessage);
-            if (deterministicGenericWorkflow) {
+            const aiRecipeDecisionResponse = await openaiAdapter.chatJson({
+                model: env.openaiOrchestratorModel,
+                systemPrompt: buildGenericRequestDecisionSystemPrompt(),
+                userMessage: buildGenericRequestDecisionPrompt(userMessage, currentContext),
+                maxTokens: 1000,
+            });
+            const aiRecipeDecision = normalizeGenericRequestDecision(
+                parseJsonObject(aiRecipeDecisionResponse.content),
+                userMessage
+            );
+
+            if (aiRecipeDecision.recipeId === 'longform.explainer.v1') {
                 const contentProfile = buildContentProfilePreferences({
                     userMessage,
-                    outputType: deterministicGenericWorkflow.plan.outputType,
-                    hasMediaImage: deterministicGenericWorkflow.blocks.some(block => block.type === 'media-image'),
-                    hasMediaVideo: deterministicGenericWorkflow.blocks.some(block => block.type === 'media-video'),
+                    outputType: 'video',
+                    hasMediaVideo: true,
+                    contentProfileId: aiRecipeDecision.recipeId,
+                    scriptToneId: aiRecipeDecision.scriptToneId,
                 });
-                const proposal = buildProposalResult(deterministicGenericWorkflow, userMessage, contentProfile);
-                await traceService.record(flowId, null, 'TOOL_RESULT', 'Deterministic generic proposal generated', {
+                const aiDecisionResponse = await openaiAdapter.chatJson({
+                    model: env.openaiOrchestratorModel,
+                    systemPrompt: LONGFORM_ORCHESTRATOR_DECISION_SYSTEM_PROMPT,
+                    userMessage: buildLongformDecisionPrompt(userMessage, currentContext, contentProfile),
+                    maxTokens: 1200,
+                });
+                const aiOrchestratorDecision = parseJsonObject(aiDecisionResponse.content);
+                const aiContentProfile = buildAiLongformContentProfile(
+                    userMessage,
+                    contentProfile,
+                    aiOrchestratorDecision
+                );
+                const data = buildLongformGateAWorkflow(userMessage, aiContentProfile);
+                applyAiLongformDecisionToWorkflow(data, aiOrchestratorDecision);
+                const proposal = buildProposalResult(data, userMessage, aiContentProfile, {
+                    aiRequestDecision: aiRecipeDecision,
+                    aiOrchestratorDecision,
+                });
+                await traceService.record(flowId, null, 'TOOL_RESULT', 'AI longform recipe proposal generated', {
+                    promptVersion: PROMPT_VERSION,
+                    blockCount: proposal.proposedNodes.length,
+                    edgeCount: proposal.proposedEdges.length,
+                    estimatedCost: proposal.estimatedCost.total,
+                    contentProfileId: aiContentProfile.contentProfileId,
+                    scriptToneId: aiContentProfile.scriptToneId,
+                    reviewMode: aiContentProfile.reviewMode,
+                    aiRecipeDecisionModel: aiRecipeDecisionResponse.model,
+                    aiDecisionModel: aiDecisionResponse.model,
+                    aiDecisionLatencyMs: aiDecisionResponse.latencyMs,
+                    plan: data.plan,
+                    latencyMs: Date.now() - startMs,
+                });
+                return proposal;
+            }
+
+            const aiGenericWorkflow = buildAiSelectedGenericWorkflow(userMessage, aiRecipeDecision);
+            if (aiGenericWorkflow) {
+                const contentProfile = buildContentProfilePreferences({
+                    userMessage,
+                    outputType: aiGenericWorkflow.plan.outputType,
+                    hasMediaImage: aiGenericWorkflow.blocks.some(block => block.type === 'media-image'),
+                    hasMediaVideo: aiGenericWorkflow.blocks.some(block => block.type === 'media-video'),
+                    contentProfileId: aiRecipeDecision.recipeId === 'image.single.v1' ? 'image.single.v1' : undefined,
+                    scriptToneId: aiRecipeDecision.scriptToneId,
+                });
+                const proposal = buildProposalResult(aiGenericWorkflow, userMessage, contentProfile, {
+                    aiRequestDecision: aiRecipeDecision,
+                });
+                await traceService.record(flowId, null, 'TOOL_RESULT', 'AI recipe proposal generated', {
                     promptVersion: PROMPT_VERSION,
                     blockCount: proposal.proposedNodes.length,
                     edgeCount: proposal.proposedEdges.length,
@@ -102,7 +199,10 @@ export const openaiOrchestrator: Orchestrator = {
                     contentProfileId: contentProfile.contentProfileId,
                     scriptToneId: contentProfile.scriptToneId,
                     reviewMode: contentProfile.reviewMode,
-                    plan: deterministicGenericWorkflow.plan,
+                    aiRecipeDecisionModel: aiRecipeDecisionResponse.model,
+                    aiRecipeDecisionLatencyMs: aiRecipeDecisionResponse.latencyMs,
+                    aiRecipeDecision,
+                    plan: aiGenericWorkflow.plan,
                     latencyMs: Date.now() - startMs,
                 });
                 return proposal;
@@ -240,50 +340,96 @@ function buildFallbackProposal(errorMessage: string): ProposalResult {
     };
 }
 
-function buildDeterministicGenericWorkflow(userMessage: string): ClaudeProposalOutput | null {
-    const intent = classifyGenericRequestIntent(userMessage);
+type KnownRecipeId =
+    | 'image.single.v1'
+    | 'text.blog.v1'
+    | 'text.url-explainer.v1'
+    | 'shorts.info.v1'
+    | 'longform.explainer.v1';
 
-    if (intent.wantsLongformRecipe) return null;
+interface GenericRequestDecision {
+    intent: string;
+    recipeId: KnownRecipeId | null;
+    outputKind: WorkflowOutputKind | 'unknown';
+    mode: string;
+    needsSearch: boolean;
+    needsScript: boolean;
+    needsImagePrompt: boolean;
+    scriptToneId?: string;
+    reason: string;
+    confidence: number;
+    understanding: {
+        surfaceTerms: string[];
+        focusEntities: string[];
+        actions: string[];
+        constraints: string[];
+        styleHints: string[];
+    };
+}
 
-    if (intent.wantsShortformRecipe) {
-        return buildWorkflowFromRecipe('shorts.info.v1', userMessage, {
-            summary:
-                '요청한 주제를 자료 수집, 대본 작성, 장면 구성, 이미지와 음성 생성, 영상 합성, 메타데이터 생성까지 이어지는 쇼츠 제작 워크플로우로 처리합니다.',
+function buildAiSelectedGenericWorkflow(
+    userMessage: string,
+    decision: GenericRequestDecision
+): ClaudeProposalOutput | null {
+    if (!decision.recipeId || decision.recipeId === 'longform.explainer.v1') return null;
+
+    const topic = firstNonEmpty(decision.understanding.surfaceTerms) ?? userMessage.trim();
+    const requestSpec = buildRequestSpecFromDecision(userMessage, decision);
+    const baseConfig = {
+        topic: topic || userMessage.trim(),
+        requestSpec,
+        requestUnderstanding: decision.understanding,
+        requestIntent: decision.intent,
+        requestMode: decision.mode,
+    };
+
+    if (decision.recipeId === 'shorts.info.v1') {
+        return buildWorkflowFromRecipe(decision.recipeId, userMessage, {
+            summary: buildAiRecipeSummary(
+                decision,
+                '요청한 주제를 자료 수집, 대본 작성, 장면 구성, 이미지와 음성 생성, 영상 합성, 메타데이터 생성까지 이어지는 쇼츠 제작 워크플로우로 처리합니다.'
+            ),
             blockConfigOverrides: {
-                search: { query: userMessage.trim() || '쇼츠 자료 수집' },
-                content: { topic: userMessage.trim() || '쇼츠 대본 생성' },
+                search: { query: userMessage.trim() || topic || '쇼츠 자료 수집', requestSpec },
+                content: baseConfig,
+                data: { requestUnderstanding: decision.understanding },
+                analysis: { requestUnderstanding: decision.understanding },
+                'media-image': { requestUnderstanding: decision.understanding },
             },
         });
     }
 
-    if (intent.wantsTextWriting) {
-        return buildWorkflowFromRecipe(intent.hasUrl ? 'text.url-explainer.v1' : 'text.blog.v1', userMessage, {
-            summary: intent.hasUrl
-                ? 'URL 원문을 수집한 뒤 블로그나 설명문으로 읽기 좋은 글을 생성합니다.'
-                : '요청한 주제로 블로그나 문서에 바로 쓸 수 있는 글을 생성합니다.',
-            blockConfigOverrides: intent.hasUrl
-                ? {
-                      search: { query: userMessage.trim() || 'URL 설명' },
-                      content: { topic: userMessage.trim() || '글 작성' },
-                  }
-                : {
-                      content: { topic: userMessage.trim() || '글 작성' },
-                  },
+    if (decision.recipeId === 'text.blog.v1' || decision.recipeId === 'text.url-explainer.v1') {
+        return buildWorkflowFromRecipe(decision.recipeId, userMessage, {
+            summary: buildAiRecipeSummary(
+                decision,
+                decision.recipeId === 'text.url-explainer.v1'
+                    ? 'URL 원문을 수집한 뒤 블로그나 설명문으로 읽기 좋은 글을 생성합니다.'
+                    : '요청한 주제로 블로그나 문서에 바로 쓸 수 있는 글을 생성합니다.'
+            ),
+            blockConfigOverrides: {
+                search: { query: userMessage.trim() || topic || 'URL 설명' },
+                content: baseConfig,
+            },
         });
     }
 
-    if (intent.wantsVideoOutput) return null;
-
-    if (intent.wantsImage) {
-        return buildWorkflowFromRecipe('image.single.v1', userMessage, {
-            summary: '요청한 이미지를 만들기 위해 프롬프트를 정리한 뒤 단일 이미지를 생성합니다.',
+    if (decision.recipeId === 'image.single.v1') {
+        return buildWorkflowFromRecipe(decision.recipeId, userMessage, {
+            summary: buildAiRecipeSummary(
+                decision,
+                '요청한 이미지를 만들기 위해 프롬프트를 정리한 뒤 단일 이미지를 생성합니다.'
+            ),
             blockConfigOverrides: {
                 content: {
-                    topic: userMessage.trim() || '이미지 생성',
+                    ...baseConfig,
+                    mode: 'single-image',
                     scenes: 1,
+                    needsImagePrompt: true,
                 },
                 'media-image': {
-                    count: 1,
+                    count: detectRequestedSceneCount(userMessage) ?? 1,
+                    requestUnderstanding: decision.understanding,
                 },
             },
         });
@@ -292,44 +438,38 @@ function buildDeterministicGenericWorkflow(userMessage: string): ClaudeProposalO
     return null;
 }
 
-function classifyGenericRequestIntent(userMessage: string): {
-    hasUrl: boolean;
-    wantsImage: boolean;
-    wantsLongformRecipe: boolean;
-    wantsShortformRecipe: boolean;
-    wantsTextWriting: boolean;
-    wantsVideoOutput: boolean;
-} {
-    const normalized = normalizeRequestText(userMessage);
-    const hasUrl = /https?:\/\/[^\s"'<>]+/i.test(userMessage);
-    const wantsShortformRecipe = /쇼츠|shorts|릴스|reels|틱톡|tiktok/.test(normalized);
-    const wantsLongformRecipe = /롱폼|longform|긴영상/.test(normalized);
-    const mentionsVideoSurface = /영상|비디오|video|mp4|유튜브|youtube/.test(normalized);
-    const asksToProduce = /만들|제작|생성|합성|편집|렌더|produce|create|make|render|compose/.test(normalized);
-    const wantsVideoOutput = wantsShortformRecipe || wantsLongformRecipe || (mentionsVideoSurface && asksToProduce);
-    const wantsImage = /이미지|그림|사진|일러스트|삽화|썸네일|image|picture|photo|illustration|thumbnail/.test(
-        normalized
-    );
-    const wantsImageTextComposition = wantsImage && /글자|문구|텍스트|자막|caption|text/.test(normalized);
-    const mentionsTextDocument =
-        /블로그|홍보글|소개글|대본|본문|문서|아티클|포스트|설명문|요약문|blog|article|post|document|script|copy|write/.test(
-            normalized
-        );
-    const asksForWriting = /글.{0,8}(써|작성|만들|생성|쓰|쓸|정리)|(?:써|작성|만들|생성|write).{0,8}글/.test(
-        normalized
-    );
-    const wantsTextWriting =
-        mentionsTextDocument ||
-        (asksForWriting && !wantsImageTextComposition) ||
-        (hasUrl && /설명|요약|정리|분석|해설|읽어|explain|summarize|analyze|brief/.test(normalized));
+function buildAiRecipeSummary(decision: GenericRequestDecision, fallback: string): string {
+    const recipe = decision.recipeId ? DEFAULT_WORKFLOW_PACK_REGISTRY.getRecipe(decision.recipeId) : undefined;
+    const reason = decision.reason || fallback;
+    return recipe ? `${recipe.displayName}: ${reason}` : reason;
+}
 
+function buildRequestSpecFromDecision(userMessage: string, decision: GenericRequestDecision): RequestSpec {
+    const outputKind =
+        decision.outputKind === 'text' ||
+        decision.outputKind === 'image' ||
+        decision.outputKind === 'audio' ||
+        decision.outputKind === 'video' ||
+        decision.outputKind === 'data'
+            ? decision.outputKind
+            : 'unknown';
     return {
-        hasUrl,
-        wantsImage,
-        wantsLongformRecipe,
-        wantsShortformRecipe,
-        wantsTextWriting,
-        wantsVideoOutput,
+        userRequest: userMessage,
+        contentIntent:
+            decision.intent === 'single-image' ||
+            decision.intent === 'blog-post' ||
+            decision.intent === 'shorts' ||
+            decision.intent === 'longform' ||
+            decision.intent === 'url-explainer'
+                ? decision.intent === 'url-explainer'
+                    ? 'explanation'
+                    : decision.intent
+                : 'unknown',
+        outputKind,
+        ...(decision.mode === 'creative-simulation' ? { contentMode: 'creative-simulation' as const } : {}),
+        understanding: decision.understanding,
+        focusTerms: decision.understanding.focusEntities,
+        exactSubjectRequired: true,
     };
 }
 
@@ -392,8 +532,107 @@ function buildGenericRejectedBlocks(recipe: WorkflowRecipeManifest): ClaudePropo
     return candidates.filter(candidate => !selected.has(candidate.blockType));
 }
 
-function normalizeRequestText(text: string): string {
-    return text.toLowerCase().replace(/\s+/g, '');
+function buildGenericRequestDecisionSystemPrompt(): string {
+    const recipes = DEFAULT_WORKFLOW_PACK_REGISTRY.recipes
+        .map(
+            recipe =>
+                `- ${recipe.recipeId}: ${recipe.displayName} | output=${recipe.outputType} | use=${recipe.triggerHints.join(
+                    ', '
+                )}`
+        )
+        .join('\n');
+    return GENERIC_REQUEST_DECISION_SYSTEM_PROMPT.replace('{{RECIPES}}', recipes);
+}
+
+function buildGenericRequestDecisionPrompt(
+    userMessage: string,
+    currentContext: Record<string, unknown> | undefined
+): string {
+    return [
+        `USER_REQUEST:\n${userMessage}`,
+        currentContext ? `CURRENT_CONTEXT:\n${JSON.stringify(currentContext, null, 2)}` : undefined,
+    ]
+        .filter(Boolean)
+        .join('\n\n');
+}
+
+function normalizeGenericRequestDecision(record: Record<string, unknown>, userMessage: string): GenericRequestDecision {
+    const recipeId = normalizeKnownRecipeId(record['recipeId']);
+    const outputKind = normalizeWorkflowOutputKind(record['outputKind']);
+    const understanding = readUnderstanding(record['understanding'], userMessage);
+
+    return {
+        intent: readString(record['intent']) ?? 'custom',
+        recipeId,
+        outputKind,
+        mode: readString(record['mode']) ?? 'unknown',
+        needsSearch: readBoolean(record['needsSearch']),
+        needsScript: readBoolean(record['needsScript']),
+        needsImagePrompt: readBoolean(record['needsImagePrompt']),
+        scriptToneId: readString(record['scriptToneId']),
+        reason: readString(record['reason']) ?? '',
+        confidence: readNumber(record['confidence']) ?? 0,
+        understanding,
+    };
+}
+
+function normalizeKnownRecipeId(value: unknown): KnownRecipeId | null {
+    if (typeof value !== 'string') return null;
+    const normalized = value.trim();
+    if (
+        normalized === 'image.single.v1' ||
+        normalized === 'text.blog.v1' ||
+        normalized === 'text.url-explainer.v1' ||
+        normalized === 'shorts.info.v1' ||
+        normalized === 'longform.explainer.v1'
+    ) {
+        return normalized;
+    }
+    return null;
+}
+
+function normalizeWorkflowOutputKind(value: unknown): WorkflowOutputKind | 'unknown' {
+    if (value === 'text' || value === 'data' || value === 'image' || value === 'audio' || value === 'video') {
+        return value;
+    }
+    return 'unknown';
+}
+
+function readUnderstanding(value: unknown, userMessage: string): GenericRequestDecision['understanding'] {
+    const record =
+        value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+    const surfaceTerms = readStringArray(record['surfaceTerms']);
+    return {
+        surfaceTerms: surfaceTerms.length > 0 ? surfaceTerms : [userMessage.trim()].filter(Boolean),
+        focusEntities: readStringArray(record['focusEntities']),
+        actions: readStringArray(record['actions']),
+        constraints: readStringArray(record['constraints']),
+        styleHints: readStringArray(record['styleHints']),
+    };
+}
+
+function readString(value: unknown): string | undefined {
+    return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function readBoolean(value: unknown): boolean {
+    return value === true;
+}
+
+function readNumber(value: unknown): number | undefined {
+    return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function readStringArray(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    return value
+        .map(item => (typeof item === 'string' ? item.trim() : ''))
+        .filter(Boolean)
+        .slice(0, 12);
+}
+
+function firstNonEmpty(values: string[]): string | undefined {
+    return values.find(value => value.trim());
 }
 
 function buildAiLongformContentProfile(
@@ -456,6 +695,7 @@ function buildProposalResult(
               sceneCount,
               imageQuality: mediaImageBlock.config?.['imageQuality'] ?? env.openaiImageQuality,
               imageStyleId: mediaImageBlock.config?.['imageStyleId'] ?? mediaImageBlock.config?.['style'],
+              format: resolveImageGenerationFormat(contentProfile, mediaImageBlock.config),
               textAndOtherEstimatedCostUsd,
           })
         : undefined;
@@ -577,15 +817,25 @@ function resolveProposalSceneCount(
 }
 
 function detectRequestedSceneCount(userMessage: string): number | undefined {
-    const match = userMessage.match(/(\d{1,2})\s*(?:장|컷|씬|scene|scenes|images?)/i);
+    const match = userMessage.match(/([\d,]{1,7})\s*(?:장|컷|씬|scene|scenes|images?)/i);
     if (!match) return undefined;
-    const count = Number(match[1]);
+    const count = Number(match[1].replace(/,/g, ''));
     return Number.isFinite(count) && count > 0 ? Math.min(24, Math.floor(count)) : undefined;
 }
 
 function getMediaImageSceneCount(config: Record<string, unknown> | undefined): number {
     const count = Number(config?.['count'] ?? config?.['scenes'] ?? config?.['sceneCount'] ?? config?.['frameCount']);
     return Number.isFinite(count) && count > 0 ? Math.floor(count) : DEFAULT_SHORTS_SCENE_COUNT;
+}
+
+function resolveImageGenerationFormat(
+    contentProfile: ContentProfilePreferences,
+    imageConfig: Record<string, unknown> | undefined
+): 'single-image' | 'shorts-frame' {
+    if (contentProfile.contentProfileId === 'image.single.v1') return 'single-image';
+    if (imageConfig?.['style'] === 'single-image') return 'single-image';
+    if (imageConfig?.['format'] === 'single-image') return 'single-image';
+    return 'shorts-frame';
 }
 
 function estimateNonImageCostUsd(blocks: Array<{ type: AllowedBlockType }>): number {

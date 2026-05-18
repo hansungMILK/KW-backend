@@ -7,6 +7,18 @@ vi.mock('../../utils/id-generator', () => ({
 }));
 
 describe('mockOrchestrator content profile proposal metadata', () => {
+    it('treats draw-action requests as standalone image generation proposals', async () => {
+        const proposal = await mockOrchestrator.generateProposal('flow-1', '우주 고래가 도시 위를 나는 상황을 그려줘');
+
+        expect(proposal.proposedNodes.map(node => node.blockType)).toEqual(['content', 'media-image']);
+        expect(proposal.metadata?.['contentProfile']).toEqual(
+            expect.objectContaining({
+                contentProfileId: 'image.single.v1',
+            })
+        );
+        expect(proposal.proposedNodes.map(node => node.blockType)).not.toContain('media-video');
+    });
+
     it('attaches inferred content profile preferences to proposal metadata and runtime node config', async () => {
         const proposal = await mockOrchestrator.generateProposal(
             'flow-1',

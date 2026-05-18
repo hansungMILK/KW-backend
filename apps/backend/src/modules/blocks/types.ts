@@ -103,6 +103,8 @@ export interface BlockExecutor {
 export const SearchOutputSchema = z.object({
     collectionMode: z.enum(['url', 'web_search', 'url_fallback_web_search']).optional(),
     primaryUrl: z.string().optional(),
+    requestTopic: z.string().optional(),
+    requestSpec: z.record(z.string(), z.unknown()).optional(),
     keywords: z.array(z.string()),
     articles: z.array(
         z.object({
@@ -118,6 +120,7 @@ export const SearchOutputSchema = z.object({
             keyClaims: z.array(z.string()).optional(),
             primarySource: z.boolean().optional(),
             sourcePriority: z.number().optional(),
+            coverage: z.record(z.string(), z.unknown()).optional(),
         })
     ),
     trendScore: z.number().optional(),
@@ -128,6 +131,13 @@ export const SearchOutputSchema = z.object({
 /** content block */
 export const ContentOutputSchema = z.object({
     title: z.string().optional(),
+    mode: z.string().optional(),
+    outputKind: z.string().optional(),
+    promptPlan: z.record(z.string(), z.unknown()).optional(),
+    requestTopic: z.string().optional(),
+    requestSpec: z.record(z.string(), z.unknown()).optional(),
+    outputContract: z.record(z.string(), z.unknown()).optional(),
+    sourceCoverage: z.array(z.record(z.string(), z.unknown())).optional(),
     hook: z.string(),
     script: z
         .object({
