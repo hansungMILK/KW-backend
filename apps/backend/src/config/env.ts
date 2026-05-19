@@ -83,4 +83,6 @@ export const env = {
     nanobananaModel: readEnv('NANOBANANA_MODEL', 'nano-banana'),
 } as const;
 
-export const isLocalStage = env.stage === 'local';
+export const isAwsExecutionEnvironment = !!readEnv('AWS_EXECUTION_ENV') || !!readEnv('LAMBDA_TASK_ROOT');
+export const isOffline = readBoolEnv('IS_OFFLINE', false);
+export const isLocalStage = !isAwsExecutionEnvironment && (env.stage === 'local' || isOffline);

@@ -13,10 +13,27 @@ const BUCKET = env.s3Bucket;
 const LOCAL_ASSETS_DIR = resolve(process.cwd(), '.local-assets');
 const LOCAL_ASSET_BASE_URL = process.env.LOCAL_ASSET_BASE_URL || 'http://localhost:8800/_local-assets';
 
-export const getS3Uri = (key: string): string => `s3://${BUCKET}/${key}`;
+const hasUsableRemoteBucketName = (value: string): boolean =>
+    !!value && value !== '[object Object]' && value !== 'eureka-flows-local';
+
+const assertRemoteS3Configured = (): void => {
+    if (isLocalStage) return;
+    if (!hasUsableRemoteBucketName(BUCKET)) {
+        throw new Error(
+            `[s3] S3_BUCKET is required for stage "${env.stage}". ` +
+                'Remote stages must use S3 instead of falling back to local asset storage.'
+        );
+    }
+};
+
+export const getS3Uri = (key: string): string => {
+    assertRemoteS3Configured();
+    return `s3://${BUCKET}/${key}`;
+};
 
 export const getPublicUrl = (key: string): string => {
     if (isLocalStage) return `${LOCAL_ASSET_BASE_URL.replace(/\/+$/, '')}/${encodePath(key)}`;
+    assertRemoteS3Configured();
 
     const domain = env.cdnDomain.replace(/^https?:\/\//, '').replace(/\/+$/, '');
     if (!domain) return getS3Uri(key);
@@ -32,6 +49,7 @@ export const getObject = async (key: string) => {
     if (isLocalStage) {
         return { Body: await readFile(getLocalAssetPath(key)) };
     }
+    assertRemoteS3Configured();
 
     const cmd = new GetObjectCommand({ Bucket: BUCKET, Key: key });
     return s3.send(cmd);
@@ -45,6 +63,7 @@ export const putObject = async (key: string, body: Buffer | string, contentType:
         await writeFile(`${filePath}.metadata.json`, JSON.stringify({ contentType }));
         return { localPath: filePath };
     }
+    assertRemoteS3Configured();
 
     const cmd = new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: body, ContentType: contentType });
     return s3.send(cmd);
@@ -57,6 +76,7 @@ export const deleteObject = async (key: string) => {
         await rm(`${filePath}.metadata.json`, { force: true });
         return;
     }
+    assertRemoteS3Configured();
 
     const cmd = new DeleteObjectCommand({ Bucket: BUCKET, Key: key });
     await s3.send(cmd);

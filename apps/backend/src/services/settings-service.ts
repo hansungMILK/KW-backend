@@ -38,12 +38,12 @@ export const maskKey = (raw: string): string => {
 };
 
 const getRawKey = (provider: ApiKeyProvider): string | null => {
-    // Priority: stored record (decrypted) > env var — sync version for local
-    const decrypted = settingsRepo.getDecryptedKey(provider);
-    if (decrypted) return decrypted;
-
     const envKey = process.env[ENV_MAP[provider]];
-    return envKey || null;
+    if (!settingsRepo.isSyncReadAvailable) return envKey || null;
+
+    // Priority: stored record (decrypted) > env var — sync version for local only.
+    const decrypted = settingsRepo.getDecryptedKey(provider);
+    return decrypted || envKey || null;
 };
 
 const getRawKeyAsync = async (provider: ApiKeyProvider): Promise<string | null> => {

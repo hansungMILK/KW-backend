@@ -21,6 +21,7 @@ describe('queue local dispatch', () => {
                 localQueueMode: 'worker',
                 stage: 'local',
             },
+            isAwsExecutionEnvironment: false,
             isLocalStage: true,
         }));
         vi.doMock('../../services/execution-engine', () => ({
@@ -64,6 +65,7 @@ describe('queue local dispatch', () => {
                 localQueueMode: 'inline',
                 stage: 'local',
             },
+            isAwsExecutionEnvironment: false,
             isLocalStage: true,
         }));
         vi.doMock('../../services/execution-engine', () => ({
@@ -82,5 +84,39 @@ describe('queue local dispatch', () => {
         });
 
         expect(handleRunExecution).toHaveBeenCalledWith('run-inline', 'exec-inline');
+    });
+
+    it('does not fall back to the local worker in AWS Lambda', async () => {
+        const spawn = vi.fn();
+
+        vi.doMock('child_process', () => ({ spawn }));
+        vi.doMock('../../config/env', () => ({
+            env: {
+                awsRegion: 'ap-northeast-2',
+                executionQueueUrl: '',
+                localQueueMode: 'worker',
+                stage: 'dev',
+            },
+            isAwsExecutionEnvironment: true,
+            isLocalStage: false,
+        }));
+        vi.doMock('../../services/execution-engine', () => ({
+            executionEngine: {
+                handleNodeExecution: vi.fn(),
+                handleRunExecution: vi.fn(),
+            },
+        }));
+
+        const { queue } = await import('./queue');
+
+        await expect(
+            queue.send({
+                type: 'EXECUTE_RUN',
+                runId: 'run-prod',
+                executionId: 'exec-prod',
+                timestamp: '2026-05-12T00:00:00.000Z',
+            })
+        ).rejects.toThrow('EXECUTION_QUEUE_URL not configured');
+        expect(spawn).not.toHaveBeenCalled();
     });
 });

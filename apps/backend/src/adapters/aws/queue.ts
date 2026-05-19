@@ -4,7 +4,7 @@ import { join } from 'path';
 
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 
-import { env, isLocalStage } from '../../config/env';
+import { env, isAwsExecutionEnvironment, isLocalStage } from '../../config/env';
 import { executionEngine } from '../../services/execution-engine';
 
 import type { QueueMessage } from '@flows/contracts';
@@ -22,7 +22,7 @@ import type { QueueMessage } from '@flows/contracts';
  *   send() publishes to SQS; processLocally() is used by the SQS Lambda worker.
  */
 
-const IS_LOCAL = isLocalStage;
+const IS_LOCAL = isLocalStage && !isAwsExecutionEnvironment;
 const LOCAL_WORKER_LOG_FILE = '.local-db/local-run-worker.log';
 const LOCAL_WORKER_RUNNER = 'scripts/local-worker-runner.mjs';
 
@@ -43,6 +43,13 @@ function resolveBackendCwd(): string {
 }
 
 function dispatchLocalWorker(message: QueueMessage): void {
+    if (isAwsExecutionEnvironment) {
+        throw new Error(
+            '[queue] local worker dispatch is disabled in AWS Lambda. ' +
+                'Configure EXECUTION_QUEUE_URL/SQS for this stage.'
+        );
+    }
+
     const backendCwd = resolveBackendCwd();
     const runnerPath = join(backendCwd, LOCAL_WORKER_RUNNER);
     if (!existsSync(runnerPath)) {

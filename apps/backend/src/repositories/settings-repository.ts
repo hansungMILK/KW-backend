@@ -102,13 +102,15 @@ export interface SettingsRecord {
 // ============================================================================
 
 export const settingsRepo = {
+    isSyncReadAvailable: !USE_REAL_DYNAMO,
+
     getKey(provider: ApiKeyProvider): SettingsRecord | null {
         if (!USE_REAL_DYNAMO) {
             return (memDb.get(TABLE, provider) as unknown as SettingsRecord) ?? null;
         }
-        // DynamoDB: synchronous access not possible — this method stays sync for now.
-        // In prod, callers should use getKeyAsync() below.
-        return (memDb.get(TABLE, provider) as unknown as SettingsRecord) ?? null;
+        throw new Error(
+            '[settings-repository] getKey() is local-only when real DynamoDB is selected. Use getKeyAsync().'
+        );
     },
 
     async getKeyAsync(provider: ApiKeyProvider): Promise<SettingsRecord | null> {
@@ -126,6 +128,11 @@ export const settingsRepo = {
 
     /** @deprecated Use getDecryptedKeyAsync in prod. Sync fallback for local only. */
     getDecryptedKey(provider: ApiKeyProvider): string | null {
+        if (USE_REAL_DYNAMO) {
+            throw new Error(
+                '[settings-repository] getDecryptedKey() is local-only when real DynamoDB is selected. Use getDecryptedKeyAsync().'
+            );
+        }
         if (USE_KMS) return null; // KMS decrypt is async — must use getDecryptedKeyAsync
         const record = this.getKey(provider);
         if (!record?.encryptedKey) return null;

@@ -4,9 +4,40 @@ import { join } from 'path';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 
-import { env, isLocalStage } from '../../config/env';
+import { env, isAwsExecutionEnvironment, isLocalStage } from '../../config/env';
 
 const USE_REAL_DYNAMO = !!env.dynamodbEndpoint || !isLocalStage;
+const USE_LOCAL_FILE_DB = !USE_REAL_DYNAMO && !isAwsExecutionEnvironment;
+
+const REQUIRED_REAL_DYNAMO_TABLES = [
+    ['FLOWS_TABLE', env.flowsTable],
+    ['CONNECTIONS_TABLE', env.connectionsTable],
+    ['RUNS_TABLE', env.runsTable],
+    ['RUN_NODES_TABLE', env.runNodesTable],
+    ['MESSAGES_TABLE', env.messagesTable],
+    ['PROPOSALS_TABLE', env.proposalsTable],
+    ['TRACES_TABLE', env.tracesTable],
+    ['ASSETS_TABLE', env.assetsTable],
+    ['SETTINGS_TABLE', env.settingsTable],
+] as const;
+
+const hasUsableRemoteTableName = (value: string): boolean =>
+    !!value && value !== '[object Object]' && !value.endsWith('-local');
+
+const assertRealDynamoConfigured = (): void => {
+    if (!USE_REAL_DYNAMO || isLocalStage) return;
+
+    const missing = REQUIRED_REAL_DYNAMO_TABLES.filter(([, value]) => !hasUsableRemoteTableName(value)).map(
+        ([name]) => name
+    );
+    if (missing.length > 0) {
+        throw new Error(
+            `[dynamodb] real DynamoDB is selected for stage "${env.stage}", but required table env vars are missing: ${missing.join(', ')}`
+        );
+    }
+};
+
+assertRealDynamoConfigured();
 
 // ============================================================================
 // Real DynamoDB client (for dev/prod or when DYNAMODB_ENDPOINT is set)
@@ -35,7 +66,23 @@ export const getDocClient = (): DynamoDBDocumentClient => {
 
 const DATA_DIR = join(process.cwd(), '.local-db');
 
+export const assertLocalFileDbAllowed = (): void => {
+    if (isAwsExecutionEnvironment) {
+        throw new Error(
+            '[dynamodb] local file database is disabled in AWS Lambda. ' +
+                'Configure DynamoDB/SQS/S3 resources for this stage instead of falling back to .local-db.'
+        );
+    }
+    if (USE_REAL_DYNAMO) {
+        throw new Error(
+            '[dynamodb] local file database is disabled when real DynamoDB is selected. ' +
+                'Check repository adapter selection for this stage.'
+        );
+    }
+};
+
 const ensureDir = () => {
+    assertLocalFileDbAllowed();
     if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
 };
 
@@ -99,4 +146,4 @@ export const TableNames = {
     settings: env.settingsTable,
 } as const;
 
-export { USE_REAL_DYNAMO };
+export { USE_LOCAL_FILE_DB, USE_REAL_DYNAMO };
