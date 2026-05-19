@@ -100,7 +100,7 @@
         "@nx/workspace": "22.7.2",
         "@playwright/test": "^1.59.1",
         "@swc-node/register": "~1.9.1",
-        "@swc/cli": "~0.7.10",
+        "@swc/cli": "~0.8.1",
         "@swc/core": "~1.5.7",
         "@swc/helpers": "~0.5.11",
         "@testing-library/react": "15.0.6",
