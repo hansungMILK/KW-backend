@@ -53,7 +53,7 @@ export const openaiAdapter = {
     async chatText(request: OpenAIJsonRequest): Promise<OpenAIJsonResponse> {
         ensurePaidOpenAIAllowed('text chat');
         const apiKey = await getProviderApiKey('openai');
-        if (!apiKey) throw new Error('OPENAI_API_KEY not configured');
+        if (!apiKey) throw new Error('Provider credential not configured: openai');
 
         const model = request.model ?? env.openaiModel;
         const start = Date.now();
@@ -112,7 +112,7 @@ export const openaiAdapter = {
     async chatJson(request: OpenAIJsonRequest): Promise<OpenAIJsonResponse> {
         ensurePaidOpenAIAllowed('JSON chat');
         const apiKey = await getProviderApiKey('openai');
-        if (!apiKey) throw new Error('OPENAI_API_KEY not configured');
+        if (!apiKey) throw new Error('Provider credential not configured: openai');
 
         const model = request.model ?? env.openaiModel;
         const start = Date.now();
@@ -172,7 +172,7 @@ export const openaiAdapter = {
     async webSearchJson(request: OpenAIJsonRequest): Promise<OpenAIJsonResponse> {
         ensurePaidOpenAIAllowed('web search');
         const apiKey = await getProviderApiKey('openai');
-        if (!apiKey) throw new Error('OPENAI_API_KEY not configured');
+        if (!apiKey) throw new Error('Provider credential not configured: openai');
 
         const model = request.model ?? env.openaiSearchModel;
         const start = Date.now();
@@ -224,7 +224,7 @@ export const openaiAdapter = {
     async visionJson(request: OpenAIVisionJsonRequest): Promise<OpenAIJsonResponse> {
         ensurePaidOpenAIAllowed('vision');
         const apiKey = await getProviderApiKey('openai');
-        if (!apiKey) throw new Error('OPENAI_API_KEY not configured');
+        if (!apiKey) throw new Error('Provider credential not configured: openai');
 
         const model = request.model ?? env.openaiVisionModel;
         const start = Date.now();

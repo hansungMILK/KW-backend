@@ -39,7 +39,7 @@ export const imageAdapter = {
     async generate(request: ImageGenerationRequest): Promise<ImageGenerationResult> {
         ensurePaidOpenAIAllowed('image generation');
         const apiKey = await getProviderApiKey('openai');
-        if (!apiKey) throw new Error('OPENAI_API_KEY not configured');
+        if (!apiKey) throw new Error('Provider credential not configured: openai');
 
         const width = request.width || 1080;
         const height = request.height || 1920;

@@ -32,7 +32,7 @@ const FFPROBE_PATH =
 export const ttsAdapter = {
     async synthesize(request: TtsRequest): Promise<TtsResult> {
         const apiKey = await getProviderApiKey('elevenlabs');
-        if (!apiKey) throw new Error('ELEVENLABS_API_KEY not configured');
+        if (!apiKey) throw new Error('Provider credential not configured: elevenlabs');
 
         const model = request.modelId || env.elevenLabsTtsModel;
         const voice = request.voiceId || env.elevenLabsTtsVoiceId;

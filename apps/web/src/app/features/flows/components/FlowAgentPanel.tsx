@@ -200,8 +200,12 @@ const toUserVisibleAgentError = (error: unknown): string => {
     if (/PAID_OPENAI_DISABLED|Paid OpenAI calls are disabled/i.test(message)) {
         return '현재 OpenAI 실제 호출이 꺼져 있습니다. 비용이 나가는 테스트를 할 때만 백엔드에서 ALLOW_PAID_OPENAI=1로 켜주세요.';
     }
-    if (/MISSING_API_KEYS|Required API keys not configured|OPENAI_API_KEY/i.test(message)) {
-        return 'OpenAI API 키가 설정되어 있지 않습니다. 백엔드 환경변수 또는 Settings API에 키를 넣은 뒤 다시 시도해주세요.';
+    if (
+        /MISSING_API_KEYS|Required API keys not configured|Provider credential not configured|OPENAI_API_KEY/i.test(
+            message
+        )
+    ) {
+        return 'Provider API 키가 설정되어 있지 않습니다. Settings API에 키를 저장한 뒤 다시 시도해주세요.';
     }
     if (/RUN_COST_LIMIT_EXCEEDED|exceeds the per-run cap/i.test(message)) {
         return '예상 실행 비용이 1회 한도 $2.00를 넘어 실행을 차단했습니다. 장면 수나 이미지 품질을 낮추거나 한도를 조정해주세요.';

@@ -15,7 +15,7 @@ import { log } from '../../utils/logger';
 
 const getClient = async (): Promise<Anthropic> => {
     const apiKey = await getProviderApiKey('anthropic');
-    if (!apiKey) throw new Error('ANTHROPIC_API_KEY not configured');
+    if (!apiKey) throw new Error('Provider credential not configured: anthropic');
     return new Anthropic({ apiKey });
 };
 
