@@ -1,12 +1,17 @@
 import { readFile } from 'fs/promises';
 
 import { getLocalAssetContentType, getLocalAssetPath } from '../../../adapters/aws/s3';
+import { isLocalStage } from '../../../config/env';
 import { getCorsHeaders, getRequestOrigin } from '../../../utils/response';
 
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 
 export const main = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
     const corsHeaders = getCorsHeaders(getRequestOrigin(event));
+    if (!isLocalStage) {
+        return { statusCode: 404, headers: corsHeaders, body: 'Not found' };
+    }
+
     const key = event.pathParameters?.['proxy'];
     if (!key) {
         return { statusCode: 404, headers: corsHeaders, body: 'Not found' };

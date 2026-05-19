@@ -4,6 +4,7 @@ import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { basename, delimiter, dirname, extname, join, resolve } from 'path';
 
+import { isLocalStage } from '../../config/env';
 import { getLocalAssetPath } from '../aws/s3';
 
 import type { VideoCompositionResult } from './ffmpeg-adapter';
@@ -751,6 +752,9 @@ function getCompositionDurationSec(request: HyperframesRenderRequest): number {
 function localAssetKeyFromUrl(url: string): string | undefined {
     const base = LOCAL_ASSET_BASE_URL.replace(/\/+$/, '');
     if (!url.startsWith(`${base}/`)) return undefined;
+    if (!isLocalStage) {
+        throw new Error('Hyperframes local asset URLs are disabled outside local/offline stage.');
+    }
     return decodeURIComponent(url.slice(base.length + 1));
 }
 

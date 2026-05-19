@@ -51,9 +51,10 @@ describe('s3 local asset boundary', () => {
             isLocalStage: false,
         }));
 
-        const { getPublicUrl, putObject } = await import('./s3');
+        const { getLocalAssetPath, getPublicUrl, putObject } = await import('./s3');
 
         expect(() => getPublicUrl('images/test.txt')).toThrow(/S3_BUCKET is required/);
+        expect(() => getLocalAssetPath('images/test.txt')).toThrow(/local asset paths are disabled/);
         await expect(putObject('images/test.txt', 'ok', 'text/plain')).rejects.toThrow(/S3_BUCKET is required/);
         expect(existsSync(join(tempCwd, '.local-assets'))).toBe(false);
     });

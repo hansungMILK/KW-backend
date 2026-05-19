@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
     buildHyperframesChildEnv,
@@ -6,17 +6,19 @@ import {
     resolveHyperframesCommand,
 } from './hyperframes-adapter';
 
+const originalConfiguredBin = process.env.HYPERFRAMES_CLI_BIN;
+
+afterEach(() => {
+    if (originalConfiguredBin === undefined) {
+        delete process.env.HYPERFRAMES_CLI_BIN;
+    } else {
+        process.env.HYPERFRAMES_CLI_BIN = originalConfiguredBin;
+    }
+    vi.doUnmock('../../config/env');
+    vi.resetModules();
+});
+
 describe('hyperframes command resolution', () => {
-    const originalConfiguredBin = process.env.HYPERFRAMES_CLI_BIN;
-
-    afterEach(() => {
-        if (originalConfiguredBin === undefined) {
-            delete process.env.HYPERFRAMES_CLI_BIN;
-        } else {
-            process.env.HYPERFRAMES_CLI_BIN = originalConfiguredBin;
-        }
-    });
-
     it('runs the bundled CLI through the current Node binary instead of a .bin env shim', () => {
         delete process.env.HYPERFRAMES_CLI_BIN;
 
@@ -39,6 +41,35 @@ describe('hyperframes command resolution', () => {
         expect(env.PATH?.split(':')).toEqual(
             expect.arrayContaining([expect.stringMatching(/\/bin$/), '/opt/homebrew/bin', '/usr/bin', '/bin'])
         );
+    });
+});
+
+describe('hyperframes remote-stage asset boundary', () => {
+    it('rejects local asset URLs outside local/offline stage instead of reading local files', async () => {
+        vi.resetModules();
+        vi.doMock('../../config/env', () => ({
+            env: {
+                awsRegion: 'ap-northeast-2',
+                cdnDomain: 'cdn.example.com',
+                s3Bucket: 'eureka-flows-backend-assets-dev',
+                stage: 'dev',
+            },
+            isLocalStage: false,
+        }));
+
+        const { hyperframesAdapter } = await import('./hyperframes-adapter');
+
+        await expect(
+            hyperframesAdapter.renderLongform({
+                scenes: [],
+                subtitleCues: [],
+                motionCues: [],
+                audioUrl: 'http://localhost:8800/_local-assets/narration.mp3',
+                audioDurationSec: 1,
+                outputWidth: 2560,
+                outputHeight: 1440,
+            })
+        ).rejects.toThrow(/local asset URLs are disabled/);
     });
 });
 

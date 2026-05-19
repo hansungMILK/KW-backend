@@ -83,6 +83,10 @@ export const deleteObject = async (key: string) => {
 };
 
 export const getLocalAssetPath = (key: string): string => {
+    if (!isLocalStage) {
+        throw new Error('[s3] local asset paths are disabled outside local/offline stage.');
+    }
+
     const safeKey = key
         .split('/')
         .filter(part => part && part !== '.' && part !== '..')

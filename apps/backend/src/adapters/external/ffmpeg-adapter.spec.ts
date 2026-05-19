@@ -9,6 +9,8 @@ import { isSupportedFontFile, resolveFfmpegPath, resolveFfprobePath, splitOverla
 
 afterEach(() => {
     vi.doUnmock('child_process');
+    vi.doUnmock('../../config/env');
+    vi.resetModules();
     vi.restoreAllMocks();
 });
 
@@ -110,5 +112,31 @@ describe('shorts overlay text wrapping', () => {
             '모수 와인 바꿔치기,',
             '안성재 사과',
         ]);
+    });
+});
+
+describe('ffmpeg remote-stage asset boundary', () => {
+    it('rejects local asset URLs outside local/offline stage instead of reading local files', async () => {
+        vi.resetModules();
+        vi.doMock('../../config/env', () => ({
+            env: {
+                awsRegion: 'ap-northeast-2',
+                cdnDomain: 'cdn.example.com',
+                s3Bucket: 'eureka-flows-backend-assets-dev',
+                stage: 'dev',
+            },
+            isLocalStage: false,
+        }));
+
+        const { ffmpegAdapter } = await import('./ffmpeg-adapter');
+
+        await expect(
+            ffmpegAdapter.compose({
+                images: [{ url: 'http://localhost:8800/_local-assets/image.png', durationSec: 1 }],
+                outputWidth: 1080,
+                outputHeight: 1920,
+                outputFormat: 'mp4',
+            })
+        ).rejects.toThrow(/local asset URLs are disabled/);
     });
 });

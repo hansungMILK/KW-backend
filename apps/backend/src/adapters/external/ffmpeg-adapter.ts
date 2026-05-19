@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join, resolve } from 'path';
 
+import { isLocalStage } from '../../config/env';
 import { getLocalAssetPath } from '../aws/s3';
 
 export interface VideoCompositionRequest {
@@ -641,6 +642,9 @@ async function loadAudioBinary(url: string, signal?: AbortSignal): Promise<Buffe
 function localAssetKeyFromUrl(url: string): string | undefined {
     const base = LOCAL_ASSET_BASE_URL.replace(/\/+$/, '');
     if (!url.startsWith(`${base}/`)) return undefined;
+    if (!isLocalStage) {
+        throw new Error('FFmpeg local asset URLs are disabled outside local/offline stage.');
+    }
     return decodeURIComponent(url.slice(base.length + 1));
 }
 
