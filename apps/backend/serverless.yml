@@ -681,13 +681,13 @@ functions:
         handler: src/workers/run-worker.main
         memorySize: 3008
         timeout: 900
-        reservedConcurrency: ${env:RUN_WORKER_RESERVED_CONCURRENCY, 1}
         layers:
             - !Ref FfmpegLambdaLayer
         events:
             - sqs:
                   arn: !GetAtt ExecutionQueue.Arn
                   batchSize: 1
+                  maximumConcurrency: ${env:RUN_WORKER_MAXIMUM_CONCURRENCY, 2}
 
     # ── WebSocket ──
     wsConnect:
