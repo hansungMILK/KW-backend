@@ -1,4 +1,4 @@
-import { settingsService } from './settings-service';
+import { getProviderApiKey } from './credential-resolver';
 import { traceService } from './trace-service';
 import { wsService } from './websocket-service';
 import { broadcastNodePortUpdated } from './ws-flow-events-service';
@@ -537,9 +537,10 @@ const requiresPaidOpenAI = (nodes: Array<Record<string, unknown>>): boolean => {
 
 /**
  * F-34: Check that all required API keys are present before execution.
- * Priority: block config apiKeyOverride > global SettingsTable key > env var.
+ * Provider keys must come from stored credentials. Raw per-node overrides and
+ * legacy provider env vars are intentionally ignored for user runs.
  * Returns list of missing providers, or empty array if all OK.
- * Async — reads from DynamoDB in prod via settingsService.getKeyForProviderAsync().
+ * Async — reads from the credential resolver, which owns stored/system-key policy.
  */
 async function checkMissingApiKeys(nodes: Array<Record<string, unknown>>): Promise<string[]> {
     const missing: string[] = [];
@@ -552,14 +553,8 @@ async function checkMissingApiKeys(nodes: Array<Record<string, unknown>>): Promi
         if (checked.has(provider)) continue;
         checked.add(provider);
 
-        // Check block-level override first
-        const config = getNodeConfig(node);
-        const override = config?.['apiKeyOverride'] as string | undefined;
-        if (override && override.trim().length > 0) continue;
-
-        // Check global key — async to read from DynamoDB in prod
-        const globalKey = await settingsService.getKeyForProviderAsync(provider);
-        if (globalKey) continue;
+        const credential = await getProviderApiKey(provider);
+        if (credential) continue;
 
         missing.push(provider);
     }

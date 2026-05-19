@@ -1,6 +1,6 @@
 import { ensurePaidOpenAIAllowed } from './paid-openai-guard';
 import { env } from '../../config/env';
-import { settingsService } from '../../services/settings-service';
+import { getProviderApiKey } from '../../services/credential-resolver';
 import { log } from '../../utils/logger';
 
 export interface OpenAIJsonRequest {
@@ -52,7 +52,7 @@ interface ResponsesApiResponse {
 export const openaiAdapter = {
     async chatText(request: OpenAIJsonRequest): Promise<OpenAIJsonResponse> {
         ensurePaidOpenAIAllowed('text chat');
-        const apiKey = await settingsService.getKeyForProviderAsync('openai');
+        const apiKey = await getProviderApiKey('openai');
         if (!apiKey) throw new Error('OPENAI_API_KEY not configured');
 
         const model = request.model ?? env.openaiModel;
@@ -111,7 +111,7 @@ export const openaiAdapter = {
 
     async chatJson(request: OpenAIJsonRequest): Promise<OpenAIJsonResponse> {
         ensurePaidOpenAIAllowed('JSON chat');
-        const apiKey = await settingsService.getKeyForProviderAsync('openai');
+        const apiKey = await getProviderApiKey('openai');
         if (!apiKey) throw new Error('OPENAI_API_KEY not configured');
 
         const model = request.model ?? env.openaiModel;
@@ -171,7 +171,7 @@ export const openaiAdapter = {
 
     async webSearchJson(request: OpenAIJsonRequest): Promise<OpenAIJsonResponse> {
         ensurePaidOpenAIAllowed('web search');
-        const apiKey = await settingsService.getKeyForProviderAsync('openai');
+        const apiKey = await getProviderApiKey('openai');
         if (!apiKey) throw new Error('OPENAI_API_KEY not configured');
 
         const model = request.model ?? env.openaiSearchModel;
@@ -223,7 +223,7 @@ export const openaiAdapter = {
 
     async visionJson(request: OpenAIVisionJsonRequest): Promise<OpenAIJsonResponse> {
         ensurePaidOpenAIAllowed('vision');
-        const apiKey = await settingsService.getKeyForProviderAsync('openai');
+        const apiKey = await getProviderApiKey('openai');
         if (!apiKey) throw new Error('OPENAI_API_KEY not configured');
 
         const model = request.model ?? env.openaiVisionModel;

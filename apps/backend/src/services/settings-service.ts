@@ -1,22 +1,12 @@
 import { API_KEY_PROVIDERS } from '@flows/contracts';
 
+import { getProviderApiKey } from './credential-resolver';
 import { PAID_OPENAI_DISABLED, isPaidOpenAIAllowed } from '../adapters/ai/paid-openai-guard';
 import { env } from '../config/env';
 import { settingsRepo } from '../repositories/settings-repository';
 import { log } from '../utils/logger';
 
 import type { ApiKeyInfo, ApiKeyProvider, ApiKeyVerifyResponse } from '@flows/contracts';
-
-// ============================================================================
-// ENV var mapping per provider
-// ============================================================================
-
-const ENV_MAP: Record<ApiKeyProvider, string> = {
-    anthropic: 'ANTHROPIC_API_KEY',
-    nanobanana: 'NANOBANANA_API_KEY',
-    openai: 'OPENAI_API_KEY',
-    elevenlabs: 'ELEVENLABS_API_KEY',
-};
 
 // ============================================================================
 // Helpers
@@ -38,20 +28,15 @@ export const maskKey = (raw: string): string => {
 };
 
 const getRawKey = (provider: ApiKeyProvider): string | null => {
-    const envKey = process.env[ENV_MAP[provider]];
-    if (!settingsRepo.isSyncReadAvailable) return envKey || null;
+    if (!settingsRepo.isSyncReadAvailable) return null;
 
-    // Priority: stored record (decrypted) > env var — sync version for local only.
+    // Sync reads are local-only. User execution must never fall back to env provider keys.
     const decrypted = settingsRepo.getDecryptedKey(provider);
-    return decrypted || envKey || null;
+    return decrypted || null;
 };
 
 const getRawKeyAsync = async (provider: ApiKeyProvider): Promise<string | null> => {
-    const decrypted = await settingsRepo.getDecryptedKeyAsync(provider);
-    if (decrypted) return decrypted;
-
-    const envKey = process.env[ENV_MAP[provider]];
-    return envKey || null;
+    return await getProviderApiKey(provider);
 };
 
 // ============================================================================
@@ -177,17 +162,6 @@ export const settingsService = {
                     maskedKey: record.maskedKey,
                     status: record.status,
                     lastVerifiedAt: record.lastVerifiedAt,
-                });
-                continue;
-            }
-            const envKey = process.env[ENV_MAP[provider]];
-            if (envKey) {
-                results.push({
-                    provider,
-                    configured: true,
-                    maskedKey: maskKey(envKey),
-                    status: 'unverified' as const,
-                    lastVerifiedAt: null,
                 });
                 continue;
             }

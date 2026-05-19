@@ -76,10 +76,11 @@ provider:
             !If [IsLocalStage, "${env:LOCAL_ASSET_BASE_URL, 'http://localhost:8800/_local-assets'}", '']
         CORS_ALLOWED_ORIGINS: ${self:custom.corsAllowedOriginsCsv.${self:provider.stage}, self:custom.corsAllowedOriginsCsv.local}
         APP_API_KEY: ${env:APP_API_KEY, ''}
-        OPENAI_API_KEY: ${env:OPENAI_API_KEY, ''}
-        ANTHROPIC_API_KEY: ${env:ANTHROPIC_API_KEY, ''}
-        ELEVENLABS_API_KEY: ${env:ELEVENLABS_API_KEY, ''}
-        NANOBANANA_API_KEY: ${env:NANOBANANA_API_KEY, ''}
+        ALLOW_SYSTEM_PROVIDER_KEYS: ${env:ALLOW_SYSTEM_PROVIDER_KEYS, 'false'}
+        SYSTEM_OPENAI_API_KEY: ${env:SYSTEM_OPENAI_API_KEY, ''}
+        SYSTEM_ANTHROPIC_API_KEY: ${env:SYSTEM_ANTHROPIC_API_KEY, ''}
+        SYSTEM_ELEVENLABS_API_KEY: ${env:SYSTEM_ELEVENLABS_API_KEY, ''}
+        SYSTEM_NANOBANANA_API_KEY: ${env:SYSTEM_NANOBANANA_API_KEY, ''}
     httpApi:
         cors:
             allowedOrigins: ${self:custom.corsAllowedOrigins.${self:provider.stage}, self:custom.corsAllowedOrigins.local}

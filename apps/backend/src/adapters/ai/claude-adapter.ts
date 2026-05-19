@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 
 import { env } from '../../config/env';
-import { settingsService } from '../../services/settings-service';
+import { getProviderApiKey } from '../../services/credential-resolver';
 import { log } from '../../utils/logger';
 
 /**
@@ -14,7 +14,7 @@ import { log } from '../../utils/logger';
  */
 
 const getClient = async (): Promise<Anthropic> => {
-    const apiKey = await settingsService.getKeyForProviderAsync('anthropic');
+    const apiKey = await getProviderApiKey('anthropic');
     if (!apiKey) throw new Error('ANTHROPIC_API_KEY not configured');
     return new Anthropic({ apiKey });
 };

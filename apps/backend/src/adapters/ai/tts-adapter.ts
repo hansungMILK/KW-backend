@@ -4,7 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 
 import { env } from '../../config/env';
-import { settingsService } from '../../services/settings-service';
+import { getProviderApiKey } from '../../services/credential-resolver';
 import { log } from '../../utils/logger';
 
 export interface TtsRequest {
@@ -31,7 +31,7 @@ const FFPROBE_PATH =
 
 export const ttsAdapter = {
     async synthesize(request: TtsRequest): Promise<TtsResult> {
-        const apiKey = await settingsService.getKeyForProviderAsync('elevenlabs');
+        const apiKey = await getProviderApiKey('elevenlabs');
         if (!apiKey) throw new Error('ELEVENLABS_API_KEY not configured');
 
         const model = request.modelId || env.elevenLabsTtsModel;

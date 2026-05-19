@@ -7,7 +7,7 @@ import { classifyMessageIntent, generateChatReply } from '../../../modules/orche
 import { flowRepo } from '../../../repositories/flow-repository';
 import { messageRepo } from '../../../repositories/message-repository';
 import { proposalRepo } from '../../../repositories/proposal-repository';
-import { settingsService } from '../../../services/settings-service';
+import { getProviderApiKey } from '../../../services/credential-resolver';
 import { wsService } from '../../../services/websocket-service';
 import { generateNumericId } from '../../../utils/id-generator';
 import { getBody, getPathParam, withMiddleware } from '../../../utils/middleware';
@@ -33,7 +33,7 @@ const ensureOrchestratorProviderKey = async (): Promise<APIGatewayProxyResult | 
         });
     }
 
-    const apiKey = await settingsService.getKeyForProviderAsync(provider);
+    const apiKey = await getProviderApiKey(provider);
     if (apiKey) return null;
 
     return unprocessableJson({

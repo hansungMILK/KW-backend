@@ -25,10 +25,8 @@ vi.mock('../../modules/image-generation/image-style', () => ({
     normalizeImageQuality: (quality: string) => quality,
 }));
 
-vi.mock('../../services/settings-service', () => ({
-    settingsService: {
-        getKeyForProviderAsync: vi.fn(async () => 'sk-test'),
-    },
+vi.mock('../../services/credential-resolver', () => ({
+    getProviderApiKey: vi.fn(async () => 'sk-test'),
 }));
 
 vi.mock('../../utils/logger', () => ({

@@ -3,7 +3,7 @@ import { request as undiciRequest } from 'undici';
 import { ensurePaidOpenAIAllowed } from './paid-openai-guard';
 import { env } from '../../config/env';
 import { GPT_IMAGE_MODEL, normalizeImageQuality } from '../../modules/image-generation/image-style';
-import { settingsService } from '../../services/settings-service';
+import { getProviderApiKey } from '../../services/credential-resolver';
 import { log } from '../../utils/logger';
 
 export interface ImageGenerationRequest {
@@ -38,7 +38,7 @@ type OpenAIImageResponse = { data?: Array<{ b64_json?: string; url?: string }> }
 export const imageAdapter = {
     async generate(request: ImageGenerationRequest): Promise<ImageGenerationResult> {
         ensurePaidOpenAIAllowed('image generation');
-        const apiKey = await settingsService.getKeyForProviderAsync('openai');
+        const apiKey = await getProviderApiKey('openai');
         if (!apiKey) throw new Error('OPENAI_API_KEY not configured');
 
         const width = request.width || 1080;

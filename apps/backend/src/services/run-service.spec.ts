@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { getProviderApiKey } from './credential-resolver';
 import { runService } from './run-service';
-import { settingsService } from './settings-service';
 import { queue } from '../adapters/aws/queue';
 import { flowRepo } from '../repositories/flow-repository';
 import { runRepo } from '../repositories/run-repository';
@@ -35,10 +35,8 @@ vi.mock('../adapters/ai/paid-openai-guard', () => ({
     isPaidOpenAIAllowed: vi.fn(() => true),
 }));
 
-vi.mock('./settings-service', () => ({
-    settingsService: {
-        getKeyForProviderAsync: vi.fn(),
-    },
+vi.mock('./credential-resolver', () => ({
+    getProviderApiKey: vi.fn(),
 }));
 
 const getFlow = vi.mocked(flowRepo.get);
@@ -50,7 +48,7 @@ const putRunNode = vi.mocked(runRepo.putRunNode);
 const updateRunNodeStatus = vi.mocked(runRepo.updateRunNodeStatus);
 const updateRunStatus = vi.mocked(runRepo.updateRunStatus);
 const sendQueueMessage = vi.mocked(queue.send);
-const getKeyForProviderAsync = vi.mocked(settingsService.getKeyForProviderAsync);
+const getProviderApiKeyMock = vi.mocked(getProviderApiKey);
 
 describe('runService cost guards', () => {
     beforeEach(() => {
@@ -80,7 +78,7 @@ describe('runService cost guards', () => {
             createdAt: '2026-05-13T00:00:00.000Z',
             updatedAt: '2026-05-13T00:00:00.000Z',
         });
-        getKeyForProviderAsync.mockResolvedValue(null);
+        getProviderApiKeyMock.mockResolvedValue(null);
         putRun.mockResolvedValue(undefined);
         putRunNode.mockResolvedValue(undefined);
         sendQueueMessage.mockResolvedValue(undefined);
@@ -88,7 +86,7 @@ describe('runService cost guards', () => {
         const result = await runService.createRun('flow-longform-gate-a');
 
         expect(result).toEqual(expect.objectContaining({ ok: true }));
-        expect(getKeyForProviderAsync).not.toHaveBeenCalled();
+        expect(getProviderApiKeyMock).not.toHaveBeenCalled();
         expect(putRun).toHaveBeenCalled();
         expect(putRunNode).toHaveBeenCalledTimes(2);
         expect(sendQueueMessage).toHaveBeenCalled();
@@ -137,7 +135,7 @@ describe('runService cost guards', () => {
             createdAt: '2026-05-13T00:00:00.000Z',
             updatedAt: '2026-05-13T00:00:00.000Z',
         });
-        getKeyForProviderAsync.mockResolvedValue(null);
+        getProviderApiKeyMock.mockResolvedValue(null);
         putRun.mockResolvedValue(undefined);
         putRunNode.mockResolvedValue(undefined);
         sendQueueMessage.mockResolvedValue(undefined);
@@ -145,7 +143,7 @@ describe('runService cost guards', () => {
         const result = await runService.createRun('flow-longform-full-factory', 'MANUAL', { executionMode: 'step' });
 
         expect(result).toEqual(expect.objectContaining({ ok: true }));
-        expect(getKeyForProviderAsync).not.toHaveBeenCalled();
+        expect(getProviderApiKeyMock).not.toHaveBeenCalled();
         expect(putRun).toHaveBeenCalled();
         expect(putRunNode).toHaveBeenCalledTimes(4);
         expect(sendQueueMessage).toHaveBeenCalled();
@@ -201,7 +199,7 @@ describe('runService cost guards', () => {
             createdAt: '2026-05-13T00:00:00.000Z',
             updatedAt: '2026-05-13T00:00:00.000Z',
         });
-        getKeyForProviderAsync.mockResolvedValue({ provider: 'elevenlabs', apiKey: 'test-key' } as never);
+        getProviderApiKeyMock.mockResolvedValue('test-key');
         putRun.mockResolvedValue(undefined);
         putRunNode.mockResolvedValue(undefined);
         sendQueueMessage.mockResolvedValue(undefined);
@@ -209,8 +207,8 @@ describe('runService cost guards', () => {
         const result = await runService.createRun('flow-longform-approved', 'MANUAL', { executionMode: 'full' });
 
         expect(result).toEqual(expect.objectContaining({ ok: true }));
-        expect(getKeyForProviderAsync).toHaveBeenCalledTimes(1);
-        expect(getKeyForProviderAsync).toHaveBeenCalledWith('elevenlabs');
+        expect(getProviderApiKeyMock).toHaveBeenCalledTimes(1);
+        expect(getProviderApiKeyMock).toHaveBeenCalledWith('elevenlabs');
         expect(putRun).toHaveBeenCalled();
         expect(putRunNode).toHaveBeenCalledTimes(4);
         expect(sendQueueMessage).toHaveBeenCalled();
@@ -253,7 +251,7 @@ describe('runService cost guards', () => {
             createdAt: '2026-05-13T00:00:00.000Z',
             updatedAt: '2026-05-13T00:00:00.000Z',
         });
-        getKeyForProviderAsync.mockResolvedValue({ provider: 'elevenlabs', apiKey: 'test-key' } as never);
+        getProviderApiKeyMock.mockResolvedValue('test-key');
         putRun.mockResolvedValue(undefined);
         putRunNode.mockResolvedValue(undefined);
         sendQueueMessage.mockResolvedValue(undefined);
@@ -263,8 +261,8 @@ describe('runService cost guards', () => {
         });
 
         expect(result).toEqual(expect.objectContaining({ ok: true }));
-        expect(getKeyForProviderAsync).toHaveBeenCalledWith('openai');
-        expect(getKeyForProviderAsync).toHaveBeenCalledWith('elevenlabs');
+        expect(getProviderApiKeyMock).toHaveBeenCalledWith('openai');
+        expect(getProviderApiKeyMock).toHaveBeenCalledWith('elevenlabs');
         expect(putRunNode).toHaveBeenCalledTimes(3);
         expect(sendQueueMessage).toHaveBeenCalled();
     });
@@ -295,7 +293,7 @@ describe('runService cost guards', () => {
             createdAt: '2026-05-13T00:00:00.000Z',
             updatedAt: '2026-05-13T00:00:00.000Z',
         });
-        getKeyForProviderAsync.mockResolvedValue(null);
+        getProviderApiKeyMock.mockResolvedValue(null);
 
         const result = await runService.createRun('flow-longform-providers');
 
@@ -305,6 +303,42 @@ describe('runService cost guards', () => {
                 error: 'MISSING_API_KEYS',
                 status: 422,
                 missingProviders: ['openai', 'elevenlabs'],
+            })
+        );
+        expect(putRun).not.toHaveBeenCalled();
+        expect(putRunNode).not.toHaveBeenCalled();
+        expect(sendQueueMessage).not.toHaveBeenCalled();
+    });
+
+    it('does not treat raw node apiKeyOverride config as a configured provider credential', async () => {
+        getFlow.mockResolvedValueOnce({
+            id: 'flow-node-override',
+            name: 'Node override flow',
+            state: 'READY',
+            nodes: [
+                {
+                    id: 'node-image',
+                    blockType: 'media-image',
+                    label: 'Image generation',
+                    config: {
+                        apiKeyOverride: 'sk-node-override',
+                    },
+                },
+            ],
+            edges: [],
+            createdAt: '2026-05-19T00:00:00.000Z',
+            updatedAt: '2026-05-19T00:00:00.000Z',
+        });
+        getProviderApiKeyMock.mockResolvedValue(null);
+
+        const result = await runService.createRun('flow-node-override');
+
+        expect(result).toEqual(
+            expect.objectContaining({
+                ok: false,
+                error: 'MISSING_API_KEYS',
+                status: 422,
+                missingProviders: ['openai'],
             })
         );
         expect(putRun).not.toHaveBeenCalled();
@@ -349,7 +383,7 @@ describe('runService cost guards', () => {
         expect(putRun).not.toHaveBeenCalled();
         expect(putRunNode).not.toHaveBeenCalled();
         expect(sendQueueMessage).not.toHaveBeenCalled();
-        expect(getKeyForProviderAsync).not.toHaveBeenCalled();
+        expect(getProviderApiKeyMock).not.toHaveBeenCalled();
     });
 
     it('does not block non-render longform nodes just because they carry generic cost fields', async () => {
@@ -428,7 +462,7 @@ describe('runService cost guards', () => {
         expect(putRun).not.toHaveBeenCalled();
         expect(putRunNode).not.toHaveBeenCalled();
         expect(sendQueueMessage).not.toHaveBeenCalled();
-        expect(getKeyForProviderAsync).not.toHaveBeenCalled();
+        expect(getProviderApiKeyMock).not.toHaveBeenCalled();
     });
 
     it('blocks longform-render nodes above the $5 cap before any execution side effect', async () => {
@@ -467,7 +501,7 @@ describe('runService cost guards', () => {
         expect(putRun).not.toHaveBeenCalled();
         expect(putRunNode).not.toHaveBeenCalled();
         expect(sendQueueMessage).not.toHaveBeenCalled();
-        expect(getKeyForProviderAsync).not.toHaveBeenCalled();
+        expect(getProviderApiKeyMock).not.toHaveBeenCalled();
     });
 
     it('blocks longform Gate B nodes without an approved Gate A artifact before queueing', async () => {
@@ -503,7 +537,7 @@ describe('runService cost guards', () => {
         expect(putRun).not.toHaveBeenCalled();
         expect(putRunNode).not.toHaveBeenCalled();
         expect(sendQueueMessage).not.toHaveBeenCalled();
-        expect(getKeyForProviderAsync).not.toHaveBeenCalled();
+        expect(getProviderApiKeyMock).not.toHaveBeenCalled();
     });
 
     it('blocks single-node config overrides that would make the actual render execution exceed the longform cap', async () => {
