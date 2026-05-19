@@ -48,7 +48,7 @@ provider:
         MAX_RUN_ESTIMATED_COST_USD: ${env:MAX_RUN_ESTIMATED_COST_USD, '2'}
         MAX_LONGFORM_HTML_RENDER_ESTIMATED_COST_USD: ${env:MAX_LONGFORM_HTML_RENDER_ESTIMATED_COST_USD, '5'}
         HYPERFRAMES_CLI_BIN: ${env:HYPERFRAMES_CLI_BIN, ''}
-        HYPERFRAMES_RENDER_WORKERS: ${env:HYPERFRAMES_RENDER_WORKERS, '4'}
+        HYPERFRAMES_RENDER_WORKERS: ${env:HYPERFRAMES_RENDER_WORKERS, '1'}
         OPENAI_MODEL: ${env:OPENAI_MODEL, 'gpt-5.4-nano'}
         OPENAI_ORCHESTRATOR_MODEL: ${env:OPENAI_ORCHESTRATOR_MODEL, 'gpt-5.4-nano'}
         OPENAI_VISION_MODEL: ${env:OPENAI_VISION_MODEL, 'gpt-5.4-nano'}
@@ -681,6 +681,7 @@ functions:
         handler: src/workers/run-worker.main
         memorySize: 3008
         timeout: 900
+        reservedConcurrency: ${env:RUN_WORKER_RESERVED_CONCURRENCY, 1}
         layers:
             - !Ref FfmpegLambdaLayer
         events:
