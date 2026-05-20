@@ -1,4 +1,4 @@
-import { PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { DeleteCommand, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 
 import { stripRetentionTtl, withRetentionTtl } from './retention';
 import { TableNames, USE_REAL_DYNAMO, getDocClient, memDb } from '../adapters/aws/dynamodb';
@@ -71,6 +71,49 @@ export const traceRepo = {
             ? Buffer.from(JSON.stringify(result.LastEvaluatedKey)).toString('base64')
             : null;
         return { items, nextCursor };
+    },
+
+    async deleteByRun(runId: string): Promise<number> {
+        if (!USE_REAL_DYNAMO) {
+            const owned = memDb.query(
+                TABLE,
+                item => (item as { runId?: string }).runId === runId
+            ) as unknown as Trace[];
+            for (const trace of owned) {
+                memDb.delete(TABLE, trace.traceId);
+            }
+            return owned.length;
+        }
+
+        let deleted = 0;
+        let exclusiveStartKey: Record<string, unknown> | undefined;
+        do {
+            const result = await getDocClient().send(
+                new QueryCommand({
+                    TableName: TABLE,
+                    IndexName: 'runId-occurredAt-index',
+                    KeyConditionExpression: 'runId = :rid',
+                    ExpressionAttributeValues: { ':rid': runId },
+                    ProjectionExpression: 'traceId',
+                    ...(exclusiveStartKey ? { ExclusiveStartKey: exclusiveStartKey } : {}),
+                })
+            );
+            const items = (result.Items || []) as Array<{ traceId?: string }>;
+            const traceIds = items.map(item => item.traceId).filter((traceId): traceId is string => !!traceId);
+            await Promise.all(
+                traceIds.map(traceId =>
+                    getDocClient().send(
+                        new DeleteCommand({
+                            TableName: TABLE,
+                            Key: { traceId },
+                        })
+                    )
+                )
+            );
+            deleted += traceIds.length;
+            exclusiveStartKey = result.LastEvaluatedKey as Record<string, unknown> | undefined;
+        } while (exclusiveStartKey);
+        return deleted;
     },
 
     async listByRunNode(

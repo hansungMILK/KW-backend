@@ -6,6 +6,7 @@ import { createFlow, getFlow } from '../api';
 import {
     flowsKeys,
     useCreateFlowMutation,
+    useDeleteFlowMutation,
     useLoadFlowQuery,
     useSaveFlowMutation,
     useUpdateFlowMutation,
@@ -63,6 +64,7 @@ export const useFlows = () => {
 
     // TanStack Mutations
     const createFlowMutation = useCreateFlowMutation();
+    const deleteFlowMutation = useDeleteFlowMutation();
     const saveFlowMutation = useSaveFlowMutation();
     const updateFlowMutation = useUpdateFlowMutation();
 
@@ -306,6 +308,26 @@ export const useFlows = () => {
         }
     }, [createFlowMutation, setCurrentFlowId, setFlowName, setLastSavedAt, setChannelId]);
 
+    const deleteSavedFlow = useCallback(
+        async (id: string): Promise<boolean> => {
+            try {
+                await deleteFlowMutation.mutateAsync(id);
+                if (id === currentFlowId) {
+                    flowStorage.clearFlowId();
+                    setCurrentFlowId(null);
+                    setFlowName('Untitled Workflow');
+                    setLastSavedAt(null);
+                    setChannelId(null);
+                }
+                return true;
+            } catch (error) {
+                console.error('[useFlows] Failed to delete flow:', error);
+                return false;
+            }
+        },
+        [currentFlowId, deleteFlowMutation, setCurrentFlowId, setFlowName, setLastSavedAt, setChannelId]
+    );
+
     /**
      * Update flow name (metadata only)
      * POST /flows/:id
@@ -368,6 +390,7 @@ export const useFlows = () => {
         // Actions - Save & Create
         saveCurrentFlow,
         createNewFlow,
+        deleteSavedFlow,
         retrySave,
 
         // Actions - Local State

@@ -159,6 +159,7 @@ export const FlowEditorPage = () => {
         loadFlowById,
         saveCurrentFlow,
         createNewFlow,
+        deleteSavedFlow,
         retrySave,
         toggleAutoSave,
         updateFlowName,
@@ -1051,6 +1052,26 @@ export const FlowEditorPage = () => {
         showNotification('저장한 플로우를 열었습니다.', 'success');
     };
 
+    const handleDeleteSavedFlow = async (flowId: string) => {
+        const wasCurrentFlow = flowId === currentFlowId;
+        const deleted = await deleteSavedFlow(flowId);
+        if (!deleted) {
+            throw new Error('플로우 삭제에 실패했습니다. 실행 중인 플로우라면 완료되거나 취소한 뒤 다시 시도하세요.');
+        }
+
+        if (wasCurrentFlow) {
+            canvasRef.current?.newWorkflow();
+            resetRunUi();
+            lastSavedStateRef.current = serializeWorkflowState({ nodes: [], connections: [] });
+            const newId = await createNewFlow();
+            if (newId) {
+                updateUrl(newId, null);
+            }
+        }
+
+        showNotification('플로우와 생성 산출물을 삭제했습니다.', 'success');
+    };
+
     const handleNameChange = async (newName: string) => {
         // Update flow name on server via POST /flows/:id
         await updateFlowName(newName);
@@ -1478,6 +1499,7 @@ export const FlowEditorPage = () => {
                 currentFlowId={currentFlowId}
                 onOpenChange={setIsFlowOpenDialogOpen}
                 onSelect={handleOpenSavedFlow}
+                onDelete={handleDeleteSavedFlow}
             />
 
             {/* Help Dialog */}

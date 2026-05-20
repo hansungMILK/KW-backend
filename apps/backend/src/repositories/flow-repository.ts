@@ -1,8 +1,12 @@
 import { DeleteCommand, GetCommand, PutCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
 
+import { assetRepo } from './asset-repository';
 import { messageRepo } from './message-repository';
 import { proposalRepo } from './proposal-repository';
+import { runRepo } from './run-repository';
+import { traceRepo } from './trace-repository';
 import { TableNames, USE_REAL_DYNAMO, getDocClient, memDb } from '../adapters/aws/dynamodb';
+import { deleteObject } from '../adapters/aws/s3';
 import {
     getFlowNodeBlockType,
     getFlowNodeId,
@@ -10,6 +14,8 @@ import {
     sanitizeCanvasNodesForStorage,
 } from '../utils/flow-node-classification';
 import { generateNumericId } from '../utils/id-generator';
+
+import type { Asset, Run } from '@flows/contracts';
 
 export interface FlowRecord {
     id: string;
@@ -72,6 +78,31 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const hasMeaningfulConfig = (value: unknown): boolean =>
     isRecord(value) ? Object.keys(value).length > 0 : value !== undefined && value !== null;
+
+const ACTIVE_RUN_STATUSES = new Set<Run['status']>(['QUEUED', 'RUNNING']);
+
+const getAssetStorageKey = (asset: Asset): string | null => {
+    const metadataKey = asset.metadata?.['s3Key'];
+    if (typeof metadataKey === 'string' && metadataKey.length > 0) return metadataKey;
+
+    if (typeof asset.publicUrl === 'string' && asset.publicUrl.startsWith('s3://')) {
+        const key = asset.publicUrl.replace(/^s3:\/\/[^/]+\//, '');
+        return key.length > 0 ? key : null;
+    }
+
+    return null;
+};
+
+const listAllRunsByFlow = async (flowId: string): Promise<Run[]> => {
+    const runs: Run[] = [];
+    let cursor: string | null = null;
+    do {
+        const page = await runRepo.listByFlow(flowId, 100, cursor ?? undefined);
+        runs.push(...page.items);
+        cursor = page.nextCursor;
+    } while (cursor);
+    return runs;
+};
 
 const mergeNodeData = (incomingData: unknown, existingData: unknown): Record<string, unknown> | undefined => {
     if (!isRecord(incomingData) && !isRecord(existingData)) return undefined;
@@ -431,10 +462,63 @@ export const flowRepo = {
         deleted: boolean;
         messagesDeleted: number;
         proposalsDeleted: number;
+        runsDeleted: number;
+        runNodesDeleted: number;
+        tracesDeleted: number;
+        assetsDeleted: number;
+        storageObjectsDeleted: number;
+        activeRunCount: number;
     }> {
         const existing = await this.get(id);
         if (!existing) {
-            return { deleted: false, messagesDeleted: 0, proposalsDeleted: 0 };
+            return {
+                deleted: false,
+                messagesDeleted: 0,
+                proposalsDeleted: 0,
+                runsDeleted: 0,
+                runNodesDeleted: 0,
+                tracesDeleted: 0,
+                assetsDeleted: 0,
+                storageObjectsDeleted: 0,
+                activeRunCount: 0,
+            };
+        }
+
+        const runs = await listAllRunsByFlow(id);
+        const activeRunCount = runs.filter(run => ACTIVE_RUN_STATUSES.has(run.status)).length;
+        if (activeRunCount > 0) {
+            return {
+                deleted: false,
+                messagesDeleted: 0,
+                proposalsDeleted: 0,
+                runsDeleted: 0,
+                runNodesDeleted: 0,
+                tracesDeleted: 0,
+                assetsDeleted: 0,
+                storageObjectsDeleted: 0,
+                activeRunCount,
+            };
+        }
+
+        let assetsDeleted = 0;
+        let storageObjectsDeleted = 0;
+        let runNodesDeleted = 0;
+        let tracesDeleted = 0;
+
+        for (const run of runs) {
+            const assets = await assetRepo.listByRun(run.runId);
+            const storageKeys = new Set(assets.map(getAssetStorageKey).filter((key): key is string => !!key));
+            for (const key of storageKeys) {
+                await deleteObject(key);
+                storageObjectsDeleted += 1;
+            }
+            for (const asset of assets) {
+                await assetRepo.delete(asset.assetId);
+                assetsDeleted += 1;
+            }
+            tracesDeleted += await traceRepo.deleteByRun(run.runId);
+            runNodesDeleted += await runRepo.deleteRunNodes(run.runId);
+            await runRepo.deleteRun(run.runId);
         }
 
         const [messagesDeleted, proposalsDeleted] = await Promise.all([
@@ -443,6 +527,16 @@ export const flowRepo = {
         ]);
         await this.delete(id);
 
-        return { deleted: true, messagesDeleted, proposalsDeleted };
+        return {
+            deleted: true,
+            messagesDeleted,
+            proposalsDeleted,
+            runsDeleted: runs.length,
+            runNodesDeleted,
+            tracesDeleted,
+            assetsDeleted,
+            storageObjectsDeleted,
+            activeRunCount: 0,
+        };
     },
 };

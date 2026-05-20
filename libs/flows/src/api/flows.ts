@@ -194,6 +194,16 @@ export const updateFlow = async (id: string, body: SaveFlowBody): Promise<SaveFl
 };
 
 /**
+ * Delete flow and all flow-owned execution artifacts.
+ * DELETE /flows/{flowId}
+ */
+export const deleteFlow = async (id: string): Promise<void> => {
+    if (!id) throw new Error('Flow ID is required');
+    _log(`> deleteFlow(${id})`);
+    await api.delete(`/flows/${id}`);
+};
+
+/**
  * Create new flow
  * POST /flows, then optional PUT /flows/{flowId}
  */

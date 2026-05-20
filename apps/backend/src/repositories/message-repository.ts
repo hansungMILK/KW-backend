@@ -72,29 +72,37 @@ export const messageRepo = {
      */
     async deleteByFlowId(flowId: string): Promise<number> {
         if (USE_REAL_DYNAMO) {
-            const result = await getDocClient().send(
-                new QueryCommand({
-                    TableName: TABLE,
-                    IndexName: 'flowId-createdAt-index',
-                    KeyConditionExpression: 'flowId = :fid',
-                    ExpressionAttributeValues: { ':fid': flowId },
-                    ProjectionExpression: 'messageId',
-                })
-            );
-            const items = (result.Items || []) as Array<{ messageId?: string }>;
-            await Promise.all(
-                items
-                    .filter(item => item.messageId)
-                    .map(item =>
+            let deleted = 0;
+            let exclusiveStartKey: Record<string, unknown> | undefined;
+            do {
+                const result = await getDocClient().send(
+                    new QueryCommand({
+                        TableName: TABLE,
+                        IndexName: 'flowId-createdAt-index',
+                        KeyConditionExpression: 'flowId = :fid',
+                        ExpressionAttributeValues: { ':fid': flowId },
+                        ProjectionExpression: 'messageId',
+                        ...(exclusiveStartKey ? { ExclusiveStartKey: exclusiveStartKey } : {}),
+                    })
+                );
+                const items = (result.Items || []) as Array<{ messageId?: string }>;
+                const messageIds = items
+                    .map(item => item.messageId)
+                    .filter((messageId): messageId is string => !!messageId);
+                await Promise.all(
+                    messageIds.map(messageId =>
                         getDocClient().send(
                             new DeleteCommand({
                                 TableName: TABLE,
-                                Key: { messageId: item.messageId },
+                                Key: { messageId },
                             })
                         )
                     )
-            );
-            return items.filter(item => item.messageId).length;
+                );
+                deleted += messageIds.length;
+                exclusiveStartKey = result.LastEvaluatedKey as Record<string, unknown> | undefined;
+            } while (exclusiveStartKey);
+            return deleted;
         }
 
         const owned = memDb.query(

@@ -52,18 +52,26 @@ export const assetRepo = {
         if (!USE_REAL_DYNAMO) {
             all = memDb.query(TABLE, item => (item as { runId?: string }).runId === runId) as unknown as Asset[];
         } else {
-            const result = await getDocClient().send(
-                new QueryCommand({
-                    TableName: TABLE,
-                    IndexName: 'runId-createdAt-index',
-                    KeyConditionExpression: 'runId = :rid',
-                    ExpressionAttributeValues: { ':rid': runId },
-                    ScanIndexForward: true,
-                })
-            );
-            all = (result.Items || []).map(item =>
-                stripRetentionTtl(item as Record<string, unknown>)
-            ) as unknown as Asset[];
+            all = [];
+            let exclusiveStartKey: Record<string, unknown> | undefined;
+            do {
+                const result = await getDocClient().send(
+                    new QueryCommand({
+                        TableName: TABLE,
+                        IndexName: 'runId-createdAt-index',
+                        KeyConditionExpression: 'runId = :rid',
+                        ExpressionAttributeValues: { ':rid': runId },
+                        ScanIndexForward: true,
+                        ...(exclusiveStartKey ? { ExclusiveStartKey: exclusiveStartKey } : {}),
+                    })
+                );
+                all.push(
+                    ...((result.Items || []).map(item =>
+                        stripRetentionTtl(item as Record<string, unknown>)
+                    ) as unknown as Asset[])
+                );
+                exclusiveStartKey = result.LastEvaluatedKey as Record<string, unknown> | undefined;
+            } while (exclusiveStartKey);
         }
         all.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
         return all;

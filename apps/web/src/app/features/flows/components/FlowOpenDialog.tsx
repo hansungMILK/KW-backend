@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import { FolderOpen, Loader2, RefreshCw } from 'lucide-react';
+import { FolderOpen, Loader2, RefreshCw, Trash2 } from 'lucide-react';
 
 import { listFlows } from '@flows/flows';
 import { Badge, Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@flows/ui-kit';
@@ -10,6 +10,7 @@ interface FlowOpenDialogProps {
     currentFlowId: string | null;
     onOpenChange: (open: boolean) => void;
     onSelect: (flowId: string) => Promise<void>;
+    onDelete: (flowId: string) => Promise<void>;
 }
 
 type FlowSummary = Awaited<ReturnType<typeof listFlows>>[number];
@@ -25,10 +26,11 @@ const formatDate = (value: string): string => {
     }).format(date);
 };
 
-export const FlowOpenDialog = ({ open, currentFlowId, onOpenChange, onSelect }: FlowOpenDialogProps) => {
+export const FlowOpenDialog = ({ open, currentFlowId, onOpenChange, onSelect, onDelete }: FlowOpenDialogProps) => {
     const [flows, setFlows] = useState<FlowSummary[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [openingId, setOpeningId] = useState<string | null>(null);
+    const [deletingId, setDeletingId] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
 
     const load = useCallback(async () => {
@@ -57,6 +59,24 @@ export const FlowOpenDialog = ({ open, currentFlowId, onOpenChange, onSelect }: 
             setError(err instanceof Error ? err.message : '플로우를 열지 못했습니다.');
         } finally {
             setOpeningId(null);
+        }
+    };
+
+    const handleDelete = async (flowId: string, title: string) => {
+        const confirmed = window.confirm(
+            `"${title}" 플로우를 삭제할까요?\n실행 기록과 생성된 이미지, 음성, 영상 파일도 함께 삭제됩니다.`
+        );
+        if (!confirmed) return;
+
+        setDeletingId(flowId);
+        setError(null);
+        try {
+            await onDelete(flowId);
+            setFlows(current => current.filter(flow => flow.flowId !== flowId));
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '플로우를 삭제하지 못했습니다.');
+        } finally {
+            setDeletingId(null);
         }
     };
 
@@ -100,6 +120,8 @@ export const FlowOpenDialog = ({ open, currentFlowId, onOpenChange, onSelect }: 
                     {flows.map(flow => {
                         const isCurrent = flow.flowId === currentFlowId;
                         const isOpening = openingId === flow.flowId;
+                        const isDeleting = deletingId === flow.flowId;
+                        const isBusy = Boolean(openingId || deletingId);
 
                         return (
                             <section
@@ -122,16 +144,34 @@ export const FlowOpenDialog = ({ open, currentFlowId, onOpenChange, onSelect }: 
                                         {flow.flowId}
                                     </code>
                                 </div>
-                                <Button
-                                    type="button"
-                                    size="sm"
-                                    className="h-8 shrink-0 text-xs"
-                                    disabled={isCurrent || Boolean(openingId)}
-                                    onClick={() => handleSelect(flow.flowId)}
-                                >
-                                    {isOpening && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                                    열기
-                                </Button>
+                                <div className="flex shrink-0 items-center gap-2">
+                                    <Button
+                                        type="button"
+                                        size="sm"
+                                        className="h-8 text-xs"
+                                        disabled={isCurrent || isBusy}
+                                        onClick={() => handleSelect(flow.flowId)}
+                                    >
+                                        {isOpening && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                                        열기
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-8 px-3 text-xs text-muted-foreground hover:text-destructive"
+                                        disabled={isBusy}
+                                        aria-label={`${flow.title} 삭제`}
+                                        onClick={() => handleDelete(flow.flowId, flow.title)}
+                                    >
+                                        {isDeleting ? (
+                                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        ) : (
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                        )}
+                                        삭제
+                                    </Button>
+                                </div>
                             </section>
                         );
                     })}

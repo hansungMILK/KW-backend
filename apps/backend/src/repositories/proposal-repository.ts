@@ -79,29 +79,37 @@ export const proposalRepo = {
      */
     async deleteByFlowId(flowId: string): Promise<number> {
         if (USE_REAL_DYNAMO) {
-            const result = await getDocClient().send(
-                new QueryCommand({
-                    TableName: TABLE,
-                    IndexName: 'flowId-createdAt-index',
-                    KeyConditionExpression: 'flowId = :fid',
-                    ExpressionAttributeValues: { ':fid': flowId },
-                    ProjectionExpression: 'proposalId',
-                })
-            );
-            const items = (result.Items || []) as Array<{ proposalId?: string }>;
-            await Promise.all(
-                items
-                    .filter(item => item.proposalId)
-                    .map(item =>
+            let deleted = 0;
+            let exclusiveStartKey: Record<string, unknown> | undefined;
+            do {
+                const result = await getDocClient().send(
+                    new QueryCommand({
+                        TableName: TABLE,
+                        IndexName: 'flowId-createdAt-index',
+                        KeyConditionExpression: 'flowId = :fid',
+                        ExpressionAttributeValues: { ':fid': flowId },
+                        ProjectionExpression: 'proposalId',
+                        ...(exclusiveStartKey ? { ExclusiveStartKey: exclusiveStartKey } : {}),
+                    })
+                );
+                const items = (result.Items || []) as Array<{ proposalId?: string }>;
+                const proposalIds = items
+                    .map(item => item.proposalId)
+                    .filter((proposalId): proposalId is string => !!proposalId);
+                await Promise.all(
+                    proposalIds.map(proposalId =>
                         getDocClient().send(
                             new DeleteCommand({
                                 TableName: TABLE,
-                                Key: { proposalId: item.proposalId },
+                                Key: { proposalId },
                             })
                         )
                     )
-            );
-            return items.filter(item => item.proposalId).length;
+                );
+                deleted += proposalIds.length;
+                exclusiveStartKey = result.LastEvaluatedKey as Record<string, unknown> | undefined;
+            } while (exclusiveStartKey);
+            return deleted;
         }
 
         const owned = memDb.query(

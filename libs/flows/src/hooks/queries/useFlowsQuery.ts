@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { flowsKeys } from './keys';
-import { createFlow, getFlow, saveFlow, updateFlowMetadata } from '../../api';
+import { createFlow, deleteFlow, getFlow, saveFlow, updateFlowMetadata } from '../../api';
 
 import type {
     FlowView,
@@ -37,6 +37,18 @@ export const useLoadFlowQuery = (flowId: string | null) => {
 export const useCreateFlowMutation = () => {
     return useMutation({
         mutationFn: (body?: Partial<SaveFlowBody>) => createFlow(body),
+    });
+};
+
+export const useDeleteFlowMutation = () => {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: (id: string) => deleteFlow(id),
+        onSuccess: (_data, id) => {
+            queryClient.removeQueries({ queryKey: flowsKeys.snapshot(id) });
+            void queryClient.invalidateQueries({ queryKey: flowsKeys.lists() });
+        },
     });
 };
 

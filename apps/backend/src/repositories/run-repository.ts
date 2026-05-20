@@ -1,4 +1,4 @@
-import { GetCommand, PutCommand, QueryCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
+import { DeleteCommand, GetCommand, PutCommand, QueryCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
 
 import { stripRetentionTtl, withRetentionTtl } from './retention';
 import { TableNames, USE_REAL_DYNAMO, getDocClient, memDb } from '../adapters/aws/dynamodb';
@@ -59,6 +59,14 @@ export const runRepo = {
         const result = await getDocClient().send(new GetCommand({ TableName: RUNS_TABLE, Key: { runId } }));
         if (!result.Item) return null;
         return stripRetentionTtl(result.Item as Record<string, unknown>) as unknown as Run;
+    },
+
+    async deleteRun(runId: string): Promise<void> {
+        if (!USE_REAL_DYNAMO) {
+            memDb.delete(RUNS_TABLE, runId);
+            return;
+        }
+        await getDocClient().send(new DeleteCommand({ TableName: RUNS_TABLE, Key: { runId } }));
     },
 
     async listByFlow(
@@ -199,16 +207,47 @@ export const runRepo = {
             return all;
         }
         // DynamoDB: Query with PK=runId (composite key: runId + nodeId)
-        const result = await getDocClient().send(
-            new QueryCommand({
-                TableName: RUN_NODES_TABLE,
-                KeyConditionExpression: 'runId = :rid',
-                ExpressionAttributeValues: { ':rid': runId },
-            })
+        const items: RunNode[] = [];
+        let exclusiveStartKey: Record<string, unknown> | undefined;
+        do {
+            const result = await getDocClient().send(
+                new QueryCommand({
+                    TableName: RUN_NODES_TABLE,
+                    KeyConditionExpression: 'runId = :rid',
+                    ExpressionAttributeValues: { ':rid': runId },
+                    ...(exclusiveStartKey ? { ExclusiveStartKey: exclusiveStartKey } : {}),
+                })
+            );
+            items.push(
+                ...((result.Items || []).map(item =>
+                    stripRetentionTtl(item as Record<string, unknown>)
+                ) as unknown as RunNode[])
+            );
+            exclusiveStartKey = result.LastEvaluatedKey as Record<string, unknown> | undefined;
+        } while (exclusiveStartKey);
+        return items;
+    },
+
+    async deleteRunNodes(runId: string): Promise<number> {
+        const nodes = await this.listRunNodes(runId);
+        if (!USE_REAL_DYNAMO) {
+            for (const node of nodes) {
+                memDb.delete(RUN_NODES_TABLE, `${node.runId}#${node.nodeId}`);
+            }
+            return nodes.length;
+        }
+
+        await Promise.all(
+            nodes.map(node =>
+                getDocClient().send(
+                    new DeleteCommand({
+                        TableName: RUN_NODES_TABLE,
+                        Key: { runId: node.runId, nodeId: node.nodeId },
+                    })
+                )
+            )
         );
-        return (result.Items || []).map(item =>
-            stripRetentionTtl(item as Record<string, unknown>)
-        ) as unknown as RunNode[];
+        return nodes.length;
     },
 
     // ── Conditional status updates ────────────────────────────────────────────
