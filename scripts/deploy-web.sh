@@ -97,6 +97,12 @@ setup_aws_profile() {
 validate_environment() {
     local deploy_env="${1:-}"
 
+    if [ -z "${BUCKET_NAME}" ] || [ "${BUCKET_NAME}" = "your-s3-bucket" ]; then
+        log_error "BUCKET_NAME is not configured for web deployment"
+        log_error "Create .env.deploy with BUCKET_NAME before running this script"
+        exit 1
+    fi
+
     if [ ! -d "${DIST_DIR}" ]; then
         log_error "Build directory ${DIST_DIR} does not exist"
         if [ -n "$deploy_env" ]; then
