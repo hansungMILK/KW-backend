@@ -213,7 +213,7 @@ export const ORCHESTRATOR_BLOCK_CATALOG: Record<AllowedBlockType, BlockCatalogEn
         label: '롱폼 음성 생성',
         capabilities: ['audio.tts'],
         input: 'approved longform script',
-        output: 'json ElevenLabs audio metadata',
+        output: 'json TTS audio metadata',
         whenToUse: '승인된 롱폼 대본으로 내레이션을 만들 때',
         whenNotToUse: 'Gate A 승인 전',
     },

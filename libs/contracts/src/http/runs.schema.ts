@@ -180,6 +180,23 @@ export const RunNodeRetryResponseSchema = z.object({
 });
 
 // ============================================================================
+// POST /runs/{runId}/nodes/{nodeId}/recover
+// ============================================================================
+
+export const RunNodeRecoverParamsSchema = RunNodeRetryParamsSchema;
+
+export const RunNodeRecoverRequestSchema = z.object({
+    reason: z.string().optional(),
+});
+
+export const RunNodeRecoverResponseSchema = z.object({
+    runId: z.string(),
+    nodeId: z.string(),
+    recoveryAccepted: z.boolean(),
+    repairedSourceNodeId: z.string(),
+});
+
+// ============================================================================
 // Product API — GET /runs (all runs, global)
 // ============================================================================
 

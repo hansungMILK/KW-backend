@@ -89,15 +89,16 @@ export const mediaTtsBlock: BlockExecutor = {
             });
             await context?.onProgress?.(35, '나레이션 텍스트 준비 완료');
 
-            await recordTtsTrace(context, 'tts.elevenlabs.requested', 'STATUS', {
+            await recordTtsTrace(context, 'tts.requested', 'STATUS', {
                 textLength: fullText.length,
-                model: env.elevenLabsTtsModel,
-                voice: env.elevenLabsTtsVoiceId,
-                timeoutMs: env.elevenLabsTtsTimeoutMs,
+                fallbackOrder: ['elevenlabs', 'openai'],
             });
             const ttsStartedAt = Date.now();
             const result = await ttsAdapter.synthesize({ text: fullText, signal: context?.abortSignal });
-            await recordTtsTrace(context, 'tts.elevenlabs.completed', 'STATUS', {
+            await recordTtsTrace(context, `tts.${result.provider}.completed`, 'STATUS', {
+                provider: result.provider,
+                model: result.model,
+                voiceId: result.voiceId,
                 durationMs: Date.now() - ttsStartedAt,
                 estimatedDurationSec: result.estimatedDurationSec,
                 bytes: result.audioBuffer.byteLength,
@@ -149,9 +150,9 @@ export const mediaTtsBlock: BlockExecutor = {
                         durationSec: result.estimatedDurationSec,
                         format: 'mp3',
                         sampleRate: 44100,
-                        provider: 'elevenlabs',
-                        model: env.elevenLabsTtsModel,
-                        voiceId: env.elevenLabsTtsVoiceId,
+                        provider: result.provider,
+                        model: result.model,
+                        voiceId: result.voiceId,
                     },
                     narrationText: fullText,
                     subtitleCues,

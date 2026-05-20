@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { FileText, LayoutGrid, Menu, Redo2, Save, Trash2, Undo2, Workflow } from 'lucide-react';
+import { FileText, FolderOpen, KeyRound, LayoutGrid, Menu, Redo2, Save, Trash2, Undo2, Workflow } from 'lucide-react';
 
 import { cn } from '@flows/lib/utils';
 import {
@@ -27,6 +27,7 @@ export interface FlowInfoProps {
 
 export interface FileActionsProps {
     onNew: () => void;
+    onOpenSaved: () => void;
     onSave: () => void;
     onExport: () => void;
     onImport: () => void;
@@ -275,7 +276,7 @@ export const Header: React.FC<HeaderProps> = ({
     saveState,
     socketState,
     onShare: _onShare,
-    onApiKeySettings: _onApiKeySettings,
+    onApiKeySettings,
     onHelp: _onHelp,
     isAgentPanelOpen = false,
 }) => {
@@ -329,10 +330,9 @@ export const Header: React.FC<HeaderProps> = ({
                             'text-sm font-semibold text-foreground shadow-sm',
                             'hover:bg-accent/40 transition-colors'
                         )}
-                        aria-label="새로 시작"
+                        aria-label="새 플로우"
                     >
-                        <FileText className="w-4 h-4 text-primary" />
-                        새로 시작
+                        <FileText className="w-4 h-4 text-primary" />새 플로우
                     </button>
 
                     {/* Edit Tools - hidden on mobile, shown on tablet+ */}
@@ -394,9 +394,23 @@ export const Header: React.FC<HeaderProps> = ({
                                 <FileText className="w-4 h-4 mr-2" />
                                 {t('header.newFlow')}
                             </DropdownMenuItem>
+                            <DropdownMenuItem onClick={fileActions.onOpenSaved}>
+                                <FolderOpen className="w-4 h-4 mr-2" />
+                                저장한 플로우 열기
+                            </DropdownMenuItem>
                             <DropdownMenuItem onClick={fileActions.onSave}>
                                 <Save className="w-4 h-4 mr-2" />
                                 {t('header.saveFlow')}
+                            </DropdownMenuItem>
+
+                            <DropdownMenuSeparator />
+
+                            <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">
+                                Provider
+                            </DropdownMenuLabel>
+                            <DropdownMenuItem onClick={onApiKeySettings}>
+                                <KeyRound className="w-4 h-4 mr-2" />
+                                Provider API 키 설정
                             </DropdownMenuItem>
 
                             <DropdownMenuSeparator />

@@ -2,9 +2,11 @@ import { getProviderApiKey } from './credential-resolver';
 import { traceService } from './trace-service';
 import { wsService } from './websocket-service';
 import { broadcastNodePortUpdated } from './ws-flow-events-service';
+import { openaiAdapter } from '../adapters/ai/openai-adapter';
 import { PAID_OPENAI_DISABLED, isPaidOpenAIAllowed } from '../adapters/ai/paid-openai-guard';
 import { queue } from '../adapters/aws/queue';
 import { env } from '../config/env';
+import { ContentOutputSchema } from '../modules/blocks/types';
 import { estimateGptImage2CostUsd } from '../modules/image-generation/image-style';
 import { flowRepo } from '../repositories/flow-repository';
 import { runRepo } from '../repositories/run-repository';
@@ -229,6 +231,8 @@ const OPENAI_BLOCK_PROVIDER_MAP: Record<string, ApiKeyProvider> = {
     'longform-tts': 'elevenlabs',
 };
 
+const TTS_BLOCK_TYPES = new Set(['media-tts', 'longform-tts']);
+
 type RunServiceFailure = {
     ok: false;
     error: string;
@@ -244,6 +248,18 @@ type SingleNodeRunOverrides = {
     output?: Record<string, unknown>;
 };
 
+const ANALYSIS_RECOVERY_SYSTEM_PROMPT = [
+    'You rewrite Korean Shorts script JSON after quality-review feedback.',
+    'Return JSON only. Keep the same top-level schema used by the original script.',
+    'Preserve the user request, exact topic, scene count, sceneNumber order, and downstream media fields.',
+    'Rewrite narration, captions, visualText, and imagePrompt only as needed to satisfy review feedback.',
+    'If feedback says a focus term or core topic is missing, make it explicit in the hook and several scenes.',
+    'If feedback says health, medical, finance, or factual claims are too strong, soften them with source-aware language such as "도움이 될 수 있습니다", "연구에 따르면", "보도에 따르면", or "개인차가 있습니다".',
+    'Do not invent citations. If no source is available, avoid claimType "fact" for uncertain claims.',
+    'Remove repeated sentences and make each scene advance a different point.',
+    'Do not add markdown fences or explanation.',
+].join('\n');
+
 const getProviderForBlock = (blockType: string): ApiKeyProvider | undefined => {
     return env.aiProvider === 'legacy' ? LEGACY_BLOCK_PROVIDER_MAP[blockType] : OPENAI_BLOCK_PROVIDER_MAP[blockType];
 };
@@ -255,6 +271,77 @@ const getBlockType = (node: Record<string, unknown>): string => {
 const getNodeId = (node: Record<string, unknown>): string => getFlowNodeId(node);
 
 const isExecutableNode = (node: Record<string, unknown>): boolean => isExecutableFlowNode(node);
+
+const isRecoverableAnalysisFailure = (node: RunNode): boolean =>
+    node.blockType === 'analysis' &&
+    node.status === 'FAILED' &&
+    (node.errorCode === 'ANALYSIS_REJECTED' ||
+        (typeof node.errorMessage === 'string' && node.errorMessage.startsWith('Analysis rejected content:')));
+
+const extractAnalysisIssues = (node: RunNode): Array<Record<string, unknown>> => {
+    const issues = isRecord(node.outputPayload) ? node.outputPayload['issues'] : undefined;
+    if (Array.isArray(issues)) {
+        return issues
+            .filter(isRecord)
+            .map(issue => ({
+                severity: typeof issue['severity'] === 'string' ? issue['severity'] : 'high',
+                message: String(issue['message'] ?? ''),
+                ...(typeof issue['sceneNumber'] === 'number' ? { sceneNumber: issue['sceneNumber'] } : {}),
+            }))
+            .filter(issue => String(issue['message']).trim().length > 0);
+    }
+
+    if (node.errorMessage) {
+        return [{ severity: 'high', message: node.errorMessage }];
+    }
+    return [{ severity: 'high', message: '품질검수 피드백을 반영해 대본을 다시 작성해야 합니다.' }];
+};
+
+const findRecoverableContentAncestor = (analysisNode: RunNode, allNodes: RunNode[]): RunNode | undefined => {
+    const nodeById = new Map(allNodes.map(node => [node.nodeId, node]));
+    const visited = new Set<string>();
+    const stack = [...analysisNode.parentNodeIds];
+
+    while (stack.length > 0) {
+        const nodeId = stack.shift();
+        if (!nodeId || visited.has(nodeId)) continue;
+        visited.add(nodeId);
+
+        const candidate = nodeById.get(nodeId);
+        if (!candidate) continue;
+        if (
+            candidate.blockType === 'content' &&
+            candidate.status === 'COMPLETED' &&
+            isRecord(candidate.outputPayload) &&
+            Array.isArray(candidate.outputPayload['scenes'])
+        ) {
+            return candidate;
+        }
+        stack.push(...candidate.parentNodeIds);
+    }
+
+    return undefined;
+};
+
+const parseRecoveredContentOutput = (
+    content: string
+): { ok: true; output: Record<string, unknown> } | { ok: false; error: string } => {
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(content);
+    } catch {
+        return { ok: false, error: 'SCRIPT_RECOVERY_INVALID_JSON' };
+    }
+
+    const validated = ContentOutputSchema.safeParse(parsed);
+    if (!validated.success) {
+        return {
+            ok: false,
+            error: `SCRIPT_RECOVERY_INVALID_OUTPUT: ${validated.error.issues.map(issue => issue.message).join(', ')}`,
+        };
+    }
+    return { ok: true, output: validated.data as Record<string, unknown> };
+};
 
 const getNodeConfig = (node: Record<string, unknown>): Record<string, unknown> => {
     const data = node['data'] as Record<string, unknown> | undefined;
@@ -528,11 +615,18 @@ const getPreflightNodesForRun = (
     return nodes.filter(node => !LONGFORM_GATE_B_BLOCK_TYPES.has(getBlockType(node)));
 };
 
-const requiresPaidOpenAI = (nodes: Array<Record<string, unknown>>): boolean => {
-    return nodes.some(node => {
+const requiresPaidOpenAI = async (nodes: Array<Record<string, unknown>>): Promise<boolean> => {
+    for (const node of nodes) {
         const blockType = getBlockType(node);
-        return getProviderForBlock(blockType) === 'openai';
-    });
+        if (getProviderForBlock(blockType) === 'openai') return true;
+        if (TTS_BLOCK_TYPES.has(blockType)) {
+            const elevenLabsKey = await getProviderApiKey('elevenlabs');
+            if (elevenLabsKey) continue;
+            const openAiKey = await getProviderApiKey('openai');
+            if (openAiKey) return true;
+        }
+    }
+    return false;
 };
 
 /**
@@ -548,6 +642,20 @@ async function checkMissingApiKeys(nodes: Array<Record<string, unknown>>): Promi
 
     for (const node of nodes) {
         const blockType = getBlockType(node);
+        if (TTS_BLOCK_TYPES.has(blockType)) {
+            if (checked.has('tts')) continue;
+            checked.add('tts');
+
+            const elevenLabsKey = await getProviderApiKey('elevenlabs');
+            if (elevenLabsKey) continue;
+            const openAiKey = await getProviderApiKey('openai');
+            if (openAiKey) continue;
+
+            if (!missing.includes('elevenlabs')) missing.push('elevenlabs');
+            if (!missing.includes('openai')) missing.push('openai');
+            continue;
+        }
+
         const provider = getProviderForBlock(blockType);
         if (!provider) continue;
         if (checked.has(provider)) continue;
@@ -603,7 +711,7 @@ export const runService = {
         const longformApprovalResult = checkLongformGateBApproval(preflightNodes);
         if (longformApprovalResult) return longformApprovalResult;
 
-        if (requiresPaidOpenAI(preflightNodes) && !isPaidOpenAIAllowed()) {
+        if ((await requiresPaidOpenAI(preflightNodes)) && !isPaidOpenAIAllowed()) {
             return { ok: false, error: PAID_OPENAI_DISABLED, status: 422 };
         }
 
@@ -704,7 +812,7 @@ export const runService = {
         const longformApprovalResult = checkLongformGateBApproval([costGuardTargetNode]);
         if (longformApprovalResult) return longformApprovalResult;
 
-        if (requiresPaidOpenAI([targetNode]) && !isPaidOpenAIAllowed()) {
+        if ((await requiresPaidOpenAI([targetNode])) && !isPaidOpenAIAllowed()) {
             return { ok: false, error: PAID_OPENAI_DISABLED, status: 422 };
         }
 
@@ -835,6 +943,84 @@ export const runService = {
         // Cancel the run
         await runRepo.updateRunStatus(runId, 'CANCELLED');
         return { ok: true };
+    },
+
+    /**
+     * Recover an ANALYSIS_REJECTED node by rewriting the nearest completed
+     * upstream content output, then retrying analysis and its downstream nodes.
+     */
+    async recoverAnalysisNode(
+        runId: string,
+        nodeId: string,
+        reason?: string
+    ): Promise<{ ok: true; repairedSourceNodeId: string } | RunServiceFailure> {
+        const node = await runRepo.getRunNode(runId, nodeId);
+        if (!node) return { ok: false, error: `RunNode ${runId}#${nodeId} not found`, status: 404 };
+        if (!isRecoverableAnalysisFailure(node)) {
+            return {
+                ok: false,
+                error: 'ANALYSIS_RECOVERY_REQUIRES_REJECTED_ANALYSIS_NODE',
+                status: 409,
+            };
+        }
+
+        const run = await runRepo.getRun(runId);
+        if (!run) return { ok: false, error: `Run ${runId} not found`, status: 404 };
+        const allNodes = await runRepo.listRunNodes(runId);
+        const sourceNode = findRecoverableContentAncestor(node, allNodes);
+        if (!sourceNode || !isRecord(sourceNode.outputPayload)) {
+            return { ok: false, error: 'ANALYSIS_RECOVERY_SOURCE_CONTENT_NOT_FOUND', status: 409 };
+        }
+
+        const issues = extractAnalysisIssues(node);
+        let response;
+        try {
+            response = await openaiAdapter.chatJson({
+                systemPrompt: ANALYSIS_RECOVERY_SYSTEM_PROMPT,
+                userMessage: JSON.stringify(
+                    {
+                        runId,
+                        analysisNodeId: nodeId,
+                        reason,
+                        reviewIssues: issues,
+                        reviewError: node.errorMessage,
+                        originalScript: sourceNode.outputPayload,
+                    },
+                    null,
+                    2
+                ),
+                maxTokens: 4096,
+            });
+        } catch (error) {
+            return {
+                ok: false,
+                error: error instanceof Error ? error.message : String(error),
+                status: 400,
+            };
+        }
+
+        const parsed = parseRecoveredContentOutput(response.content);
+        if (!parsed.ok) {
+            return { ok: false, error: parsed.error, status: 400 };
+        }
+
+        await runRepo.putRunNode({
+            ...sourceNode,
+            outputPayload: {
+                ...parsed.output,
+                recovery: {
+                    recoveredFromNodeId: nodeId,
+                    recoveredAt: new Date().toISOString(),
+                    reason,
+                    issues,
+                },
+            },
+            updatedAt: new Date().toISOString(),
+        });
+
+        const retryResult = await this.retryNode(runId, nodeId, reason ?? 'analysis recovery');
+        if (!retryResult.ok) return retryResult;
+        return { ok: true, repairedSourceNodeId: sourceNode.nodeId };
     },
 
     /**

@@ -38,6 +38,7 @@ provider:
         FFMPEG_TIMEOUT_MS: ${env:FFMPEG_TIMEOUT_MS, '840000'}
         FFMPEG_FONT_FILE: ${env:FFMPEG_FONT_FILE, 'assets/fonts/Jalnan2.otf'}
         SHORTS_FFMPEG_OVERLAY: ${env:SHORTS_FFMPEG_OVERLAY, 'all'}
+        ALLOW_SHORTS_OVERLAY_OFF: ${env:ALLOW_SHORTS_OVERLAY_OFF, 'false'}
         SHORTS_BGM_MODE: ${env:SHORTS_BGM_MODE, 'catalog'}
         SHORTS_BGM_REQUIRED: ${env:SHORTS_BGM_REQUIRED, 'false'}
         SHORTS_BGM_ASSETS_DIR: ${env:SHORTS_BGM_ASSETS_DIR, 'assets/bgm'}
@@ -60,7 +61,7 @@ provider:
         OPENAI_IMAGE_MAX_ATTEMPTS: ${env:OPENAI_IMAGE_MAX_ATTEMPTS, '1'}
         OPENAI_IMAGE_SCENE_TIMEOUT_MS: ${env:OPENAI_IMAGE_SCENE_TIMEOUT_MS, '120000'}
         OPENAI_IMAGE_SCENE_MAX_ATTEMPTS: ${env:OPENAI_IMAGE_SCENE_MAX_ATTEMPTS, '2'}
-        OPENAI_IMAGE_SCENE_CONCURRENCY: ${env:OPENAI_IMAGE_SCENE_CONCURRENCY, '12'}
+        OPENAI_IMAGE_SCENE_CONCURRENCY: ${env:OPENAI_IMAGE_SCENE_CONCURRENCY, '2'}
         OPENAI_IMAGE_BATCH_TIMEOUT_BUFFER_MS: ${env:OPENAI_IMAGE_BATCH_TIMEOUT_BUFFER_MS, '30000'}
         OPENAI_TTS_MODEL: ${env:OPENAI_TTS_MODEL, 'gpt-4o-mini-tts'}
         OPENAI_TTS_VOICE: ${env:OPENAI_TTS_VOICE, 'nova'}
@@ -240,6 +241,23 @@ functions:
             - httpApi:
                   path: '/_local-assets/{proxy+}'
                   method: get
+
+    diagnosticsFfmpegOverlay:
+        handler: src/handlers/http/diagnostics/ffmpeg-overlay.main
+        timeout: 120
+        memorySize: 3008
+        layers:
+            - !Ref FfmpegLambdaLayer
+        events:
+            - httpApi:
+                  path: '/diagnostics/ffmpeg-overlay'
+                  method: post
+            - httpApi:
+                  path: '/_apis/diagnostics/ffmpeg-overlay'
+                  method: post
+            - httpApi:
+                  path: '/_api_/diagnostics/ffmpeg-overlay'
+                  method: post
 
     # ── Flows ──
     flowCreate:
@@ -568,6 +586,19 @@ functions:
                   method: post
             - httpApi:
                   path: '/_api_/runs/{runId}/nodes/{nodeId}/retry'
+                  method: post
+
+    runNodeRecover:
+        handler: src/handlers/http/runs/recover-node.main
+        events:
+            - httpApi:
+                  path: '/runs/{runId}/nodes/{nodeId}/recover'
+                  method: post
+            - httpApi:
+                  path: '/_apis/runs/{runId}/nodes/{nodeId}/recover'
+                  method: post
+            - httpApi:
+                  path: '/_api_/runs/{runId}/nodes/{nodeId}/recover'
                   method: post
 
     # ── Traces ──

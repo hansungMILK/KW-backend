@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'child_process';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join, resolve } from 'path';
@@ -51,9 +51,10 @@ const LOCAL_ASSET_BASE_URL = process.env.LOCAL_ASSET_BASE_URL || 'http://localho
 const REFERENCE_YELLOW = '#fff200';
 
 let cachedDrawtextSupport: boolean | undefined;
+let cachedSubtitlesSupport: boolean | undefined;
 let cachedSipsSupport: boolean | undefined;
 
-type OverlayStrategy = 'none' | 'drawtext' | 'image';
+type OverlayStrategy = 'none' | 'drawtext' | 'ass' | 'image';
 
 export const ffmpegAdapter = {
     async compose(request: VideoCompositionRequest): Promise<VideoCompositionResult> {
@@ -73,6 +74,7 @@ export const ffmpegAdapter = {
                 caption?: string;
                 sourceLabel?: string;
                 overlayPath?: string;
+                subtitlePath?: string;
             }> = [];
 
             for (let i = 0; i < request.images.length; i++) {
@@ -104,6 +106,15 @@ export const ffmpegAdapter = {
                         `자막 오버레이 준비 중 (${i + 1}/${imageFiles.length})`
                     );
                 }
+            } else if (overlayStrategy === 'ass') {
+                for (let i = 0; i < imageFiles.length; i += 1) {
+                    throwIfAborted(request.signal);
+                    imageFiles[i].subtitlePath = await createOverlayAss(imageFiles[i], i, workDir);
+                    await request.onProgress?.(
+                        52 + Math.round(((i + 1) / imageFiles.length) * 8),
+                        `자막 오버레이 준비 중 (${i + 1}/${imageFiles.length})`
+                    );
+                }
             }
 
             let audioPath: string | null = null;
@@ -123,7 +134,11 @@ export const ffmpegAdapter = {
 
             throwIfAborted(request.signal);
             await request.onProgress?.(70, 'FFmpeg 합성 시작');
-            await runFfmpeg(buildArgs(imageFiles, audioPath, backgroundMusicPath, request, outputPath), request.signal);
+            await runFfmpeg(
+                buildArgs(imageFiles, audioPath, backgroundMusicPath, request, outputPath),
+                request.signal,
+                prepareFfmpegFontconfigEnv(process.env, workDir)
+            );
             await request.onProgress?.(88, 'FFmpeg 합성 완료');
 
             const videoBuffer = await readFile(outputPath);
@@ -157,7 +172,7 @@ export const ffmpegAdapter = {
                     'json',
                     videoPath,
                 ],
-                { encoding: 'utf8', timeout: 10000 }
+                { encoding: 'utf8', timeout: 10000, env: { ...process.env, HOME: '/tmp' } }
             );
             if (result.error || result.status !== 0) {
                 console.warn(
@@ -237,17 +252,19 @@ function buildArgs(
         caption?: string;
         sourceLabel?: string;
         overlayPath?: string;
+        subtitlePath?: string;
     }>,
     audioPath: string | null,
     backgroundMusicPath: string | null,
     request: VideoCompositionRequest,
     outputPath: string
 ): string[] {
-    const args = ['-y', '-hide_banner', '-loglevel', 'error'];
+    const args = ['-y', '-nostdin', '-hide_banner', '-loglevel', 'error'];
     const durationSec = imageFiles.reduce((sum, image) => sum + image.durationSec, 0);
+    const outputFrameCount = Math.max(1, Math.round(durationSec * 30));
 
     for (const image of imageFiles) {
-        args.push('-framerate', '30', '-loop', '1', '-t', String(image.durationSec), '-i', image.path);
+        args.push('-i', image.path);
     }
 
     let nextInputIndex = imageFiles.length;
@@ -256,7 +273,7 @@ function buildArgs(
         if (!image.overlayPath) return;
         overlayInputIndices.set(index, nextInputIndex);
         nextInputIndex += 1;
-        args.push('-framerate', '30', '-loop', '1', '-t', String(image.durationSec), '-i', image.overlayPath);
+        args.push('-i', image.overlayPath);
     });
 
     let narrationInputIndex: number | null = null;
@@ -275,6 +292,7 @@ function buildArgs(
 
     const overlayStrategy = resolveOverlayStrategy();
     const fontFile = overlayStrategy === 'drawtext' ? resolveOverlayFontFile() : undefined;
+    const fontsDir = overlayStrategy === 'ass' ? resolveOverlayFontsDir() : undefined;
     const filterParts: string[] = [];
     imageFiles.forEach((image, i) => {
         const baseFilter = buildShortsVisualBaseFilter(
@@ -287,15 +305,22 @@ function buildArgs(
         const overlayInputIndex = overlayInputIndices.get(i);
         if (overlayInputIndex !== undefined) {
             filterParts.push(`${baseFilter}[base${i}]`);
-            filterParts.push(`[base${i}][${overlayInputIndex}:v]overlay=0:0:format=auto[v${i}]`);
+            filterParts.push(
+                `[base${i}][${overlayInputIndex}:v]overlay=0:0:format=auto,${buildFiniteSceneFilter(image.durationSec)}[v${i}]`
+            );
             return;
         }
 
-        const overlay = overlayStrategy === 'drawtext' ? buildDrawtextOverlayFilter(image, fontFile) : '';
-        filterParts.push(`${baseFilter}${overlay}[v${i}]`);
+        const subtitle = image.subtitlePath ? buildAssSubtitleFilter(image.subtitlePath, fontsDir) : '';
+        const overlay = overlayStrategy === 'drawtext' ? buildDrawtextOverlayFilter(image, fontFile) : subtitle;
+        filterParts.push(`${baseFilter}${overlay},${buildFiniteSceneFilter(image.durationSec)}[v${i}]`);
     });
-    const concatInputs = imageFiles.map((_, i) => `[v${i}]`).join('');
-    filterParts.push(`${concatInputs}concat=n=${imageFiles.length}:v=1:a=0,format=yuv420p[v]`);
+    if (imageFiles.length === 1) {
+        filterParts.push('[v0]format=yuv420p[v]');
+    } else {
+        const concatInputs = imageFiles.map((_, i) => `[v${i}]`).join('');
+        filterParts.push(`${concatInputs}concat=n=${imageFiles.length}:v=1:a=0,format=yuv420p[v]`);
+    }
 
     let audioMap: string | null = null;
     const backgroundMusicVolume = resolveBackgroundMusicVolume(request.backgroundMusic);
@@ -315,9 +340,19 @@ function buildArgs(
     } else if (narrationInputIndex !== null) {
         args.push('-map', `${narrationInputIndex}:a:0`, '-shortest', '-c:a', 'aac', '-b:a', '128k');
     }
+    args.push('-t', String(durationSec), '-frames:v', String(outputFrameCount));
     args.push('-c:v', 'libx264', '-preset', 'veryfast', '-r', '30', '-movflags', '+faststart', outputPath);
 
     return args;
+}
+
+function buildFiniteSceneFilter(durationSec: number): string {
+    return `trim=duration=${durationSec},setpts=PTS-STARTPTS`;
+}
+
+function buildFiniteImageInputFilter(inputIndex: number, durationSec: number): string {
+    const frameCount = Math.max(1, Math.round(durationSec * 30));
+    return `[${inputIndex}:v]loop=loop=${Math.max(0, frameCount - 1)}:size=1:start=0,setpts=N/(30*TB)`;
 }
 
 function buildShortsVisualBaseFilter(
@@ -327,36 +362,53 @@ function buildShortsVisualBaseFilter(
     durationSec: number,
     motionMode?: VideoCompositionRequest['motionMode']
 ): string {
+    const input = buildFiniteImageInputFilter(inputIndex, durationSec);
     if (motionMode === 'ken-burns') {
         const frameCount = Math.max(1, Math.round(durationSec * 30));
         const scaledWidth = Math.ceil(outputWidth * 1.12);
         const scaledHeight = Math.ceil(outputHeight * 1.12);
-        return `[${inputIndex}:v]scale=${scaledWidth}:${scaledHeight}:force_original_aspect_ratio=increase,crop=${scaledWidth}:${scaledHeight},zoompan=z='min(zoom+0.0008,1.08)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frameCount}:s=${outputWidth}x${outputHeight}:fps=30,setsar=1`;
+        return `${input},scale=${scaledWidth}:${scaledHeight}:force_original_aspect_ratio=increase,crop=${scaledWidth}:${scaledHeight},zoompan=z='min(zoom+0.0008,1.08)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frameCount}:s=${outputWidth}x${outputHeight}:fps=30,setsar=1`;
     }
 
     const visualHeight = Math.round(outputHeight * 0.55);
     const visualY = Math.round(outputHeight * 0.205);
-    return `[${inputIndex}:v]scale=${outputWidth}:${visualHeight}:force_original_aspect_ratio=increase,crop=${outputWidth}:${visualHeight},setsar=1,pad=${outputWidth}:${outputHeight}:0:${visualY}:black`;
+    return `${input},scale=${outputWidth}:${visualHeight}:force_original_aspect_ratio=increase,crop=${outputWidth}:${visualHeight},setsar=1,pad=${outputWidth}:${outputHeight}:0:${visualY}:black`;
 }
 
-function resolveOverlayFontFile(): string | undefined {
+export function resolveOverlayFontFile(): string | undefined {
     const candidates = [
         process.env.FFMPEG_FONT_FILE,
         resolve('assets/fonts/Pretendard-Black.otf'),
         resolve('assets/fonts/Pretendard-Bold.otf'),
+        resolve('apps/backend/assets/fonts/Pretendard-Black.otf'),
+        resolve('apps/backend/assets/fonts/Pretendard-Bold.otf'),
         '/opt/fonts/Pretendard-Black.otf',
         '/opt/fonts/Pretendard-Bold.otf',
         '/opt/fonts/BlackHanSans-Regular.ttf',
         '/opt/fonts/NotoSansKR-Black.otf',
         '/opt/fonts/NotoSansCJKkr-Black.otf',
         resolve('assets/fonts/Jalnan2.otf'),
+        resolve('apps/backend/assets/fonts/Jalnan2.otf'),
         '/System/Library/Fonts/AppleSDGothicNeo.ttc',
         '/System/Library/Fonts/Supplemental/AppleGothic.ttf',
         '/opt/fonts/NotoSansCJKkr-Regular.otf',
         '/opt/fonts/NotoSansKR-Regular.otf',
     ].filter((candidate): candidate is string => Boolean(candidate));
 
-    return candidates.find(isSupportedFontFile);
+    return candidates.map(resolveFontCandidatePath).find(isSupportedFontFile);
+}
+
+function resolveFontCandidatePath(candidate: string): string {
+    const trimmed = candidate.trim();
+    if (trimmed.startsWith('/')) return trimmed;
+    return resolve(trimmed);
+}
+
+function resolveOverlayFontsDir(): string | undefined {
+    const fontFile = resolveOverlayFontFile();
+    if (!fontFile) return undefined;
+    const index = Math.max(fontFile.lastIndexOf('/'), fontFile.lastIndexOf('\\'));
+    return index > 0 ? fontFile.slice(0, index) : undefined;
 }
 
 export function isSupportedFontFile(candidate: string | undefined): candidate is string {
@@ -381,21 +433,36 @@ function ffmpegSupportsDrawtext(): boolean {
     return cachedDrawtextSupport;
 }
 
+function ffmpegSupportsSubtitles(): boolean {
+    if (cachedSubtitlesSupport !== undefined) return cachedSubtitlesSupport;
+
+    const result = spawnSync(FFMPEG_PATH, ['-hide_banner', '-filters'], { encoding: 'utf8', timeout: 5000 });
+    const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+    cachedSubtitlesSupport = !result.error && result.status === 0 && /\bsubtitles\b/.test(output);
+    return cachedSubtitlesSupport;
+}
+
 function canRenderSvgOverlayWithSips(): boolean {
     if (cachedSipsSupport !== undefined) return cachedSipsSupport;
     cachedSipsSupport = existsSync('/usr/bin/sips');
     return cachedSipsSupport;
 }
 
-function resolveOverlayStrategy(): OverlayStrategy {
-    if (FFMPEG_OVERLAY_MODE === 'off') return 'none';
+export function resolveOverlayStrategy(): OverlayStrategy {
+    if (FFMPEG_OVERLAY_MODE === 'off') {
+        if (isLocalStage || process.env.ALLOW_SHORTS_OVERLAY_OFF === 'true') return 'none';
+        throw new Error(
+            `VIDEO_OVERLAY_DISABLED_IN_STAGE: SHORTS_FFMPEG_OVERLAY=off is blocked outside local/offline stage. Text overlay is required for Shorts composition in deployed stages. Set ALLOW_SHORTS_OVERLAY_OFF=true only for an intentional debug run.`
+        );
+    }
 
     const fontFile = resolveOverlayFontFile();
     if (fontFile && ffmpegSupportsDrawtext()) return 'drawtext';
-    if (canRenderSvgOverlayWithSips()) return 'image';
+    if (fontFile && ffmpegSupportsSubtitles()) return 'ass';
+    if (isLocalStage && canRenderSvgOverlayWithSips()) return 'image';
 
     throw new Error(
-        'Shorts text overlay requires an ffmpeg build with drawtext support or macOS /usr/bin/sips for local overlay PNG rendering. Set SHORTS_FFMPEG_OVERLAY=off only if text overlay is intentionally disabled.'
+        `VIDEO_OVERLAY_CAPABILITY_MISSING: Shorts text overlay requires ffmpeg drawtext or subtitles/libass support. FFMPEG_PATH=${FFMPEG_PATH}, SHORTS_FFMPEG_OVERLAY=${FFMPEG_OVERLAY_MODE}. Local macOS may use /usr/bin/sips as a fallback, but deployed Lambda must use an ffmpeg layer with overlay support.`
     );
 }
 
@@ -427,6 +494,62 @@ async function createOverlayPng(
         );
     }
     return pngPath;
+}
+
+async function createOverlayAss(
+    image: { title?: string; caption?: string; sourceLabel?: string; durationSec?: number },
+    index: number,
+    workDir: string
+): Promise<string> {
+    const assPath = join(workDir, `overlay-${String(index).padStart(2, '0')}.ass`);
+    await writeFile(assPath, buildOverlayAss(image), 'utf8');
+    return assPath;
+}
+
+function buildOverlayAss(image: {
+    title?: string;
+    caption?: string;
+    sourceLabel?: string;
+    durationSec?: number;
+}): string {
+    const end = formatAssTime(normalizeDurationSec(image.durationSec));
+    const titleLines =
+        FFMPEG_OVERLAY_MODE === 'all' ? splitOverlayLines(compactOverlayText(image.title, 28), 11, 2) : [];
+    const captionLines =
+        FFMPEG_OVERLAY_MODE === 'all' ? splitOverlayLines(compactOverlayText(image.caption, 62), 14, 3) : [];
+    const sourceLabel = compactOverlayText(image.sourceLabel, 36);
+    const dialogues: string[] = [];
+
+    if (FFMPEG_OVERLAY_MODE === 'all' && titleLines.length > 0) {
+        dialogues.push(
+            `Dialogue: 0,0:00:00.00,${end},Title,,0,0,0,,{\\pos(540,${titleLines.length === 1 ? 150 : 95})}${escapeAss(titleLines.join('\\N'))}`
+        );
+    }
+    if (FFMPEG_OVERLAY_MODE === 'all' && captionLines.length > 0) {
+        dialogues.push(
+            `Dialogue: 0,0:00:00.00,${end},Caption,,0,0,0,,{\\pos(540,1660)}${escapeAss(captionLines.join('\\N'))}`
+        );
+    }
+    if ((FFMPEG_OVERLAY_MODE === 'source' || FFMPEG_OVERLAY_MODE === 'all') && sourceLabel) {
+        dialogues.push(`Dialogue: 0,0:00:00.00,${end},Source,,0,0,0,,{\\pos(540,1888)}${escapeAss(sourceLabel)}`);
+    }
+
+    return `[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Title,Jalnan 2,118,&H0000F2FF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,7,0,8,0,0,0,1
+Style: Caption,Jalnan 2,76,&H0000F2FF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,7,0,2,0,0,0,1
+Style: Source,Jalnan 2,30,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,0,2,0,0,0,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+${dialogues.join('\n')}
+`;
 }
 
 function buildOverlaySvg(image: { title?: string; caption?: string; sourceLabel?: string }): string {
@@ -525,6 +648,12 @@ function buildDrawtextOverlayFilter(
     return filters.length > 0 ? `,${filters.join(',')}` : '';
 }
 
+function buildAssSubtitleFilter(subtitlePath: string, fontsDir: string | undefined): string {
+    const options = [`filename='${escapeFilterValue(subtitlePath)}'`];
+    if (fontsDir) options.push(`fontsdir='${escapeFilterValue(fontsDir)}'`);
+    return `,subtitles=${options.join(':')}`;
+}
+
 function compactOverlayText(value: string | undefined, maxLength: number): string {
     if (!value) return '';
     const compact = value.replace(/\s+/g, ' ').trim();
@@ -562,6 +691,25 @@ export function splitOverlayLines(value: string, maxCharsPerLine: number, maxLin
 
 function escapeDrawtext(value: string): string {
     return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/:/g, '\\:').replace(/%/g, '\\%');
+}
+
+function escapeFilterValue(value: string): string {
+    return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/:/g, '\\:');
+}
+
+function escapeAss(value: string): string {
+    return value.replace(/\\/g, '\\\\').replace(/{/g, '\\{').replace(/}/g, '\\}');
+}
+
+function formatAssTime(durationSec: number): string {
+    const totalCentiseconds = Math.max(1, Math.round(durationSec * 100));
+    const centiseconds = totalCentiseconds % 100;
+    const totalSeconds = Math.floor(totalCentiseconds / 100);
+    const seconds = totalSeconds % 60;
+    const totalMinutes = Math.floor(totalSeconds / 60);
+    const minutes = totalMinutes % 60;
+    const hours = Math.floor(totalMinutes / 60);
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(centiseconds).padStart(2, '0')}`;
 }
 
 function escapeXml(value: string): string {
@@ -614,6 +762,9 @@ async function loadImageBinary(url: string, signal?: AbortSignal): Promise<Buffe
         throw new Error(`FFmpeg input must be a public URL, got ${url}`);
     }
 
+    const dataBuffer = decodeDataUrlBinary(url);
+    if (dataBuffer) return dataBuffer;
+
     const localAssetKey = localAssetKeyFromUrl(url);
     if (localAssetKey) return readFile(getLocalAssetPath(localAssetKey));
 
@@ -631,6 +782,9 @@ async function loadAudioBinary(url: string, signal?: AbortSignal): Promise<Buffe
     if (url.startsWith('s3://')) {
         throw new Error(`FFmpeg input must be a public URL, got ${url}`);
     }
+    const dataBuffer = decodeDataUrlBinary(url);
+    if (dataBuffer) return dataBuffer;
+
     const localAssetKey = localAssetKeyFromUrl(url);
     if (localAssetKey) return readFile(getLocalAssetPath(localAssetKey));
 
@@ -648,14 +802,67 @@ function localAssetKeyFromUrl(url: string): string | undefined {
     return decodeURIComponent(url.slice(base.length + 1));
 }
 
-export function runFfmpeg(args: string[], signal?: AbortSignal): Promise<void> {
+export function decodeDataUrlBinary(url: string): Buffer | undefined {
+    const match = /^data:([^,]*),(.*)$/s.exec(url);
+    if (!match) return undefined;
+
+    const metadata = match[1] ?? '';
+    const payload = match[2] ?? '';
+    if (/;base64(?:;|$)/i.test(metadata)) return Buffer.from(payload, 'base64');
+    return Buffer.from(decodeURIComponent(payload), 'utf8');
+}
+
+export function prepareFfmpegFontconfigEnv(
+    baseEnv: NodeJS.ProcessEnv,
+    workDir: string
+): NodeJS.ProcessEnv & { FONTCONFIG_PATH: string; FONTCONFIG_FILE: string; XDG_CACHE_HOME: string; HOME: string } {
+    const fontconfigDir = join(workDir, 'fontconfig');
+    const fontconfigCacheDir = join(workDir, 'fontconfig-cache');
+    const fontsConfPath = join(fontconfigDir, 'fonts.conf');
+    mkdirSync(fontconfigDir, { recursive: true });
+    mkdirSync(fontconfigCacheDir, { recursive: true });
+    writeFileSync(
+        fontsConfPath,
+        `<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+  <dir>/var/task/assets/fonts</dir>
+  <dir>/opt/fonts</dir>
+  <dir>/usr/share/fonts</dir>
+  <cachedir>${escapeFontconfigXml(fontconfigCacheDir)}</cachedir>
+</fontconfig>
+`,
+        'utf8'
+    );
+
+    return {
+        ...baseEnv,
+        HOME: '/tmp',
+        XDG_CACHE_HOME: fontconfigCacheDir,
+        FONTCONFIG_PATH: fontconfigDir,
+        FONTCONFIG_FILE: fontsConfPath,
+    };
+}
+
+export function runFfmpeg(args: string[], signal?: AbortSignal, env: NodeJS.ProcessEnv = process.env): Promise<void> {
     return new Promise((resolve, reject) => {
         if (signal?.aborted) {
             reject(abortError(signal));
             return;
         }
 
-        const child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+        const diagnosticLog = env.FFMPEG_DIAGNOSTIC_LOG === 'true';
+        if (diagnosticLog) {
+            console.log(
+                JSON.stringify({
+                    event: 'ffmpeg.process.start',
+                    ffmpegPath: FFMPEG_PATH,
+                    args,
+                })
+            );
+        }
+
+        const child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env });
         let stderr = '';
         let settled = false;
         let exitFallbackTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -693,12 +900,22 @@ export function runFfmpeg(args: string[], signal?: AbortSignal): Promise<void> {
         };
         const onAbort = () => {
             child.kill('SIGKILL');
-            rejectOnce(abortError(signal));
+            const error = abortError(signal);
+            error.message = `${error.message}. FFmpeg stderr: ${stderr.slice(0, 2000) || '(empty)'}`;
+            rejectOnce(error);
         };
         signal?.addEventListener('abort', onAbort, { once: true });
 
         child.stderr?.on('data', chunk => {
             if (stderr.length < 4000) stderr += chunk.toString().slice(0, 4000 - stderr.length);
+            if (diagnosticLog) {
+                console.log(
+                    JSON.stringify({
+                        event: 'ffmpeg.process.stderr',
+                        chunk: chunk.toString().slice(0, 1000),
+                    })
+                );
+            }
         });
         child.on('error', err => {
             rejectOnce(
@@ -714,6 +931,10 @@ export function runFfmpeg(args: string[], signal?: AbortSignal): Promise<void> {
             finish(code, killedBySignal);
         });
     });
+}
+
+function escapeFontconfigXml(value: string): string {
+    return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 function throwIfAborted(signal?: AbortSignal): void {

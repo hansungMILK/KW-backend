@@ -63,7 +63,7 @@ export const env = {
     openaiImageMaxAttempts: readIntEnv('OPENAI_IMAGE_MAX_ATTEMPTS', 1, 1),
     openaiImageSceneTimeoutMs: readIntEnv('OPENAI_IMAGE_SCENE_TIMEOUT_MS', 120000, 1),
     openaiImageSceneMaxAttempts: readIntEnv('OPENAI_IMAGE_SCENE_MAX_ATTEMPTS', 2, 1),
-    openaiImageSceneConcurrency: readIntEnv('OPENAI_IMAGE_SCENE_CONCURRENCY', 12, 1),
+    openaiImageSceneConcurrency: readIntEnv('OPENAI_IMAGE_SCENE_CONCURRENCY', 2, 1),
     openaiImageBatchTimeoutBufferMs: readIntEnv('OPENAI_IMAGE_BATCH_TIMEOUT_BUFFER_MS', 30000, 0),
     openaiTtsModel: readEnv('OPENAI_TTS_MODEL', 'gpt-4o-mini-tts'),
     openaiTtsVoice: readEnv('OPENAI_TTS_VOICE', 'nova'),

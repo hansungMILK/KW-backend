@@ -27,6 +27,9 @@ vi.mock('../../adapters/ai/tts-adapter', () => ({
             audioBuffer: Buffer.from('mock-longform-tts'),
             contentType: 'audio/mpeg',
             estimatedDurationSec: 2,
+            provider: 'elevenlabs',
+            model: 'eleven_flash_v2_5',
+            voiceId: 'pNInz6obpgDQGcFmaJgB',
         })),
     },
 }));
@@ -498,7 +501,7 @@ describe('longform blocks', () => {
         );
     });
 
-    it('adapts an approved longform script into ElevenLabs TTS input without dropping the artifact', async () => {
+    it('adapts an approved longform script into TTS input without dropping the artifact', async () => {
         const result = await longformTtsBlock.execute({
             mode: 'longform-gate-a',
             reviewStatus: 'approved',
@@ -582,7 +585,7 @@ describe('longform blocks', () => {
             ],
         });
 
-        expect(result.output.alignmentMethod).toBe('elevenlabs-tts-duration-aligned');
+        expect(result.output.alignmentMethod).toBe('tts-duration-aligned');
         expect(result.output.subtitleCues).toEqual([
             expect.objectContaining({
                 sceneNumber: 1,
@@ -604,7 +607,7 @@ describe('longform blocks', () => {
             longformSrtAlignBlock.execute({
                 transcriptText: '타이밍 없는 텍스트만 있으면 렌더 싱크를 보장할 수 없습니다.',
             })
-        ).rejects.toThrow('longform-srt-align requires subtitle cues from ElevenLabs TTS output');
+        ).rejects.toThrow('longform-srt-align requires subtitle cues from TTS output');
     });
 
     it('fails longform QA when ffprobe metadata is missing audio even if a 2K preview URL exists', async () => {

@@ -18,6 +18,9 @@ vi.mock('../../adapters/ai/tts-adapter', () => ({
             audioBuffer: Buffer.from('audio'),
             contentType: 'audio/mpeg',
             estimatedDurationSec: 8,
+            provider: 'elevenlabs',
+            model: 'eleven_flash_v2_5',
+            voiceId: 'pNInz6obpgDQGcFmaJgB',
         })),
     },
 }));
@@ -105,5 +108,28 @@ describe('mediaTtsBlock', () => {
         );
 
         expect(ttsAdapter.synthesize).toHaveBeenCalledWith(expect.objectContaining({ signal: controller.signal }));
+    });
+
+    it('preserves the TTS provider selected by the adapter', async () => {
+        vi.mocked(ttsAdapter.synthesize).mockResolvedValueOnce({
+            audioBuffer: Buffer.from('openai-audio'),
+            contentType: 'audio/mpeg',
+            estimatedDurationSec: 3,
+            provider: 'openai',
+            model: 'gpt-4o-mini-tts',
+            voiceId: 'nova',
+        });
+
+        const result = await mediaTtsBlock.execute({
+            normalizedScenes: [{ sceneNumber: 1, narration: '오픈AI 음성으로 읽습니다.' }],
+        });
+
+        expect(result.output).toMatchObject({
+            audio: {
+                provider: 'openai',
+                model: 'gpt-4o-mini-tts',
+                voiceId: 'nova',
+            },
+        });
     });
 });

@@ -24,6 +24,13 @@ export interface CreateFlowRunOptions {
 
 export type FlowRunSummary = RunListResponse['items'][number];
 
+export type RunNodeRecoverResponse = {
+    runId: string;
+    nodeId: string;
+    recoveryAccepted: boolean;
+    repairedSourceNodeId: string;
+};
+
 /**
  * Start a flow run
  * POST /flows/{flowId}/runs
@@ -68,4 +75,20 @@ export const getRunNodes = async (runId: string): Promise<RunNode[]> => {
     _log(`> getRunNodes(${runId})`);
     const response = await api.get<RunNodesListResponse>(`/runs/${runId}/nodes`);
     return response.data.items;
+};
+
+/**
+ * Recover a failed analysis node by applying quality-review feedback.
+ * POST /runs/{runId}/nodes/{nodeId}/recover
+ */
+export const recoverRunNode = async (
+    runId: string,
+    nodeId: string,
+    reason?: string
+): Promise<RunNodeRecoverResponse> => {
+    _log(`> recoverRunNode(${runId}, ${nodeId})`, { reason });
+    const response = await api.post<RunNodeRecoverResponse>(`/runs/${runId}/nodes/${nodeId}/recover`, {
+        ...(reason ? { reason } : {}),
+    });
+    return response.data;
 };

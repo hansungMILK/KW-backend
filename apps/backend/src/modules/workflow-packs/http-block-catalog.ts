@@ -309,7 +309,7 @@ export const BLOCK_CATALOG: BlockDef[] = [
             id: 'blk-longform-tts',
             type: 'longform-tts',
             label: '롱폼 음성 생성',
-            description: '승인된 롱폼 대본으로 ElevenLabs 내레이션을 생성합니다.',
+            description: '승인된 롱폼 대본으로 내레이션 TTS를 생성합니다.',
             inputs: [{ id: 'in', label: 'Approved Script', type: 'json' }],
             outputs: [{ id: 'out', label: 'Audio', type: 'json' }],
             configSchema: [],

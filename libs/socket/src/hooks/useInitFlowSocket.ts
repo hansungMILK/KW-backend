@@ -177,6 +177,7 @@ const parsePortId = (
 
 export interface NodeUpdateInfo {
     nodeId: string;
+    runId?: string;
     flowId?: string;
     timestamp?: number;
     /**
@@ -403,6 +404,7 @@ export const useInitFlowSocket = (options: UseInitFlowSocketOptions = {}) => {
 
                     onNodeReload({
                         nodeId: data.id,
+                        runId: undefined,
                         flowId: data.flowId,
                         timestamp: data.timestamp,
                         no: data.no,
@@ -430,6 +432,7 @@ export const useInitFlowSocket = (options: UseInitFlowSocketOptions = {}) => {
                 if (onNodeReload) {
                     onNodeReload({
                         nodeId: data.nodeId,
+                        runId: data.runId,
                         flowId: data.flowId,
                         timestamp: data.timestamp,
                         no: data.no,

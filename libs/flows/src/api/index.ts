@@ -8,3 +8,4 @@ export * from './messages';
 export * from './proposals';
 export * from './runs';
 export * from './assets';
+export * from './settings';

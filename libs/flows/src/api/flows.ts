@@ -14,7 +14,7 @@ import type {
     SaveFlowView,
     UpdateFlowBody,
 } from '../types';
-import type { Trace, TraceListResponse } from '@flows/contracts';
+import type { FlowListResponse, FlowSummary, Trace, TraceListResponse } from '@flows/contracts';
 
 const _log = console.log.bind(console, '[flows-api]');
 const flowWriteQueues = new Map<string, Promise<unknown>>();
@@ -144,6 +144,11 @@ const toSaveFlowView = (flow: SpecFlowDetail): SaveFlowView => ({
     createdAt: flow.createdAt,
     updatedAt: flow.updatedAt,
 });
+
+export const listFlows = async (limit = 20): Promise<FlowSummary[]> => {
+    const response = await api.get<FlowListResponse>('/flows', { params: { limit } });
+    return response.data.items;
+};
 
 const toCreatedFlowView = (flow: SpecFlowSummary): SaveFlowView => ({
     id: flow.flowId,

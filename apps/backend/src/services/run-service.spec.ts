@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getProviderApiKey } from './credential-resolver';
 import { runService } from './run-service';
+import { openaiAdapter } from '../adapters/ai/openai-adapter';
 import { queue } from '../adapters/aws/queue';
 import { flowRepo } from '../repositories/flow-repository';
 import { runRepo } from '../repositories/run-repository';
@@ -30,6 +31,12 @@ vi.mock('../adapters/aws/queue', () => ({
     },
 }));
 
+vi.mock('../adapters/ai/openai-adapter', () => ({
+    openaiAdapter: {
+        chatJson: vi.fn(),
+    },
+}));
+
 vi.mock('../adapters/ai/paid-openai-guard', () => ({
     PAID_OPENAI_DISABLED: 'PAID_OPENAI_DISABLED',
     isPaidOpenAIAllowed: vi.fn(() => true),
@@ -49,6 +56,7 @@ const updateRunNodeStatus = vi.mocked(runRepo.updateRunNodeStatus);
 const updateRunStatus = vi.mocked(runRepo.updateRunStatus);
 const sendQueueMessage = vi.mocked(queue.send);
 const getProviderApiKeyMock = vi.mocked(getProviderApiKey);
+const chatJson = vi.mocked(openaiAdapter.chatJson);
 
 describe('runService cost guards', () => {
     beforeEach(() => {
@@ -207,8 +215,9 @@ describe('runService cost guards', () => {
         const result = await runService.createRun('flow-longform-approved', 'MANUAL', { executionMode: 'full' });
 
         expect(result).toEqual(expect.objectContaining({ ok: true }));
-        expect(getProviderApiKeyMock).toHaveBeenCalledTimes(1);
+        expect(getProviderApiKeyMock).toHaveBeenCalledTimes(2);
         expect(getProviderApiKeyMock).toHaveBeenCalledWith('elevenlabs');
+        expect(getProviderApiKeyMock).not.toHaveBeenCalledWith('openai');
         expect(putRun).toHaveBeenCalled();
         expect(putRunNode).toHaveBeenCalledTimes(4);
         expect(sendQueueMessage).toHaveBeenCalled();
@@ -308,6 +317,37 @@ describe('runService cost guards', () => {
         expect(putRun).not.toHaveBeenCalled();
         expect(putRunNode).not.toHaveBeenCalled();
         expect(sendQueueMessage).not.toHaveBeenCalled();
+    });
+
+    it('allows TTS execution with an OpenAI key when ElevenLabs is not configured', async () => {
+        getFlow.mockResolvedValueOnce({
+            id: 'flow-tts-openai-fallback',
+            name: 'OpenAI TTS fallback flow',
+            state: 'READY',
+            nodes: [
+                {
+                    id: 'node-tts',
+                    blockType: 'media-tts',
+                    label: 'Narration',
+                    config: {},
+                },
+            ],
+            edges: [],
+            createdAt: '2026-05-19T00:00:00.000Z',
+            updatedAt: '2026-05-19T00:00:00.000Z',
+        });
+        getProviderApiKeyMock.mockImplementation(async provider => (provider === 'openai' ? 'openai-key' : null));
+        putRun.mockResolvedValue(undefined);
+        putRunNode.mockResolvedValue(undefined);
+        sendQueueMessage.mockResolvedValue(undefined);
+
+        const result = await runService.createRun('flow-tts-openai-fallback');
+
+        expect(result).toEqual(expect.objectContaining({ ok: true }));
+        expect(getProviderApiKeyMock).toHaveBeenCalledWith('elevenlabs');
+        expect(getProviderApiKeyMock).toHaveBeenCalledWith('openai');
+        expect(putRun).toHaveBeenCalled();
+        expect(sendQueueMessage).toHaveBeenCalled();
     });
 
     it('does not treat raw node apiKeyOverride config as a configured provider credential', async () => {
@@ -837,6 +877,259 @@ describe('runService cost guards', () => {
         expect(updateRunNodeStatus).toHaveBeenCalledWith('run-retry-approved', 'node-render', 'PENDING');
         expect(updateRunStatus).toHaveBeenCalledWith(
             'run-retry-approved',
+            'RUNNING',
+            expect.objectContaining({ completedAt: null, finalOutputSummary: null })
+        );
+        expect(sendQueueMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'EXECUTE_RUN' }));
+    });
+
+    it('rewrites the upstream script and resumes from a failed analysis node', async () => {
+        const originalOutput = {
+            title: '바나나 장점',
+            hook: '바나나는 왜 좋을까?',
+            script: { hook: '바나나는 왜 좋을까?', angle: '장점 요약', cta: '저장해두세요' },
+            style: { format: 'vertical-shorts', aspectRatio: '9:16', sceneCount: 2 },
+            scenes: [
+                {
+                    sceneNumber: 1,
+                    imageSlot: '[Image #1]',
+                    storyBeat: 'hook',
+                    topTitle: '바나나 장점',
+                    caption: '기분이 좋아져요',
+                    narration: '바나나는 우울과 불안을 완화합니다.',
+                    imagePrompt: 'banana on a bright kitchen table',
+                    visualText: '기분 관리',
+                    visual: { topTitle: '바나나 장점', mainCaption: '기분 관리' },
+                    claimType: 'fact',
+                    sourceRefs: [],
+                    durationSec: 5,
+                },
+                {
+                    sceneNumber: 2,
+                    imageSlot: '[Image #2]',
+                    storyBeat: 'takeaway',
+                    topTitle: '바나나 장점',
+                    caption: '한 줄 결론',
+                    narration: '바나나는 건강에 확실한 장점이 있습니다.',
+                    imagePrompt: 'banana beside a simple checklist',
+                    visualText: '장점 정리',
+                    visual: { topTitle: '바나나 장점', mainCaption: '장점 정리' },
+                    claimType: 'fact',
+                    sourceRefs: [],
+                    durationSec: 5,
+                },
+            ],
+            cta: '저장해두세요',
+            totalDurationSec: 10,
+            sources: [],
+        };
+        const repairedOutput = {
+            ...originalOutput,
+            scenes: originalOutput.scenes.map(scene => ({
+                ...scene,
+                narration:
+                    scene.sceneNumber === 1
+                        ? '연구에 따르면 바나나는 기분 관리에 도움이 될 수 있습니다.'
+                        : '바나나의 장점은 에너지와 간편함에서 볼 수 있습니다.',
+                claimType: 'opinion',
+            })),
+        };
+
+        getRunNode
+            .mockResolvedValueOnce({
+                runId: 'run-analysis-recover',
+                nodeId: 'node-analysis',
+                blockType: 'analysis',
+                label: '사실성 및 형식 검수',
+                status: 'FAILED',
+                progress: 100,
+                retryCount: 0,
+                parentNodeIds: ['node-content'],
+                errorCode: 'ANALYSIS_REJECTED',
+                errorMessage:
+                    'Analysis rejected content: 요청한 핵심 주제(장점)가 대본 본문/자막에 충분히 반영되지 않았습니다.',
+                outputPayload: {
+                    approved: false,
+                    issues: [
+                        {
+                            severity: 'high',
+                            message: '요청한 핵심 주제(장점)가 대본 본문/자막에 충분히 반영되지 않았습니다.',
+                        },
+                        {
+                            severity: 'high',
+                            message: "건강 효능을 단정하기보다 '도움이 될 수 있습니다'처럼 완화하세요.",
+                        },
+                    ],
+                },
+                updatedAt: '2026-05-13T00:00:00.000Z',
+            })
+            .mockResolvedValueOnce({
+                runId: 'run-analysis-recover',
+                nodeId: 'node-analysis',
+                blockType: 'analysis',
+                label: '사실성 및 형식 검수',
+                status: 'FAILED',
+                progress: 100,
+                retryCount: 0,
+                parentNodeIds: ['node-content'],
+                errorCode: 'ANALYSIS_REJECTED',
+                updatedAt: '2026-05-13T00:00:00.000Z',
+            });
+        getRun
+            .mockResolvedValueOnce({
+                runId: 'run-analysis-recover',
+                flowId: 'flow-analysis-recover',
+                runType: 'FULL_FLOW',
+                status: 'FAILED',
+                triggerSource: 'MANUAL',
+                flowSnapshot: {
+                    nodes: [
+                        { id: 'node-content', blockType: 'content', config: {} },
+                        { id: 'node-analysis', blockType: 'analysis', config: {} },
+                        { id: 'node-image', blockType: 'media-image', config: {} },
+                    ],
+                    edges: [
+                        { source: 'node-content', target: 'node-analysis' },
+                        { source: 'node-analysis', target: 'node-image' },
+                    ],
+                },
+                createdAt: '2026-05-13T00:00:00.000Z',
+            })
+            .mockResolvedValueOnce({
+                runId: 'run-analysis-recover',
+                flowId: 'flow-analysis-recover',
+                runType: 'FULL_FLOW',
+                status: 'FAILED',
+                triggerSource: 'MANUAL',
+                flowSnapshot: {
+                    nodes: [
+                        { id: 'node-content', blockType: 'content', config: {} },
+                        { id: 'node-analysis', blockType: 'analysis', config: {} },
+                        { id: 'node-image', blockType: 'media-image', config: {} },
+                    ],
+                    edges: [
+                        { source: 'node-content', target: 'node-analysis' },
+                        { source: 'node-analysis', target: 'node-image' },
+                    ],
+                },
+                createdAt: '2026-05-13T00:00:00.000Z',
+            });
+        listRunNodes
+            .mockResolvedValueOnce([
+                {
+                    runId: 'run-analysis-recover',
+                    nodeId: 'node-content',
+                    blockType: 'content',
+                    label: '스크립트 생성',
+                    status: 'COMPLETED',
+                    progress: 100,
+                    retryCount: 0,
+                    parentNodeIds: [],
+                    outputPayload: originalOutput,
+                    updatedAt: '2026-05-13T00:00:00.000Z',
+                },
+                {
+                    runId: 'run-analysis-recover',
+                    nodeId: 'node-analysis',
+                    blockType: 'analysis',
+                    label: '사실성 및 형식 검수',
+                    status: 'FAILED',
+                    progress: 100,
+                    retryCount: 0,
+                    parentNodeIds: ['node-content'],
+                    errorCode: 'ANALYSIS_REJECTED',
+                    updatedAt: '2026-05-13T00:00:00.000Z',
+                },
+                {
+                    runId: 'run-analysis-recover',
+                    nodeId: 'node-image',
+                    blockType: 'media-image',
+                    label: '이미지 생성',
+                    status: 'SKIPPED',
+                    progress: 0,
+                    retryCount: 0,
+                    parentNodeIds: ['node-analysis'],
+                    updatedAt: '2026-05-13T00:00:00.000Z',
+                },
+            ])
+            .mockResolvedValueOnce([
+                {
+                    runId: 'run-analysis-recover',
+                    nodeId: 'node-content',
+                    blockType: 'content',
+                    label: '스크립트 생성',
+                    status: 'COMPLETED',
+                    progress: 100,
+                    retryCount: 0,
+                    parentNodeIds: [],
+                    outputPayload: repairedOutput,
+                    updatedAt: '2026-05-13T00:00:00.000Z',
+                },
+                {
+                    runId: 'run-analysis-recover',
+                    nodeId: 'node-analysis',
+                    blockType: 'analysis',
+                    label: '사실성 및 형식 검수',
+                    status: 'FAILED',
+                    progress: 100,
+                    retryCount: 0,
+                    parentNodeIds: ['node-content'],
+                    errorCode: 'ANALYSIS_REJECTED',
+                    updatedAt: '2026-05-13T00:00:00.000Z',
+                },
+                {
+                    runId: 'run-analysis-recover',
+                    nodeId: 'node-image',
+                    blockType: 'media-image',
+                    label: '이미지 생성',
+                    status: 'SKIPPED',
+                    progress: 0,
+                    retryCount: 0,
+                    parentNodeIds: ['node-analysis'],
+                    updatedAt: '2026-05-13T00:00:00.000Z',
+                },
+            ]);
+        chatJson.mockResolvedValueOnce({
+            content: JSON.stringify(repairedOutput),
+            model: 'gpt-test',
+            inputTokens: 100,
+            outputTokens: 200,
+            latencyMs: 25,
+        });
+        putRunNode.mockResolvedValue(undefined);
+        updateRunNodeStatus.mockResolvedValue({ ok: true });
+        updateRunStatus.mockResolvedValue({ ok: true });
+        sendQueueMessage.mockResolvedValue(undefined);
+
+        const result = await runService.recoverAnalysisNode('run-analysis-recover', 'node-analysis', 'user requested');
+
+        expect(result).toEqual({ ok: true, repairedSourceNodeId: 'node-content' });
+        expect(chatJson).toHaveBeenCalledWith(
+            expect.objectContaining({
+                systemPrompt: expect.stringContaining('quality-review feedback'),
+                userMessage: expect.stringContaining('요청한 핵심 주제'),
+            })
+        );
+        expect(putRunNode).toHaveBeenCalledWith(
+            expect.objectContaining({
+                nodeId: 'node-content',
+                outputPayload: expect.objectContaining({
+                    scenes: expect.arrayContaining([
+                        expect.objectContaining({
+                            narration: expect.stringContaining('도움이 될 수 있습니다'),
+                        }),
+                    ]),
+                    recovery: expect.objectContaining({
+                        recoveredFromNodeId: 'node-analysis',
+                        reason: 'user requested',
+                    }),
+                }),
+            })
+        );
+        expect(updateRunNodeStatus).toHaveBeenCalledWith('run-analysis-recover', 'node-analysis', 'PENDING');
+        expect(updateRunNodeStatus).toHaveBeenCalledWith('run-analysis-recover', 'node-image', 'PENDING');
+        expect(updateRunStatus).toHaveBeenCalledWith(
+            'run-analysis-recover',
             'RUNNING',
             expect.objectContaining({ completedAt: null, finalOutputSummary: null })
         );

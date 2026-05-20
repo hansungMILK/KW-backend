@@ -7,9 +7,10 @@
         "start:win": "if exist .esbuild rmdir /s /q .esbuild & node scripts/with-local-env.js node ..\\..\\node_modules\\serverless\\bin\\serverless.js offline --httpPort 8800 --websocketPort 8801 --noPrependStageInUrl",
         "prepare:ffmpeg-layer": "bash scripts/prepare-ffmpeg-layer.sh",
         "smoke:local": "bash scripts/with-local-env.sh node scripts/smoke-local-flow.mjs",
-        "package:dev": "yarn prepare:ffmpeg-layer && bash scripts/with-local-env.sh npx serverless package --stage dev",
-        "deploy:dev": "yarn prepare:ffmpeg-layer && bash scripts/with-local-env.sh npx serverless deploy --stage dev",
-        "deploy:prod": "yarn prepare:ffmpeg-layer && bash scripts/with-local-env.sh npx serverless deploy --stage prod"
+        "smoke:ffmpeg-overlay": "bash scripts/with-local-env.sh node scripts/smoke-ffmpeg-overlay.mjs",
+        "package:dev": "bash scripts/with-local-env.sh bash scripts/prepare-ffmpeg-layer.sh dev && bash scripts/with-local-env.sh npx serverless package --stage dev",
+        "deploy:dev": "bash scripts/with-local-env.sh bash scripts/prepare-ffmpeg-layer.sh dev && bash scripts/with-local-env.sh npx serverless deploy --stage dev && SMOKE_STAGE=dev bash scripts/with-local-env.sh node scripts/smoke-ffmpeg-overlay.mjs",
+        "deploy:prod": "bash scripts/with-local-env.sh bash scripts/prepare-ffmpeg-layer.sh prod && bash scripts/with-local-env.sh npx serverless deploy --stage prod && SMOKE_STAGE=prod bash scripts/with-local-env.sh node scripts/smoke-ffmpeg-overlay.mjs"
     },
     "dependencies": {
         "@anthropic-ai/sdk": "^0.39.0",

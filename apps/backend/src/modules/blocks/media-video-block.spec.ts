@@ -152,7 +152,7 @@ describe('mediaVideoBlock', () => {
         expect(putObject).not.toHaveBeenCalled();
     });
 
-    it('blocks longform Gate B when narration audio is not from ElevenLabs TTS', async () => {
+    it('blocks longform Gate B when narration audio is not from a supported TTS provider', async () => {
         await expect(
             mediaVideoBlock.execute(
                 longformVideoInput({
@@ -173,7 +173,7 @@ describe('mediaVideoBlock', () => {
                     nodeId: 'node_1',
                 }
             )
-        ).rejects.toThrow(/ElevenLabs TTS/i);
+        ).rejects.toThrow(/supported TTS/i);
 
         expect(hyperframesAdapter.renderLongform).not.toHaveBeenCalled();
         expect(putObject).not.toHaveBeenCalled();

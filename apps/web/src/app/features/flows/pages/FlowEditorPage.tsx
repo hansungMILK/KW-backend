@@ -10,18 +10,19 @@ import {
     getRun,
     getRunNodes,
     listFlowRuns,
+    recoverRunNode,
     useBlocks,
     useCanvasStore,
     useFlows,
 } from '@flows/flows';
-import { ApiKeyDialog } from '@flows/shared';
 import { useInitFlowSocket } from '@flows/socket';
-import { useWebCoreStore } from '@flows/web-core';
 
 import { type WorkflowRunStatus, getWorkflowRunMode, isWorkflowRunButtonDisabled } from './run-mode';
 import { FlowAgentPanel } from '../components/FlowAgentPanel';
+import { FlowOpenDialog } from '../components/FlowOpenDialog';
 import { Header } from '../components/Header';
 import { HelpDialog } from '../components/HelpDialog';
+import { ProviderCredentialsDialog } from '../components/ProviderCredentialsDialog';
 import { Sidebar } from '../components/Sidebar';
 import { WorkflowCanvas } from '../components/WorkflowCanvas';
 
@@ -49,6 +50,9 @@ const isInputElement = (target: EventTarget | null): boolean => {
 type RunNodeSnapshot = Awaited<ReturnType<typeof getRunNodes>>[number];
 type RunActivity = {
     nodeLabel?: string;
+    runId?: string;
+    nodeId?: string;
+    errorCode?: string | null;
     progress?: number;
     state?: 'queued' | 'running' | 'reviewing' | 'completed' | 'failed';
     message?: string;
@@ -236,6 +240,9 @@ export const FlowEditorPage = () => {
                 setRunStatus('failed');
                 setRunActivity({
                     nodeLabel: getCanvasNodeLabel(failedNode.nodeId),
+                    runId: failedNode.runId,
+                    nodeId: failedNode.nodeId,
+                    errorCode: failedNode.errorCode,
                     progress: getRunNodeProgress(failedNode) || 100,
                     state: 'failed',
                     message: getRunNodeActivityMessage(failedNode),
@@ -412,6 +419,9 @@ export const FlowEditorPage = () => {
                 setRunStatus('failed');
                 setRunActivity({
                     nodeLabel: getCanvasNodeLabel(nodeId),
+                    runId: info.runId,
+                    nodeId,
+                    errorCode,
                     progress: progress ?? 100,
                     state: 'failed',
                     message,
@@ -686,6 +696,9 @@ export const FlowEditorPage = () => {
             setRunStatus('failed');
             setRunActivity({
                 nodeLabel: message.failedNodeId ? getCanvasNodeLabel(message.failedNodeId) : '전체 워크플로우',
+                runId: message.runId,
+                nodeId: message.failedNodeId,
+                errorCode: message.errorCode,
                 progress: 100,
                 state: 'failed',
                 error: message.errorMessage ?? message.error ?? message.errorCode ?? '워크플로우 실행 실패',
@@ -746,6 +759,9 @@ export const FlowEditorPage = () => {
                     activeRunScriptReviewFirstRef.current = false;
                     setRunActivity({
                         nodeLabel: summary?.failedNodeId ? getCanvasNodeLabel(summary.failedNodeId) : '전체 워크플로우',
+                        runId: run.runId,
+                        nodeId: summary?.failedNodeId,
+                        errorCode: summary?.errorCode,
                         progress: 100,
                         state: 'failed',
                         message: '워크플로우 실행이 실패했습니다.',
@@ -807,7 +823,8 @@ export const FlowEditorPage = () => {
     const [isBootError, setIsBootError] = useState(false);
     const [loadingText, setLoadingText] = useState('');
     const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-    const [isApiKeyDialogOpen, setIsApiKeyDialogOpen] = useState(false);
+    const [isProviderCredentialsOpen, setIsProviderCredentialsOpen] = useState(false);
+    const [isFlowOpenDialogOpen, setIsFlowOpenDialogOpen] = useState(false);
     const [isHelpDialogOpen, setIsHelpDialogOpen] = useState(false);
     const [isWorkflowRunning, setIsWorkflowRunning] = useState(false);
     const [isApplyingProposal, setIsApplyingProposal] = useState(false);
@@ -816,7 +833,6 @@ export const FlowEditorPage = () => {
     const agentBtnDragRef = useRef<{ mouseX: number; mouseY: number; btnX: number; btnY: number } | null>(null);
     const agentBtnIsDraggingRef = useRef(false);
 
-    const { apiKey, setApiKey } = useWebCoreStore();
     const autoSaveTimerRef = useRef<number | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const lastSavedStateRef = useRef<string | null>(null);
@@ -825,23 +841,14 @@ export const FlowEditorPage = () => {
         sidebarRef.current?.open();
     }, []);
 
-    const handleApiKeySettings = useCallback(() => {
-        setIsApiKeyDialogOpen(true);
+    const handleProviderCredentials = useCallback(() => {
+        setIsProviderCredentialsOpen(true);
     }, []);
 
     const handleOpenHelp = useCallback((tab: HelpTab = 'gettingStarted') => {
         setHelpDialogTab(tab);
         setIsHelpDialogOpen(true);
     }, []);
-
-    const handleApiKeySubmit = useCallback(
-        async (key: string): Promise<boolean> => {
-            setApiKey(key);
-            setIsApiKeyDialogOpen(false);
-            return true;
-        },
-        [setApiKey]
-    );
 
     const updateUrl = useCallback((flowId: string | null, nodeId?: string | null) => {
         try {
@@ -1017,6 +1024,33 @@ export const FlowEditorPage = () => {
         }
     };
 
+    const handleOpenSavedFlow = async (flowId: string) => {
+        const canvas = canvasRef.current;
+        if (!canvas) throw new Error('캔버스가 아직 준비되지 않았습니다.');
+
+        const currentData = canvas.getWorkflow();
+        const currentState = serializeWorkflowState(currentData);
+        if (currentState !== lastSavedStateRef.current) {
+            const shouldSave = window.confirm('현재 플로우에 저장되지 않은 변경사항이 있습니다. 저장 후 이동할까요?');
+            if (!shouldSave) return;
+
+            lastLocalUpdateTimestampRef.current = Date.now();
+            const saved = await saveCurrentFlow(currentData);
+            if (!saved.success) throw new Error('현재 플로우 저장에 실패했습니다.');
+            lastSavedStateRef.current = currentState;
+        }
+
+        const flowData = await loadFlowById(flowId);
+        if (!flowData) throw new Error('선택한 플로우를 불러오지 못했습니다.');
+
+        await canvas.loadWorkflow(flowData);
+        lastSavedStateRef.current = serializeWorkflowState(flowData);
+        resetRunUi();
+        updateUrl(flowId, null);
+        void hydrateLatestRunForFlow(flowId);
+        showNotification('저장한 플로우를 열었습니다.', 'success');
+    };
+
     const handleNameChange = async (newName: string) => {
         // Update flow name on server via POST /flows/:id
         await updateFlowName(newName);
@@ -1114,6 +1148,26 @@ export const FlowEditorPage = () => {
             showNotification(error instanceof Error ? error.message : '워크플로우 실행 실패', 'error');
         } finally {
             setIsWorkflowRunning(false);
+        }
+    };
+
+    const handleRecoverAnalysisFailure = async (runId: string, nodeId: string) => {
+        try {
+            await recoverRunNode(runId, nodeId, 'quality review feedback');
+            setActiveRunId(runId);
+            setRunStatus('running');
+            setRunActivity({
+                nodeLabel: getCanvasNodeLabel(nodeId),
+                runId,
+                nodeId,
+                progress: 0,
+                state: 'running',
+                message: '품질검수 피드백을 반영해 새 대본을 생성하고 있습니다.',
+            });
+            showNotification('품질검수 피드백을 반영해 대본을 다시 생성합니다.', 'success');
+        } catch (error) {
+            showNotification(error instanceof Error ? error.message : '대본 재생성 요청 실패', 'error');
+            throw error;
         }
     };
 
@@ -1373,6 +1427,7 @@ export const FlowEditorPage = () => {
                 }}
                 fileActions={{
                     onNew: handleNew,
+                    onOpenSaved: () => setIsFlowOpenDialogOpen(true),
                     onSave: handleSave,
                     onExport: handleExport,
                     onImport: handleImport,
@@ -1408,7 +1463,7 @@ export const FlowEditorPage = () => {
                         : undefined
                 }
                 onShare={handleShare}
-                onApiKeySettings={handleApiKeySettings}
+                onApiKeySettings={handleProviderCredentials}
                 onHelp={() => handleOpenHelp('gettingStarted')}
                 isAgentPanelOpen={isAgentOpen}
             />
@@ -1416,13 +1471,13 @@ export const FlowEditorPage = () => {
             {/* Floating Sidebar */}
             <Sidebar ref={sidebarRef} onAddNode={handleAddNode} isLoading={isLoading} />
 
-            {/* API Key Dialog */}
-            <ApiKeyDialog
-                open={isApiKeyDialogOpen}
-                onSubmit={handleApiKeySubmit}
-                onOpenChange={setIsApiKeyDialogOpen}
-                codesUrl={import.meta.env.VITE_CODES_URL}
-                initialValue={apiKey ?? undefined}
+            <ProviderCredentialsDialog open={isProviderCredentialsOpen} onOpenChange={setIsProviderCredentialsOpen} />
+
+            <FlowOpenDialog
+                open={isFlowOpenDialogOpen}
+                currentFlowId={currentFlowId}
+                onOpenChange={setIsFlowOpenDialogOpen}
+                onSelect={handleOpenSavedFlow}
             />
 
             {/* Help Dialog */}
@@ -1437,6 +1492,7 @@ export const FlowEditorPage = () => {
                 externalProposal={latestProposal}
                 runStatus={runStatus}
                 runActivity={runActivity}
+                onRecoverAnalysisFailure={handleRecoverAnalysisFailure}
             />
 
             {/* Flow Agent Button */}

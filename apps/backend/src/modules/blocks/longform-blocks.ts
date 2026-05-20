@@ -71,7 +71,7 @@ Rules:
 }`;
 
 const LONGFORM_MOTION_SYSTEM_PROMPT = `You are an AI longform motion graphics director.
-Create a compact Hyperframes motion direction blueprint from scene objects and ElevenLabs subtitle timing.
+Create a compact Hyperframes motion direction blueprint from scene objects and TTS subtitle timing.
 
 Rules:
 - Do not emit one cue per subtitle. Keep the output compact.
@@ -370,7 +370,7 @@ export const longformTtsBlock: BlockExecutor = {
     blockType: 'longform-tts',
     async execute(input, config, context) {
         const adaptedInput = buildLongformTtsInput(input);
-        const result = await mediaTtsBlock.execute(adaptedInput, { ...config, provider: 'elevenlabs' }, context);
+        const result = await mediaTtsBlock.execute(adaptedInput, config, context);
         const output = toRecord(result.output);
         const audio = toRecord(output.audio);
 
@@ -381,7 +381,7 @@ export const longformTtsBlock: BlockExecutor = {
                 ...output,
                 audio: {
                     ...audio,
-                    provider: firstString(audio.provider) ?? 'elevenlabs',
+                    provider: firstString(audio.provider) ?? 'unknown',
                     voiceId: firstString(audio.voiceId, config?.voiceId) ?? env.elevenLabsTtsVoiceId,
                 },
                 normalizedScenes: Array.isArray(output.normalizedScenes)
@@ -400,14 +400,14 @@ export const longformSrtAlignBlock: BlockExecutor = {
         const subtitleCues = normalizeSubtitleCues(record.subtitleCues);
 
         if (subtitleCues.length === 0) {
-            throw new Error('longform-srt-align requires subtitle cues from ElevenLabs TTS output');
+            throw new Error('longform-srt-align requires subtitle cues from TTS output');
         }
 
         return {
             output: {
                 ...record,
                 subtitleCues,
-                alignmentMethod: firstString(record.alignmentMethod) ?? 'elevenlabs-tts-duration-aligned',
+                alignmentMethod: firstString(record.alignmentMethod) ?? 'tts-duration-aligned',
                 driftWarnings: [],
             },
             durationMs: Date.now() - start,

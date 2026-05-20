@@ -49,7 +49,7 @@ export function buildLongformGateAWorkflow(
                 { blockType: 'longform-storyboard', reason: '대본을 장면 의도와 화면 리듬으로 나눈다' },
                 { blockType: 'longform-scene-json', reason: 'HyperFrames 2K 장면 계약으로 변환한다' },
                 { blockType: 'longform-review', reason: '사용자 검수 전에는 유료 제작을 멈춘다' },
-                { blockType: 'longform-tts', reason: '승인된 대본으로 ElevenLabs 내레이션을 만든다' },
+                { blockType: 'longform-tts', reason: '승인된 대본으로 내레이션 TTS를 만든다' },
                 { blockType: 'longform-srt-align', reason: 'TTS timing을 기준으로 자막 cue를 정렬한다' },
                 { blockType: 'longform-motion-compose', reason: '장면 계약과 자막으로 모션 composition을 만든다' },
                 { blockType: 'longform-render', reason: 'HyperFrames 경로로 2K MP4를 렌더한다' },
@@ -141,7 +141,7 @@ export function buildLongformGateAWorkflow(
                 label: '롱폼 음성 생성',
                 config: {
                     mode: 'longform-gate-b',
-                    provider: 'elevenlabs',
+                    provider: 'auto',
                     contentProfileId: contentProfile.contentProfileId,
                     reviewMode: 'script-first',
                     mediaExecutionAllowed: false,
@@ -153,7 +153,7 @@ export function buildLongformGateAWorkflow(
                 label: '롱폼 자막 정렬',
                 config: {
                     mode: 'longform-gate-b',
-                    alignmentMethod: 'elevenlabs-tts-duration-aligned',
+                    alignmentMethod: 'tts-duration-aligned',
                     contentProfileId: contentProfile.contentProfileId,
                     mediaExecutionAllowed: false,
                     approvalRequired: true,

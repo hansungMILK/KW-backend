@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { Send, X } from 'lucide-react';
+import { RefreshCw, Send, X } from 'lucide-react';
 
 import { approveProposal, getFlowMessages, sendFlowMessage } from '@flows/flows';
 import { MarkdownViewer } from '@flows/ui-kit';
@@ -110,11 +110,15 @@ interface FlowAgentPanelProps {
     runStatus?: 'running' | 'reviewing' | 'completed' | 'failed' | null;
     runActivity?: {
         nodeLabel?: string;
+        runId?: string;
+        nodeId?: string;
+        errorCode?: string | null;
         progress?: number;
         state?: 'queued' | 'running' | 'reviewing' | 'completed' | 'failed';
         message?: string;
         error?: string | null;
     } | null;
+    onRecoverAnalysisFailure?: (runId: string, nodeId: string) => void | Promise<void>;
 }
 
 const formatEstimatedCost = (cost: ProposalCreatedMessage['estimatedCost']): string | undefined => {
@@ -231,6 +235,7 @@ export const FlowAgentPanel = ({
     externalProposal,
     runStatus,
     runActivity,
+    onRecoverAnalysisFailure,
 }: FlowAgentPanelProps) => {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
@@ -246,6 +251,7 @@ export const FlowAgentPanel = ({
     const [proposalContentProfiles, setProposalContentProfiles] = useState<Record<string, ContentProfileId>>({});
     const [approvingProposalIds, setApprovingProposalIds] = useState<Record<string, boolean>>({});
     const [approvedProposalIds, setApprovedProposalIds] = useState<Record<string, boolean>>({});
+    const [isRecoveringAnalysis, setIsRecoveringAnalysis] = useState(false);
     const bottomRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const isComposingRef = useRef(false);
@@ -295,6 +301,13 @@ export const FlowAgentPanel = ({
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
+
+    const canRecoverAnalysisFailure =
+        runStatus === 'failed' &&
+        runActivity?.runId &&
+        runActivity?.nodeId &&
+        (runActivity.errorCode === 'ANALYSIS_REJECTED' ||
+            Boolean(runActivity.error?.startsWith('Analysis rejected content:')));
 
     // Handle externally pushed proposal.created WS event
     useEffect(() => {
@@ -357,6 +370,19 @@ export const FlowAgentPanel = ({
             ]);
         } finally {
             setIsThinking(false);
+        }
+    };
+
+    const handleRecoverAnalysisFailure = async () => {
+        if (!canRecoverAnalysisFailure || !runActivity?.runId || !runActivity.nodeId || !onRecoverAnalysisFailure) {
+            return;
+        }
+
+        setIsRecoveringAnalysis(true);
+        try {
+            await onRecoverAnalysisFailure(runActivity.runId, runActivity.nodeId);
+        } finally {
+            setIsRecoveringAnalysis(false);
         }
     };
 
@@ -485,6 +511,27 @@ export const FlowAgentPanel = ({
                         )}
                         {runStatus === 'failed' && runActivity?.error && (
                             <div className="mt-1 text-destructive/90">{runActivity.error}</div>
+                        )}
+                        {canRecoverAnalysisFailure && (
+                            <div className="mt-3 rounded-md border border-border/80 bg-background/40 p-2 text-foreground">
+                                <div className="text-[12px] font-semibold">
+                                    품질검수 피드백을 반영한 새 대본을 생성할까요?
+                                </div>
+                                <div className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                                    검수 사유를 반영해 대본을 다시 작성하고, 사실성 및 형식 검수부터 이어서 실행합니다.
+                                </div>
+                                <button
+                                    type="button"
+                                    className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-[12px] font-semibold text-primary-foreground disabled:opacity-60"
+                                    disabled={isRecoveringAnalysis || !onRecoverAnalysisFailure}
+                                    onClick={() => void handleRecoverAnalysisFailure()}
+                                >
+                                    <RefreshCw
+                                        className={`h-3.5 w-3.5 ${isRecoveringAnalysis ? 'animate-spin' : ''}`}
+                                    />
+                                    {isRecoveringAnalysis ? '새 대본 생성 중...' : '피드백 반영해 다시 생성'}
+                                </button>
+                            </div>
                         )}
                     </div>
                 </div>

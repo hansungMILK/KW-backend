@@ -804,8 +804,8 @@ function assertLongformProductionInputs(
 } {
     const provider = typeof audio?.provider === 'string' ? audio.provider.trim().toLowerCase() : '';
     const voiceId = typeof audio?.voiceId === 'string' ? audio.voiceId.trim() : '';
-    if (provider !== 'elevenlabs' || !voiceId) {
-        throw new Error('longform media execution requires ElevenLabs TTS audio before MP4 render');
+    if (!['elevenlabs', 'openai'].includes(provider) || !voiceId) {
+        throw new Error('longform media execution requires supported TTS audio before MP4 render');
     }
 
     const timedSubtitleCues = subtitleCues.filter(cue => {
@@ -836,7 +836,7 @@ function assertLongformProductionInputs(
     }
 
     return {
-        ttsProvider: 'elevenlabs',
+        ttsProvider: provider,
         voiceId,
         subtitleCueCount: timedSubtitleCues.length,
         motionCueCount: usableMotionCues.length,
