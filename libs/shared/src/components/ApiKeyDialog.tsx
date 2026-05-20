@@ -13,9 +13,26 @@ interface ApiKeyDialogProps {
     error?: string | null;
     codesUrl?: string;
     initialValue?: string;
+    title?: string;
+    description?: string;
+    placeholder?: string;
+    submitLabel?: string;
+    loadingLabel?: string;
 }
 
-export const ApiKeyDialog = ({ open, onSubmit, onOpenChange, error, codesUrl, initialValue }: ApiKeyDialogProps) => {
+export const ApiKeyDialog = ({
+    open,
+    onSubmit,
+    onOpenChange,
+    error,
+    codesUrl,
+    initialValue,
+    title = 'API Key',
+    description = 'Enter your API key to continue.',
+    placeholder = 'API key',
+    submitLabel = 'Continue',
+    loadingLabel = 'Validating...',
+}: ApiKeyDialogProps) => {
     const [apiKey, setApiKey] = useState(initialValue ?? '');
     const [isLoading, setIsLoading] = useState(false);
     const [showApiKey, setShowApiKey] = useState(false);
@@ -59,14 +76,14 @@ export const ApiKeyDialog = ({ open, onSubmit, onOpenChange, error, codesUrl, in
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="sm:max-w-sm p-5" onPointerDownOutside={e => !onOpenChange && e.preventDefault()}>
                 <DialogHeader className="space-y-1">
-                    <DialogTitle className="text-base">API Key</DialogTitle>
-                    <DialogDescription className="text-xs">Enter your API key to continue.</DialogDescription>
+                    <DialogTitle className="text-base">{title}</DialogTitle>
+                    <DialogDescription className="text-xs">{description}</DialogDescription>
                 </DialogHeader>
                 <form onSubmit={handleSubmit} className="flex flex-col gap-3 mt-2">
                     <div className="relative">
                         <Input
                             type={showApiKey ? 'text' : 'password'}
-                            placeholder="API key"
+                            placeholder={placeholder}
                             value={apiKey}
                             onChange={e => setApiKey(e.target.value)}
                             autoFocus
@@ -83,7 +100,7 @@ export const ApiKeyDialog = ({ open, onSubmit, onOpenChange, error, codesUrl, in
                     </div>
                     {displayError && <p className="text-xs text-destructive">{displayError}</p>}
                     <Button type="submit" size="sm" className="text-xs" disabled={!apiKey.trim() || isDisabled}>
-                        {isLoading ? 'Validating...' : 'Continue'}
+                        {isLoading ? loadingLabel : submitLabel}
                     </Button>
                     {codesUrl && (
                         <Button

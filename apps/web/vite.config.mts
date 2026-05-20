@@ -10,6 +10,11 @@ import svgr from 'vite-plugin-svgr';
 import webPkg from './package.json';
 
 const removeVitePrefix = (envVar: string) => envVar.replace('VITE_', '');
+const SENSITIVE_RUNTIME_ENV_PATTERN = /(API_KEY|SECRET|TOKEN|PASSWORD|PRIVATE|CREDENTIAL)/i;
+
+const isPublicRuntimeEnvVariable = ([key]: [string, string]): boolean => {
+    return key.startsWith('VITE_') && !SENSITIVE_RUNTIME_ENV_PATTERN.test(key);
+};
 
 const htmlEnvInjectionPlugin = (env: Record<string, string>) => {
     return {
@@ -18,7 +23,7 @@ const htmlEnvInjectionPlugin = (env: Record<string, string>) => {
             order: 'pre' as const,
             handler(html: string) {
                 const envVars = Object.entries(env)
-                    .filter(([key]) => key.startsWith('VITE_'))
+                    .filter(isPublicRuntimeEnvVariable)
                     .reduce(
                         (acc, [key, value]) => {
                             acc[removeVitePrefix(key)] = value || '';
@@ -31,7 +36,7 @@ const htmlEnvInjectionPlugin = (env: Record<string, string>) => {
     <script>
         (function() {
             ${Object.entries(envVars)
-                .map(([key, value]) => `window.${key}="${value}";`)
+                .map(([key, value]) => `window.${key}=${JSON.stringify(value)};`)
                 .join('\n            ')}
         })();
     </script>`;

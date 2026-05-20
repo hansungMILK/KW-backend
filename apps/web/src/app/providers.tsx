@@ -51,7 +51,8 @@ const isDemoRoute = (): boolean => {
 
 /**
  * API Key gate component
- * Blocks app content until a valid API key is provided
+ * Blocks app content until a valid app access key is provided.
+ * Provider keys such as OpenAI or ElevenLabs are configured inside the app.
  * Bypasses authentication for demo routes
  */
 const ApiKeyGate = ({ children }: { children: ReactNode }) => {
@@ -80,7 +81,7 @@ const ApiKeyGate = ({ children }: { children: ReactNode }) => {
             setApiKey(key);
             return true;
         }
-        setError('Invalid API key. Please try again.');
+        setError('앱 접근 키가 올바르지 않습니다. OpenAI/ElevenLabs Provider 키가 아니라 앱 접근 키를 입력해주세요.');
         return false;
     };
 
@@ -91,8 +92,19 @@ const ApiKeyGate = ({ children }: { children: ReactNode }) => {
 
     if (!apiKey) {
         const codesUrl = import.meta.env.VITE_CODES_URL;
-        console.log('codesUrl', codesUrl);
-        return <ApiKeyDialog open={true} onSubmit={handleApiKeySubmit} error={error} codesUrl={codesUrl} />;
+        return (
+            <ApiKeyDialog
+                open={true}
+                onSubmit={handleApiKeySubmit}
+                error={error}
+                codesUrl={codesUrl}
+                title="앱 접근 키"
+                description="관리자가 발급한 앱 접근 키를 입력하세요. OpenAI, ElevenLabs 같은 Provider API 키는 로그인 후 메뉴에서 별도로 저장합니다."
+                placeholder="앱 접근 키"
+                submitLabel="입장"
+                loadingLabel="검증 중..."
+            />
+        );
     }
 
     return children;
