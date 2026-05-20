@@ -41,7 +41,7 @@ describe('ffmpeg font validation', () => {
     });
 
     it('accepts the checked-in Pretendard Black OpenType font', () => {
-        expect(isSupportedFontFile('apps/backend/assets/fonts/Pretendard-Black.otf')).toBe(true);
+        expect(isSupportedFontFile('assets/fonts/Pretendard-Black.otf')).toBe(true);
     });
 });
 
@@ -160,7 +160,7 @@ describe('ffmpeg composition duration boundary', () => {
 describe('ffmpeg font path resolution', () => {
     it('returns absolute font paths so child ffmpeg does not depend on cwd', async () => {
         vi.resetModules();
-        process.env.FFMPEG_FONT_FILE = 'apps/backend/assets/fonts/Jalnan2.otf';
+        process.env.FFMPEG_FONT_FILE = 'assets/fonts/Jalnan2.otf';
 
         const { resolveOverlayFontFile } = await import('./ffmpeg-adapter');
 
