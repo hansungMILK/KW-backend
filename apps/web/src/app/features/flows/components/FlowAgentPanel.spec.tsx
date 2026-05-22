@@ -1,5 +1,6 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { type MessageProposal, approveProposal, getFlowMessages } from '@flows/flows';
 
@@ -61,6 +62,10 @@ describe('FlowAgentPanel proposal content profile controls', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         Element.prototype.scrollIntoView = vi.fn();
+    });
+
+    afterEach(() => {
+        cleanup();
     });
 
     it('lets the user choose script tone, intensity, and review mode while keeping shorts content type AI-decided', async () => {

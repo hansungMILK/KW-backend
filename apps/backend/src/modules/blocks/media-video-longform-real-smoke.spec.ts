@@ -24,6 +24,7 @@ describe('mediaVideoBlock longform real MP4 smoke', () => {
             const workDir = await mkdtemp(join(tmpdir(), 'eureka-longform-b-smoke-'));
             try {
                 const audioPath = join(workDir, 'audio.mp3');
+                const bgmPath = join(workDir, 'bgm.mp3');
 
                 runOrThrow(ffmpegPath, [
                     '-y',
@@ -34,6 +35,16 @@ describe('mediaVideoBlock longform real MP4 smoke', () => {
                     '-q:a',
                     '6',
                     audioPath,
+                ]);
+                runOrThrow(ffmpegPath, [
+                    '-y',
+                    '-f',
+                    'lavfi',
+                    '-i',
+                    'sine=frequency=220:duration=2',
+                    '-q:a',
+                    '7',
+                    bgmPath,
                 ]);
 
                 await putObject('smoke/longform-b/audio.mp3', await readFile(audioPath), 'audio/mpeg');
@@ -106,6 +117,9 @@ describe('mediaVideoBlock longform real MP4 smoke', () => {
                     {
                         mode: 'longform-gate-b',
                         rendererRoute: 'hyperframes',
+                        backgroundMusicPath: bgmPath,
+                        backgroundMusicTitle: 'Smoke BGM',
+                        backgroundMusicArtist: 'Eureka Flow',
                         htmlComposeEstimatedCostUsd: 0.25,
                         hyperframesRenderEstimatedCostUsd: 0.25,
                     },
@@ -132,9 +146,9 @@ describe('mediaVideoBlock longform real MP4 smoke', () => {
                     height: 1440,
                 });
                 expect(backgroundMusic).toMatchObject({
-                    id: 'default-bgm',
-                    title: 'Glass Horizon',
-                    artist: 'loudsquaredance310',
+                    id: 'longform-default-bgm',
+                    title: 'Smoke BGM',
+                    artist: 'Eureka Flow',
                 });
                 expect(output['longformProductionQa']).toMatchObject({
                     ttsProvider: 'elevenlabs',

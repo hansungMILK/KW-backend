@@ -10,7 +10,7 @@ import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 /**
  * POST /flows/{flowId}/runs
  *
- * Body: { triggerSource?, executionMode?, notifyWebhook? }
+ * Body: { triggerSource?, executionMode?, scope?, notifyWebhook? }
  * Returns 202 Accepted: { runId, flowId, status, runType, createdAt }
  */
 const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
@@ -22,10 +22,11 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
     const bodyParsed = RunCreateRequestSchema.safeParse(body);
     if (!bodyParsed.success) return badRequest('Invalid run request body');
 
-    const { triggerSource, executionMode, notifyWebhook } = bodyParsed.data;
+    const { triggerSource, executionMode, scope, notifyWebhook } = bodyParsed.data;
 
     const result = await runService.createRun(paramsParsed.data.flowId, triggerSource, {
         executionMode,
+        scope,
         notifyWebhook,
     });
 

@@ -15,7 +15,7 @@ export interface ApproveProposalResult {
 }
 
 /**
- * Approve a flow proposal — places nodes/edges onto the canvas
+ * Approve a flow proposal — adds the approved nodes/edges to the canvas
  * POST /proposals/{proposalId}/approve
  *
  */

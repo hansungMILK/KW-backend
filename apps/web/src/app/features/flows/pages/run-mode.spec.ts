@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { getWorkflowRunMode, isWorkflowRunButtonDisabled } from './run-mode';
+import {
+    filterNodesByWorkflowGroup,
+    getWorkflowGroupOptions,
+    getWorkflowRunMode,
+    isWorkflowRunButtonDisabled,
+} from './run-mode';
 
 import type { NodeData } from '@flows/flows';
 
@@ -171,6 +176,58 @@ describe('workflow run mode', () => {
         ).toEqual({
             executionMode: 'step',
             scriptReviewFirst: true,
+        });
+    });
+
+    it('discovers workflow groups from approved proposal metadata', () => {
+        expect(
+            getWorkflowGroupOptions([
+                {
+                    ...contentNode({}),
+                    id: 'shorts-content',
+                    workflowGroupId: 'proposal-shorts',
+                    workflowGroupLabel: '고양이 쇼츠',
+                } as NodeData,
+                {
+                    ...longformReviewNode({}),
+                    id: 'longform-review',
+                    workflowGroupId: 'proposal-longform',
+                    workflowGroupLabel: 'T머니 롱폼',
+                } as NodeData,
+                {
+                    id: 'port-1',
+                    type: 'input',
+                    name: 'input port',
+                    workflowGroupId: 'proposal-longform',
+                } as NodeData,
+            ])
+        ).toEqual([
+            { id: 'proposal-shorts', label: '고양이 쇼츠', nodeCount: 1 },
+            { id: 'proposal-longform', label: 'T머니 롱폼', nodeCount: 1 },
+        ]);
+    });
+
+    it('filters run-mode decisions to the selected workflow group', () => {
+        const nodes = [
+            {
+                ...contentNode({ reviewMode: 'script-first' }),
+                id: 'old-shorts-content',
+                workflowGroupId: 'proposal-shorts',
+            } as NodeData,
+            {
+                ...longformReviewNode({ reviewMode: 'script-first', reviewStatus: 'approved' }),
+                id: 'new-longform-review',
+                workflowGroupId: 'proposal-longform',
+            } as NodeData,
+        ];
+
+        expect(getWorkflowRunMode(nodes)).toEqual({
+            executionMode: 'step',
+            scriptReviewFirst: true,
+        });
+        expect(getWorkflowRunMode(filterNodesByWorkflowGroup(nodes, 'proposal-longform'))).toEqual({
+            executionMode: 'full',
+            scriptReviewFirst: false,
         });
     });
 });

@@ -416,7 +416,7 @@ export const FlowAgentPanel = ({
                     message.proposal?.id === proposal.id
                         ? {
                               ...message,
-                              text: `제안이 승인되었습니다. ${result.nodes.length}개 블록이 캔버스에 배치되었습니다.`,
+                              text: `제안이 승인되었습니다. 캔버스에 ${result.nodes.length}개 블록이 저장되어 있습니다.`,
                           }
                         : message
                 )
@@ -538,7 +538,7 @@ export const FlowAgentPanel = ({
                 {messages.length === 0 && (
                     <div className="rounded-xl border border-border bg-muted/30 px-3 py-3 text-[12px] text-muted-foreground leading-relaxed">
                         <div className="mb-2 font-semibold text-foreground">무엇을 만들까요?</div>
-                        <div>자연어로 요청하면 필요한 블록을 제안하고, 승인 후 캔버스에 배치합니다.</div>
+                        <div>자연어로 요청하면 필요한 블록을 제안하고, 승인 후 캔버스에 추가합니다.</div>
                         <div className="mt-2 space-y-1">
                             <div>예: 최신 이슈를 쇼츠로 제작해줘</div>
                             <div>예: 바나나가 춤추는 이미지 생성해줘</div>
@@ -887,7 +887,7 @@ export const FlowAgentPanel = ({
                                     )}
                                     {isApproved && (
                                         <div className="rounded-md border border-primary/30 bg-primary/10 px-2 py-1.5 text-[11px] text-primary">
-                                            제안이 승인되어 캔버스에 배치되었습니다. 아래 워크플로우 실행 버튼으로 바로
+                                            제안이 승인되어 캔버스에 추가되었습니다. 아래 워크플로우 실행 버튼으로 바로
                                             실행할 수 있습니다.
                                         </div>
                                     )}
@@ -897,7 +897,7 @@ export const FlowAgentPanel = ({
                                             disabled={isApproving || isApproved}
                                             onClick={() => void handleApprove(proposal)}
                                         >
-                                            {isApproved ? '승인 완료' : isApproving ? '배치 중' : '승인'}
+                                            {isApproved ? '승인 완료' : isApproving ? '추가 중' : '승인'}
                                         </button>
                                         <button
                                             className="flex-1 text-[11px] py-1.5 rounded-md bg-muted-foreground/10 hover:bg-muted-foreground/20 text-foreground transition-colors border border-border"

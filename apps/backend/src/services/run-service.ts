@@ -13,7 +13,7 @@ import { runRepo } from '../repositories/run-repository';
 import { getFlowNodeBlockType, getFlowNodeId, isExecutableFlowNode } from '../utils/flow-node-classification';
 import { generateNumericId } from '../utils/id-generator';
 
-import type { ApiKeyProvider, Run, RunNode } from '@flows/contracts';
+import type { ApiKeyProvider, Run, RunNode, RunScope } from '@flows/contracts';
 
 // ============================================================================
 // Helpers
@@ -248,6 +248,12 @@ type SingleNodeRunOverrides = {
     output?: Record<string, unknown>;
 };
 
+type CreateRunOptions = {
+    executionMode?: string;
+    notifyWebhook?: string;
+    scope?: RunScope;
+};
+
 const ANALYSIS_RECOVERY_SYSTEM_PROMPT = [
     'You rewrite Korean Shorts script JSON after quality-review feedback.',
     'Return JSON only. Keep the same top-level schema used by the original script.',
@@ -347,6 +353,46 @@ const getNodeConfig = (node: Record<string, unknown>): Record<string, unknown> =
     const data = node['data'] as Record<string, unknown> | undefined;
     const config = (node['config'] ?? data?.['config']) as Record<string, unknown> | undefined;
     return config ?? {};
+};
+
+const getWorkflowGroupId = (record: Record<string, unknown>): string | undefined => {
+    const direct = record['workflowGroupId'];
+    if (typeof direct === 'string' && direct.trim().length > 0) return direct;
+
+    const data = record['data'];
+    if (isRecord(data) && typeof data['workflowGroupId'] === 'string' && data['workflowGroupId'].trim().length > 0) {
+        return data['workflowGroupId'];
+    }
+
+    const config = record['config'];
+    if (
+        isRecord(config) &&
+        typeof config['workflowGroupId'] === 'string' &&
+        config['workflowGroupId'].trim().length > 0
+    ) {
+        return config['workflowGroupId'];
+    }
+
+    return undefined;
+};
+
+const filterSnapshotByRunScope = (
+    nodes: Array<Record<string, unknown>>,
+    edges: Array<Record<string, unknown>>,
+    scope?: RunScope
+): { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> } => {
+    if (!scope) return { nodes, edges };
+    if (scope.type !== 'workflowGroup') return { nodes, edges };
+
+    const scopedNodes = nodes.filter(node => getWorkflowGroupId(node) === scope.groupId);
+    const scopedNodeIds = new Set(scopedNodes.map(getNodeId).filter(Boolean));
+    const scopedEdges = edges.filter(edge => {
+        const source = (edge['source'] ?? edge['sourceNodeId']) as string | undefined;
+        const target = (edge['target'] ?? edge['targetNodeId']) as string | undefined;
+        return !!source && !!target && scopedNodeIds.has(source) && scopedNodeIds.has(target);
+    });
+
+    return { nodes: scopedNodes, edges: scopedEdges };
 };
 
 const getNodeData = (node: Record<string, unknown>): Record<string, unknown> => {
@@ -687,19 +733,22 @@ export const runService = {
     async createRun(
         flowId: string,
         triggerSource = 'MANUAL',
-        options?: { executionMode?: string; notifyWebhook?: string }
+        options?: CreateRunOptions
     ): Promise<{ ok: true; run: Run } | RunServiceFailure> {
         const flow = await flowRepo.get(flowId);
         if (!flow) return { ok: false, error: `Flow ${flowId} not found`, status: 404 };
 
-        const snapshotNodes = (flow.nodes ?? []) as Array<Record<string, unknown>>;
-        const executableNodes = snapshotNodes.filter(isExecutableNode);
-        const snapshotEdges = (flow.edges ?? []) as Array<Record<string, unknown>>;
+        const allSnapshotNodes = (flow.nodes ?? []) as Array<Record<string, unknown>>;
+        const allSnapshotEdges = (flow.edges ?? []) as Array<Record<string, unknown>>;
+        const scopedSnapshot = filterSnapshotByRunScope(allSnapshotNodes, allSnapshotEdges, options?.scope);
+        const executableNodes = scopedSnapshot.nodes.filter(isExecutableNode);
         const executionMode = (options?.executionMode as 'full' | 'step') ?? 'full';
         const preflightNodes = getPreflightNodesForRun(executableNodes, executionMode);
 
         if (executableNodes.length === 0) {
-            return { ok: false, error: `Flow ${flowId} has no executable nodes`, status: 422 };
+            const scopedSuffix =
+                options?.scope?.type === 'workflowGroup' ? ` for workflow group ${options.scope.groupId}` : '';
+            return { ok: false, error: `Flow ${flowId} has no executable nodes${scopedSuffix}`, status: 422 };
         }
 
         const longformCostLimitResult = checkLongformHtmlRenderCostLimit(preflightNodes);
@@ -737,15 +786,16 @@ export const runService = {
             status: 'QUEUED',
             triggerSource,
             executionMode,
+            scope: options?.scope ?? null,
             notifyWebhook: options?.notifyWebhook ?? null,
-            flowSnapshot: { nodes: executableNodes, edges: snapshotEdges },
+            flowSnapshot: { nodes: executableNodes, edges: scopedSnapshot.edges },
             createdAt: now,
         };
         await runRepo.putRun(run);
 
         // Build DAG
         const nodeIds = executableNodes.map(getNodeId).filter(Boolean);
-        const parentMap = buildParentMap(nodeIds, snapshotEdges);
+        const parentMap = buildParentMap(nodeIds, scopedSnapshot.edges);
 
         // Persist RunNode records (all PENDING)
         for (const node of executableNodes) {

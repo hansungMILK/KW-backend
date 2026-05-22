@@ -12,6 +12,12 @@ import { z } from 'zod';
 export const RunStatusSchema = z.enum(['QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED']);
 export const RunTypeSchema = z.enum(['FULL_FLOW', 'SINGLE_NODE']);
 export const RunNodeStatusSchema = z.enum(['PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'SKIPPED', 'CANCELLED']);
+export const RunScopeSchema = z.discriminatedUnion('type', [
+    z.object({
+        type: z.literal('workflowGroup'),
+        groupId: z.string().min(1),
+    }),
+]);
 
 // ============================================================================
 // RunNode model
@@ -36,6 +42,7 @@ export const RunNodeSchema = z.object({
 });
 
 export type RunNode = z.infer<typeof RunNodeSchema>;
+export type RunScope = z.infer<typeof RunScopeSchema>;
 
 // ============================================================================
 // Run model
@@ -49,6 +56,7 @@ export const RunSchema = z.object({
     status: RunStatusSchema,
     triggerSource: z.string(),
     executionMode: z.enum(['full', 'step']).optional(),
+    scope: RunScopeSchema.nullable().optional(),
     notifyWebhook: z.string().nullable().optional(),
     flowSnapshot: z.object({
         nodes: z.array(z.record(z.unknown())),
@@ -73,6 +81,7 @@ export const RunCreateParamsSchema = z.object({
 export const RunCreateRequestSchema = z.object({
     triggerSource: z.string().default('MANUAL'),
     executionMode: z.enum(['full', 'step']).default('full'),
+    scope: RunScopeSchema.optional(),
     notifyWebhook: z.string().url().optional(),
 });
 

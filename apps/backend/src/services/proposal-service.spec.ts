@@ -98,6 +98,87 @@ describe('proposalService.approve image generation overrides', () => {
         expect(byId.get('video')).toEqual(expect.objectContaining({ width: 360, height: 440 }));
     });
 
+    it('appends a second approved proposal without replacing the existing workflow', async () => {
+        const proposal: Proposal = {
+            proposalId: 'proposal-next',
+            flowId: 'flow-multi',
+            sourceMessageId: 'message-next',
+            status: 'PENDING',
+            proposedNodes: [
+                { id: 'search', blockType: 'search', type: 'search', config: {} },
+                { id: 'script', blockType: 'longform-script', type: 'longform-script', config: {} },
+            ],
+            proposedEdges: [{ id: 'edge-search-script', sourceNodeId: 'search', targetNodeId: 'script' }],
+            approvalRequired: true,
+            createdAt: '2026-05-11T00:00:00.000Z',
+            updatedAt: '2026-05-11T00:00:00.000Z',
+        };
+
+        getProposal.mockResolvedValue(proposal);
+        getFlow.mockResolvedValue({
+            id: 'flow-multi',
+            name: 'Flow',
+            state: 'READY',
+            nodes: [
+                {
+                    id: 'search',
+                    blockType: 'search',
+                    type: 'search',
+                    config: {},
+                    position: { x: 100, y: 220 },
+                },
+                {
+                    id: 'script',
+                    blockType: 'content',
+                    type: 'content',
+                    config: {},
+                    position: { x: 440, y: 220 },
+                },
+            ],
+            edges: [{ id: 'edge-search-script', sourceNodeId: 'search', targetNodeId: 'script' }],
+            createdAt: '2026-05-11T00:00:00.000Z',
+            updatedAt: '2026-05-11T00:00:00.000Z',
+        });
+
+        const result = await proposalService.approve('proposal-next');
+
+        expect(result.ok).toBe(true);
+        const savedFlow = putFlow.mock.calls[0]?.[0];
+        const savedNodes = savedFlow?.nodes as Array<{
+            id: string;
+            position?: { x: number; y: number };
+            workflowGroupId?: string;
+        }>;
+        const savedEdges = savedFlow?.edges as Array<Record<string, unknown>>;
+        const appendedSearch = savedNodes.find(node => node.id.endsWith('__search') && node.id !== 'search');
+        const appendedScript = savedNodes.find(node => node.id.endsWith('__script') && node.id !== 'script');
+
+        expect(savedNodes.map(node => node.id)).toEqual(
+            expect.arrayContaining([
+                'search',
+                'script',
+                expect.stringMatching(/__search$/),
+                expect.stringMatching(/__script$/),
+            ])
+        );
+        expect(appendedSearch?.id).not.toBe('search');
+        expect(appendedScript?.id).not.toBe('script');
+        expect(appendedSearch?.position?.y).toBeGreaterThan(220);
+        expect(appendedSearch?.workflowGroupId).toBe('proposal-next');
+        expect(appendedScript?.workflowGroupId).toBe('proposal-next');
+        expect(savedEdges).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ sourceNodeId: 'search', targetNodeId: 'script' }),
+                expect.objectContaining({
+                    id: expect.stringMatching(/^proposal-next__edge-search-script/),
+                    sourceNodeId: appendedSearch?.id,
+                    targetNodeId: appendedScript?.id,
+                    workflowGroupId: 'proposal-next',
+                }),
+            ])
+        );
+    });
+
     it('applies selected image style and quality to the approved flow and keeps proposal cost metadata in sync', async () => {
         const proposal: Proposal = {
             proposalId: 'proposal-1',

@@ -62,13 +62,14 @@ const APPROVAL_LAYOUT = {
     LEVEL_GAP: 70,
     GRID_COLS: 3,
     GRID_ROW_HEIGHT: 220,
+    APPEND_GAP_Y: 340,
 } as const;
 
 export const proposalService = {
     /**
      * Approve a proposal:
      * 1. Validate PENDING status (conditional)
-     * 2. Replace flow nodes/edges with proposal snapshot
+     * 2. Add proposal snapshot to the flow without deleting existing workflows
      * 3. Update proposal status → APPROVED
      * 4. Save SYSTEM message for audit trail
      */
@@ -111,11 +112,12 @@ export const proposalService = {
             overrides
         );
 
-        // Replace flow snapshot with proposal's nodes/edges
+        const mergedSnapshot = mergeApprovedProposalSnapshot(flow, overriddenNodes, proposal.proposedEdges, proposalId);
+
         const updatedFlow: FlowRecord = {
             ...flow,
-            nodes: overriddenNodes,
-            edges: proposal.proposedEdges,
+            nodes: mergedSnapshot.nodes,
+            edges: mergedSnapshot.edges,
             state: 'READY', // DRAFT → READY on approval
             updatedAt: now,
         };
@@ -138,7 +140,7 @@ export const proposalService = {
             flowId: proposal.flowId,
             role: 'SYSTEM',
             messageType: 'STATUS',
-            content: `제안이 승인되었습니다. ${proposal.proposedNodes.length}개 블록이 캔버스에 배치됩니다.`,
+            content: `제안이 승인되었습니다. ${proposal.proposedNodes.length}개 블록이 캔버스에 추가됩니다.`,
             proposalId,
             createdAt: now,
         };
@@ -189,6 +191,142 @@ export const proposalService = {
         return { ok: true, data: { proposal: updatedProposal } };
     },
 };
+
+function mergeApprovedProposalSnapshot(
+    flow: FlowRecord,
+    proposedNodes: Array<Record<string, unknown>>,
+    proposedEdges: ApprovalEdge[],
+    proposalId: string
+): { nodes: Array<Record<string, unknown>>; edges: ApprovalEdge[] } {
+    const existingNodes = ((flow.nodes ?? []) as Array<Record<string, unknown>>).filter(Boolean);
+    const existingEdges = ((flow.edges ?? []) as ApprovalEdge[]).filter(Boolean);
+    const workflowGroupId = sanitizeIdSegment(proposalId);
+    const workflowGroupLabel = getWorkflowGroupLabel(proposedNodes);
+    const groupedNodes = proposedNodes.map(node => ({
+        ...node,
+        workflowGroupId,
+        workflowGroupLabel:
+            typeof node['workflowGroupLabel'] === 'string' ? node['workflowGroupLabel'] : workflowGroupLabel,
+    }));
+    const groupedEdges = proposedEdges.map(edge => ({
+        ...edge,
+        workflowGroupId,
+        workflowGroupLabel:
+            typeof edge['workflowGroupLabel'] === 'string' ? edge['workflowGroupLabel'] : workflowGroupLabel,
+    }));
+
+    if (existingNodes.length === 0 && existingEdges.length === 0) {
+        return { nodes: groupedNodes, edges: groupedEdges };
+    }
+
+    const existingIds = new Set(existingNodes.map(getNodeId).filter((id): id is string => Boolean(id)));
+    const idPrefix = `${workflowGroupId}__`;
+    const remappedIds = new Map<string, string>();
+    const nextY = getAppendBaselineY(existingNodes);
+
+    const nodes = groupedNodes.map(node => {
+        const originalId = getNodeId(node);
+        if (!originalId) return offsetNodePosition(node, nextY);
+        const nextId = uniqueNodeId(`${idPrefix}${originalId}`, existingIds);
+        existingIds.add(nextId);
+        remappedIds.set(originalId, nextId);
+        return offsetNodePosition({ ...node, id: nextId }, nextY);
+    });
+
+    const edges = groupedEdges.map((edge, index) => remapApprovalEdge(edge, remappedIds, idPrefix, index));
+    return {
+        nodes: [...existingNodes, ...nodes],
+        edges: [...existingEdges, ...edges],
+    };
+}
+
+function getWorkflowGroupLabel(nodes: Array<Record<string, unknown>>): string {
+    const blockTypes = new Set(nodes.map(node => String(node['blockType'] ?? node['type'] ?? '')).filter(Boolean));
+    if ([...blockTypes].some(type => type.startsWith('longform-'))) return '롱폼 워크플로우';
+    if (blockTypes.has('media-video') || blockTypes.has('media-image')) return '쇼츠/영상 워크플로우';
+    return '워크플로우';
+}
+
+function sanitizeIdSegment(value: string): string {
+    const sanitized = value
+        .trim()
+        .replace(/[^a-zA-Z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    return sanitized || 'proposal';
+}
+
+function uniqueNodeId(baseId: string, existingIds: Set<string>): string {
+    if (!existingIds.has(baseId)) return baseId;
+    let suffix = 2;
+    while (existingIds.has(`${baseId}-${suffix}`)) suffix += 1;
+    return `${baseId}-${suffix}`;
+}
+
+function getAppendBaselineY(nodes: Array<Record<string, unknown>>): number {
+    const maxY = nodes.reduce<number>((max, node) => {
+        const position = toPosition(node['position']);
+        return Math.max(max, position?.y ?? APPROVAL_LAYOUT.BASELINE_Y);
+    }, APPROVAL_LAYOUT.BASELINE_Y);
+    return Math.max(APPROVAL_LAYOUT.BASELINE_Y, maxY + APPROVAL_LAYOUT.APPEND_GAP_Y);
+}
+
+function offsetNodePosition(node: Record<string, unknown>, baselineY: number): Record<string, unknown> {
+    const position = toPosition(node['position']);
+    if (!position) return { ...node, position: { x: APPROVAL_LAYOUT.START_X, y: baselineY } };
+    return {
+        ...node,
+        position: {
+            ...position,
+            y: position.y + (baselineY - APPROVAL_LAYOUT.BASELINE_Y),
+        },
+    };
+}
+
+function toPosition(value: unknown): { x: number; y: number } | undefined {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+    const position = value as Record<string, unknown>;
+    const x = Number(position['x']);
+    const y = Number(position['y']);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return undefined;
+    return { x, y };
+}
+
+function remapApprovalEdge(
+    edge: ApprovalEdge,
+    remappedIds: Map<string, string>,
+    edgeIdPrefix: string,
+    index: number
+): ApprovalEdge {
+    const sourceId = getEdgeNodeId(edge, 'source');
+    const targetId = getEdgeNodeId(edge, 'target');
+    const edgeId = typeof edge['id'] === 'string' && edge['id'].length > 0 ? edge['id'] : undefined;
+    return {
+        ...edge,
+        id: `${edgeIdPrefix}${edgeId ?? `edge-${index + 1}`}`,
+        ...remapEdgeNodeIdKeys(edge, ['sourceNodeId', 'source', 'fromNodeId', 'from'], sourceId, remappedIds),
+        ...remapEdgeNodeIdKeys(edge, ['targetNodeId', 'target', 'toNodeId', 'to'], targetId, remappedIds),
+    };
+}
+
+function remapEdgeNodeIdKeys(
+    edge: ApprovalEdge,
+    keys: string[],
+    resolvedId: string | undefined,
+    remappedIds: Map<string, string>
+): ApprovalEdge {
+    const nextId = resolvedId ? remappedIds.get(resolvedId) : undefined;
+    if (!nextId) return {};
+    const result: ApprovalEdge = {};
+    let wroteExistingKey = false;
+    for (const key of keys) {
+        if (typeof edge[key] === 'string') {
+            result[key] = nextId;
+            wroteExistingKey = true;
+        }
+    }
+    if (!wroteExistingKey) result[keys[0]] = nextId;
+    return result;
+}
 
 function applyApprovalLayout(
     nodes: Array<Record<string, unknown>>,

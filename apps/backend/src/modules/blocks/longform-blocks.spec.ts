@@ -300,6 +300,50 @@ describe('longform blocks', () => {
         );
     });
 
+    it('falls back to section-based storyboard chapters when the AI storyboard JSON is truncated', async () => {
+        vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
+            content:
+                '{"visualChapters":[{"chapterId":"chapter-1","sectionId":"section-1","headline":"상장 추진","visualArchetype":"source-proof","objects":[{"id":"section-1-headline","type":"headline","text":"상장 추진"}]}',
+            model: 'gpt-test',
+            inputTokens: 100,
+            outputTokens: 200,
+            latencyMs: 1,
+        });
+
+        const result = await longformStoryboardBlock.execute({
+            fullScriptDraft:
+                '세계 최대 AI 칩 기업의 상장 추진은 단순한 기업 뉴스가 아닙니다.\n\n투자자들은 성장성과 수익성을 함께 보고 있습니다.',
+            sections: [
+                {
+                    sectionId: 'section-1',
+                    title: '상장 추진',
+                    narration: '세계 최대 AI 칩 기업의 상장 추진은 단순한 기업 뉴스가 아닙니다.',
+                },
+                {
+                    sectionId: 'section-2',
+                    title: '투자 포인트',
+                    narration: '투자자들은 성장성과 수익성을 함께 보고 있습니다.',
+                },
+            ],
+            sourceMap: [{ sectionId: 'section-1', sourceIds: ['source-1'] }],
+        });
+
+        expect(result.output.visualChapters).toHaveLength(2);
+        expect(result.output.visualChapters[0]).toEqual(
+            expect.objectContaining({
+                sectionId: 'section-1',
+                headline: '상장 추진',
+                objects: expect.arrayContaining([expect.objectContaining({ id: 'section-1-headline' })]),
+            })
+        );
+        expect(result.output.aiStoryboard).toEqual(
+            expect.objectContaining({
+                recovered: true,
+                recoveryReason: expect.stringContaining('longform visual storyboard director'),
+            })
+        );
+    });
+
     it('builds a HyperFrames scene JSON contract with per-cue activity', async () => {
         const source = (await longformSourceBlock.execute(sourceInput)).output;
         const brief = (await longformBriefBlock.execute(source, { targetDurationSec: 300 })).output;

@@ -13,7 +13,7 @@ import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
  * Returns: { proposal, flow }
  *
  * State transition: PENDING → APPROVED
- * Side effects: flow nodes/edges replaced, SYSTEM message saved
+ * Side effects: proposal nodes/edges added to the flow, SYSTEM message saved
  */
 const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
     const proposalId = getPathParam(event, 'proposalId');

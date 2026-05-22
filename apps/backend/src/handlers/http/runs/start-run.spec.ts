@@ -70,4 +70,40 @@ describe('start run handler', () => {
             })
         );
     });
+
+    it('passes selected workflow scope to run service', async () => {
+        createRun.mockResolvedValueOnce({
+            ok: true,
+            run: {
+                runId: 'run-1',
+                flowId: 'flow-1',
+                runType: 'FULL_FLOW',
+                status: 'QUEUED',
+                triggerSource: 'MANUAL',
+                executionMode: 'full',
+                scope: { type: 'workflowGroup', groupId: 'proposal-longform' },
+                flowSnapshot: { nodes: [], edges: [] },
+                createdAt: '2026-05-22T00:00:00.000Z',
+            },
+        });
+
+        const response = await main({
+            httpMethod: 'POST',
+            path: '/flows/flow-1/runs',
+            headers: {},
+            pathParameters: { flowId: 'flow-1' },
+            body: JSON.stringify({
+                triggerSource: 'MANUAL',
+                executionMode: 'full',
+                scope: { type: 'workflowGroup', groupId: 'proposal-longform' },
+            }),
+        } as APIGatewayProxyEvent);
+
+        expect(response.statusCode).toBe(202);
+        expect(createRun).toHaveBeenCalledWith('flow-1', 'MANUAL', {
+            executionMode: 'full',
+            notifyWebhook: undefined,
+            scope: { type: 'workflowGroup', groupId: 'proposal-longform' },
+        });
+    });
 });

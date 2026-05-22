@@ -100,6 +100,78 @@ describe('runService cost guards', () => {
         expect(sendQueueMessage).toHaveBeenCalled();
     });
 
+    it('creates a run snapshot from only the selected workflow group', async () => {
+        getFlow.mockResolvedValueOnce({
+            id: 'flow-multi-group',
+            name: 'Multi workflow canvas',
+            state: 'READY',
+            nodes: [
+                {
+                    id: 'old-content',
+                    blockType: 'content',
+                    label: 'Old shorts script',
+                    workflowGroupId: 'proposal-shorts',
+                    config: {},
+                },
+                {
+                    id: 'old-image',
+                    blockType: 'media-image',
+                    label: 'Old shorts images',
+                    workflowGroupId: 'proposal-shorts',
+                    config: { count: 12 },
+                },
+                {
+                    id: 'new-source',
+                    blockType: 'longform-source',
+                    label: 'Longform source',
+                    workflowGroupId: 'proposal-longform',
+                    config: {},
+                },
+                {
+                    id: 'new-review',
+                    blockType: 'longform-review',
+                    label: 'Longform review',
+                    workflowGroupId: 'proposal-longform',
+                    config: {},
+                },
+            ],
+            edges: [
+                { source: 'old-content', target: 'old-image', workflowGroupId: 'proposal-shorts' },
+                { source: 'new-source', target: 'new-review', workflowGroupId: 'proposal-longform' },
+            ],
+            createdAt: '2026-05-13T00:00:00.000Z',
+            updatedAt: '2026-05-13T00:00:00.000Z',
+        });
+        getProviderApiKeyMock.mockResolvedValue(null);
+        putRun.mockResolvedValue(undefined);
+        putRunNode.mockResolvedValue(undefined);
+        sendQueueMessage.mockResolvedValue(undefined);
+
+        const result = await runService.createRun('flow-multi-group', 'MANUAL', {
+            executionMode: 'full',
+            scope: { type: 'workflowGroup', groupId: 'proposal-longform' },
+        } as Parameters<typeof runService.createRun>[2] & {
+            scope: { type: 'workflowGroup'; groupId: string };
+        });
+
+        expect(result).toEqual(expect.objectContaining({ ok: true }));
+        expect(getProviderApiKeyMock).not.toHaveBeenCalled();
+        expect(putRun).toHaveBeenCalledWith(
+            expect.objectContaining({
+                scope: { type: 'workflowGroup', groupId: 'proposal-longform' },
+                flowSnapshot: {
+                    nodes: [
+                        expect.objectContaining({ id: 'new-source' }),
+                        expect.objectContaining({ id: 'new-review' }),
+                    ],
+                    edges: [expect.objectContaining({ source: 'new-source', target: 'new-review' })],
+                },
+            })
+        );
+        expect(putRunNode.mock.calls.map(call => call[0].nodeId)).toEqual(['new-source', 'new-review']);
+        expect(sendQueueMessage).toHaveBeenCalled();
+    });
+
     it('allows a step longform run to queue with future Gate B nodes before approval', async () => {
         getFlow.mockResolvedValueOnce({
             id: 'flow-longform-full-factory',

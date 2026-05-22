@@ -6,6 +6,7 @@ import type {
     RunListResponse,
     RunNode,
     RunNodesListResponse,
+    RunScope,
 } from '@flows/contracts';
 
 const _log = console.log.bind(console, '[runs-api]');
@@ -20,6 +21,7 @@ export interface RunView {
 export interface CreateFlowRunOptions {
     executionMode?: 'full' | 'step';
     triggerSource?: string;
+    scope?: RunScope;
 }
 
 export type FlowRunSummary = RunListResponse['items'][number];

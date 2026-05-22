@@ -17,7 +17,14 @@ import {
 } from '@flows/flows';
 import { useInitFlowSocket } from '@flows/socket';
 
-import { type WorkflowRunStatus, getWorkflowRunMode, isWorkflowRunButtonDisabled } from './run-mode';
+import {
+    type WorkflowGroupOption,
+    type WorkflowRunStatus,
+    filterNodesByWorkflowGroup,
+    getWorkflowGroupOptions,
+    getWorkflowRunMode,
+    isWorkflowRunButtonDisabled,
+} from './run-mode';
 import { FlowAgentPanel } from '../components/FlowAgentPanel';
 import { FlowOpenDialog } from '../components/FlowOpenDialog';
 import { Header } from '../components/Header';
@@ -172,6 +179,19 @@ export const FlowEditorPage = () => {
     const activeRunScriptReviewFirstRef = useRef(false);
     const [latestProposal, setLatestProposal] = useState<ProposalCreatedMessage | null>(null);
     const [pendingWorkflowLoad, setPendingWorkflowLoad] = useState<PendingWorkflowLoad | null>(null);
+    const [workflowGroupOptions, setWorkflowGroupOptions] = useState<WorkflowGroupOption[]>([]);
+    const [selectedWorkflowGroupId, setSelectedWorkflowGroupId] = useState<string | null>(null);
+
+    const syncWorkflowGroupOptions = useCallback((nodes: NodeData[] | undefined) => {
+        const nextOptions = getWorkflowGroupOptions(nodes);
+        setWorkflowGroupOptions(nextOptions);
+        setSelectedWorkflowGroupId(current => {
+            if (nextOptions.length === 0) return null;
+            if (current && nextOptions.some(option => option.id === current)) return current;
+            return nextOptions[nextOptions.length - 1]?.id ?? null;
+        });
+        return nextOptions;
+    }, []);
 
     const resetRunUi = useCallback(() => {
         setRunStatus(null);
@@ -942,6 +962,7 @@ export const FlowEditorPage = () => {
                 if (pendingWorkflowLoad.initialFlow) {
                     await canvas.loadWorkflow(pendingWorkflowLoad.initialFlow);
                     lastSavedStateRef.current = serializeWorkflowState(pendingWorkflowLoad.initialFlow);
+                    syncWorkflowGroupOptions(pendingWorkflowLoad.initialFlow.nodes as NodeData[] | undefined);
                 }
 
                 if (pendingWorkflowLoad.loadedId) {
@@ -965,7 +986,7 @@ export const FlowEditorPage = () => {
             cancelled = true;
             if (retryTimer !== null) window.clearTimeout(retryTimer);
         };
-    }, [hydrateLatestRunForFlow, isAppReady, pendingWorkflowLoad, updateUrl]);
+    }, [hydrateLatestRunForFlow, isAppReady, pendingWorkflowLoad, syncWorkflowGroupOptions, updateUrl]);
 
     const triggerAutoSave = useCallback(() => {
         if (!isAutoSaveEnabled) return;
@@ -1014,6 +1035,7 @@ export const FlowEditorPage = () => {
         if (window.confirm(t('flowEditor.confirmNewFlow'))) {
             canvasRef.current.newWorkflow();
             resetRunUi();
+            syncWorkflowGroupOptions([]);
             lastSavedStateRef.current = serializeWorkflowState({ nodes: [], connections: [] });
             const newId = await createNewFlow();
             if (newId) {
@@ -1045,6 +1067,7 @@ export const FlowEditorPage = () => {
         if (!flowData) throw new Error('선택한 플로우를 불러오지 못했습니다.');
 
         await canvas.loadWorkflow(flowData);
+        syncWorkflowGroupOptions(flowData.nodes as NodeData[] | undefined);
         lastSavedStateRef.current = serializeWorkflowState(flowData);
         resetRunUi();
         updateUrl(flowId, null);
@@ -1062,6 +1085,7 @@ export const FlowEditorPage = () => {
         if (wasCurrentFlow) {
             canvasRef.current?.newWorkflow();
             resetRunUi();
+            syncWorkflowGroupOptions([]);
             lastSavedStateRef.current = serializeWorkflowState({ nodes: [], connections: [] });
             const newId = await createNewFlow();
             if (newId) {
@@ -1097,6 +1121,7 @@ export const FlowEditorPage = () => {
         if (window.confirm(t('flowEditor.confirmClearCanvas'))) {
             canvasRef.current.clearWorkflow();
             resetRunUi();
+            syncWorkflowGroupOptions([]);
             lastSavedStateRef.current = serializeWorkflowState({ nodes: [], connections: [] });
             lastLocalUpdateTimestampRef.current = Date.now();
             void saveCurrentFlow({ nodes: [], edges: [] }).then(result => {
@@ -1129,6 +1154,22 @@ export const FlowEditorPage = () => {
                 showNotification('실행할 블록이 없습니다. 먼저 제안을 승인해 캔버스에 배치해주세요.', 'error');
                 return;
             }
+            const nodes = data.nodes as NodeData[];
+            const groups = syncWorkflowGroupOptions(nodes);
+            const selectedGroup =
+                selectedWorkflowGroupId && groups.some(group => group.id === selectedWorkflowGroupId)
+                    ? selectedWorkflowGroupId
+                    : groups.length === 1
+                      ? groups[0]?.id
+                      : null;
+
+            if (groups.length > 1 && !selectedGroup) {
+                showNotification('실행할 워크플로우를 선택해주세요.', 'error');
+                return;
+            }
+
+            const runNodes = filterNodesByWorkflowGroup(nodes, selectedGroup);
+            const selectedGroupLabel = groups.find(group => group.id === selectedGroup)?.label;
 
             lastLocalUpdateTimestampRef.current = Date.now();
             const result = await saveCurrentFlow(data);
@@ -1141,13 +1182,12 @@ export const FlowEditorPage = () => {
                 updateUrl(result.id, window.location.hash.replace('#', ''));
             }
 
-            const { executionMode, scriptReviewFirst: runScriptReviewFirst } = getWorkflowRunMode(
-                data.nodes as NodeData[] | undefined
-            );
+            const { executionMode, scriptReviewFirst: runScriptReviewFirst } = getWorkflowRunMode(runNodes);
             activeRunScriptReviewFirstRef.current = runScriptReviewFirst;
 
             const run = await createFlowRun(result.id, {
                 executionMode,
+                scope: selectedGroup ? { type: 'workflowGroup', groupId: selectedGroup } : undefined,
             });
             setActiveRunId(run.id);
             setRunStatus('running');
@@ -1157,11 +1197,17 @@ export const FlowEditorPage = () => {
                 state: 'queued',
                 message: runScriptReviewFirst
                     ? '대본 검수 모드로 실행합니다. 대본 노드까지 완료되면 멈춥니다.'
-                    : '전체 워크플로우 실행을 시작했습니다.',
+                    : selectedGroupLabel
+                      ? `${selectedGroupLabel} 실행을 시작했습니다.`
+                      : '전체 워크플로우 실행을 시작했습니다.',
             });
             setIsAgentOpen(true);
             showNotification(
-                runScriptReviewFirst ? '대본 검수 모드로 실행을 시작했습니다.' : '워크플로우 실행을 시작했습니다.',
+                runScriptReviewFirst
+                    ? '대본 검수 모드로 실행을 시작했습니다.'
+                    : selectedGroupLabel
+                      ? `${selectedGroupLabel} 실행을 시작했습니다.`
+                      : '워크플로우 실행을 시작했습니다.',
                 'success'
             );
         } catch (error) {
@@ -1206,6 +1252,7 @@ export const FlowEditorPage = () => {
                 } as Parameters<WorkflowCanvasRef['loadWorkflow']>[0]);
 
                 const workflow = { nodes: nodes as NodeData[], edges: edges as EdgeData[] };
+                syncWorkflowGroupOptions(workflow.nodes);
                 lastLocalUpdateTimestampRef.current = Date.now();
                 const result = await saveCurrentFlow(workflow);
 
@@ -1214,10 +1261,10 @@ export const FlowEditorPage = () => {
                     if (result.id !== currentFlowId) {
                         updateUrl(result.id, window.location.hash.replace('#', ''));
                     }
-                    showNotification('캔버스에 블록이 배치되고 저장되었습니다.', 'success');
+                    showNotification('캔버스에 블록이 추가되고 저장되었습니다.', 'success');
                 } else {
                     lastSavedStateRef.current = null;
-                    showNotification('캔버스 배치는 완료됐지만 저장에 실패했습니다.', 'error');
+                    showNotification('캔버스 추가는 완료됐지만 저장에 실패했습니다.', 'error');
                 }
             } catch {
                 showNotification('캔버스 업데이트 실패', 'error');
@@ -1225,7 +1272,7 @@ export const FlowEditorPage = () => {
                 setIsApplyingProposal(false);
             }
         },
-        [currentFlowId, saveCurrentFlow, updateUrl]
+        [currentFlowId, saveCurrentFlow, syncWorkflowGroupOptions, updateUrl]
     );
 
     const handleSelectionChange = (nodeId: string | null) => {
@@ -1234,6 +1281,7 @@ export const FlowEditorPage = () => {
 
     const handleCanvasChange = () => {
         lastLocalUpdateTimestampRef.current = Date.now(); // Mark change time to ignore self-echo from socket
+        syncWorkflowGroupOptions(canvasRef.current?.getWorkflow().nodes as NodeData[] | undefined);
         triggerAutoSave();
     };
 
@@ -1279,6 +1327,7 @@ export const FlowEditorPage = () => {
                 const json = JSON.parse(event.target?.result as string);
                 if (canvasRef.current && json.nodes && (json.edges || json.connections)) {
                     await canvasRef.current.loadWorkflow(json);
+                    syncWorkflowGroupOptions(json.nodes as NodeData[] | undefined);
                     lastSavedStateRef.current = null;
                     showNotification(t('flowEditor.workflowImported'), 'success');
                 } else {
@@ -1413,13 +1462,30 @@ export const FlowEditorPage = () => {
                     onLongformReviewApproved={handleRunWorkflow}
                 />
 
-                {/* Full Workflow Run Button */}
+                {workflowGroupOptions.length > 1 ? (
+                    <label className="absolute bottom-36 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-border bg-panel px-3 py-2 text-xs text-muted-foreground shadow-floating">
+                        <span>실행 대상</span>
+                        <select
+                            value={selectedWorkflowGroupId ?? ''}
+                            onChange={event => setSelectedWorkflowGroupId(event.target.value || null)}
+                            className="min-w-44 rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground outline-none focus:border-primary"
+                        >
+                            {workflowGroupOptions.map(option => (
+                                <option key={option.id} value={option.id}>
+                                    {option.label} ({option.nodeCount})
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                ) : null}
+
+                {/* Workflow Run Button */}
                 <button
                     type="button"
                     onClick={() => void handleRunWorkflow()}
                     disabled={runButtonDisabled}
                     className="absolute bottom-20 left-1/2 -translate-x-1/2 z-30 inline-flex items-center gap-2 rounded-xl border border-primary/40 bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-floating transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-                    title="전체 워크플로우 실행"
+                    title={selectedWorkflowGroupId ? '선택한 워크플로우 실행' : '전체 워크플로우 실행'}
                 >
                     {isApplyingProposal || isWorkflowRunning ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -1428,7 +1494,7 @@ export const FlowEditorPage = () => {
                     )}
                     <span>
                         {isApplyingProposal
-                            ? '제안 배치 중'
+                            ? '제안 추가 중'
                             : isWorkflowRunning
                               ? '실행 요청 중'
                               : runStatus === 'running'

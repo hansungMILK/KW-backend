@@ -264,7 +264,9 @@ export const longformStoryboardBlock: BlockExecutor = {
         const script = toRecord(input);
         const sections = arrayOfRecords(script.sections);
         const aiStoryboard = await generateAiStoryboard(script);
+        const rawVisualChapterCount = arrayOfRecords(aiStoryboard.output.visualChapters).length;
         const visualChapters = normalizeVisualChapters(aiStoryboard.output.visualChapters, sections, script);
+        const recoveredMissingChapters = sections.length > 0 && rawVisualChapterCount < sections.length;
 
         return {
             output: {
@@ -274,6 +276,14 @@ export const longformStoryboardBlock: BlockExecutor = {
                     provider: 'openai',
                     model: aiStoryboard.model,
                     latencyMs: aiStoryboard.latencyMs,
+                    ...(aiStoryboard.recovered || recoveredMissingChapters
+                        ? {
+                              recovered: true,
+                              recoveryReason:
+                                  aiStoryboard.recoveryReason ??
+                                  `longform visual storyboard director returned ${rawVisualChapterCount}/${sections.length} chapters; filled missing chapters from script sections.`,
+                          }
+                        : {}),
                 },
             },
             durationMs: Date.now() - start,
@@ -551,7 +561,7 @@ async function generateAiSourceResearch(
         timeoutMs: env.openaiTextTimeoutMs,
     });
     return {
-        output: parseAiJsonObject(response.content, 'longform source researcher'),
+        output: parseAiJsonObject(response.content, 'longform source researcher').output,
         model: response.model,
         latencyMs: response.latencyMs,
     };
@@ -580,7 +590,7 @@ async function generateAiBrief(
         timeoutMs: env.openaiTextTimeoutMs,
     });
     return {
-        output: parseAiJsonObject(response.content, 'longform angle strategist'),
+        output: parseAiJsonObject(response.content, 'longform angle strategist').output,
         model: response.model,
         latencyMs: response.latencyMs,
     };
@@ -588,7 +598,7 @@ async function generateAiBrief(
 
 async function generateAiStoryboard(
     script: RecordValue
-): Promise<{ output: RecordValue; model: string; latencyMs: number }> {
+): Promise<{ output: RecordValue; model: string; latencyMs: number; recovered?: boolean; recoveryReason?: string }> {
     const response = await openaiAdapter.chatJson({
         model: env.openaiModel,
         systemPrompt: LONGFORM_STORYBOARD_SYSTEM_PROMPT,
@@ -604,13 +614,18 @@ async function generateAiStoryboard(
             null,
             2
         ),
-        maxTokens: 2400,
+        maxTokens: 5200,
         timeoutMs: env.openaiTextTimeoutMs,
     });
+    const parsed = parseAiJsonObject(response.content, 'longform visual storyboard director', {
+        fallback: () => buildFallbackStoryboard(script),
+    });
     return {
-        output: parseAiJsonObject(response.content, 'longform visual storyboard director'),
+        output: parsed.output,
         model: response.model,
         latencyMs: response.latencyMs,
+        recovered: parsed.recovered,
+        recoveryReason: parsed.recoveryReason,
     };
 }
 
@@ -648,20 +663,121 @@ async function generateAiMotion(
         timeoutMs: env.openaiTextTimeoutMs,
     });
     return {
-        output: parseAiJsonObject(response.content, 'longform motion graphics director'),
+        output: parseAiJsonObject(response.content, 'longform motion graphics director').output,
         model: response.model,
         latencyMs: response.latencyMs,
     };
 }
 
-function parseAiJsonObject(content: string, label: string): RecordValue {
+function parseAiJsonObject(
+    content: string,
+    label: string,
+    options?: { fallback?: (error: Error) => RecordValue }
+): { output: RecordValue; recovered?: boolean; recoveryReason?: string } {
     const trimmed = content.trim();
     const start = trimmed.indexOf('{');
     const end = trimmed.lastIndexOf('}');
     const json = start >= 0 && end > start ? trimmed.slice(start, end + 1) : trimmed;
-    const parsed = JSON.parse(json) as unknown;
-    if (!isRecordValue(parsed)) throw new Error(`${label} returned non-object JSON`);
-    return parsed;
+    try {
+        const parsed = JSON.parse(json) as unknown;
+        if (!isRecordValue(parsed)) throw new Error(`${label} returned non-object JSON`);
+        return { output: parsed };
+    } catch (error) {
+        const recoveredJson = repairPossiblyTruncatedJsonObject(json);
+        if (recoveredJson && recoveredJson !== json) {
+            try {
+                const parsed = JSON.parse(recoveredJson) as unknown;
+                if (isRecordValue(parsed)) {
+                    return {
+                        output: parsed,
+                        recovered: true,
+                        recoveryReason: `${label} returned malformed JSON; repaired balanced JSON delimiters.`,
+                    };
+                }
+            } catch {
+                // Fall through to deterministic fallback or original error.
+            }
+        }
+
+        const parseError = error instanceof Error ? error : new Error(String(error));
+        if (options?.fallback) {
+            return {
+                output: options.fallback(parseError),
+                recovered: true,
+                recoveryReason: `${label} returned malformed JSON: ${parseError.message}`,
+            };
+        }
+        throw parseError;
+    }
+}
+
+function repairPossiblyTruncatedJsonObject(json: string): string | undefined {
+    const start = json.indexOf('{');
+    if (start < 0) return undefined;
+
+    let result = json
+        .slice(start)
+        .replace(/,\s*([}\]])/g, '$1')
+        .trimEnd();
+    const stack: string[] = [];
+    let inString = false;
+    let escaped = false;
+
+    for (const char of result) {
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (char === '\\' && inString) {
+            escaped = true;
+            continue;
+        }
+        if (char === '"') {
+            inString = !inString;
+            continue;
+        }
+        if (inString) continue;
+        if (char === '{') stack.push('}');
+        if (char === '[') stack.push(']');
+        if ((char === '}' || char === ']') && stack[stack.length - 1] === char) stack.pop();
+    }
+
+    if (inString) result += '"';
+    while (stack.length > 0) result += stack.pop();
+    return result.replace(/,\s*([}\]])/g, '$1');
+}
+
+function buildFallbackStoryboard(script: RecordValue): RecordValue {
+    const sections = arrayOfRecords(script.sections);
+    const fallbackSections: RecordValue[] = sections.length
+        ? sections
+        : splitDraftParagraphs(firstString(script.fullScriptDraft)).map((paragraph, index) => ({
+              sectionId: `section-${index + 1}`,
+              title: paragraph.slice(0, 36),
+              narration: paragraph,
+          }));
+    const sourceMap = script.sourceMap;
+
+    return {
+        visualChapters: fallbackSections.map((section, index) => {
+            const sectionId = firstString(section.sectionId) ?? `section-${index + 1}`;
+            const headline = firstString(section.title, section.headline) ?? `챕터 ${index + 1}`;
+            const narration = firstString(section.summary, section.narration) ?? headline;
+            return {
+                chapterId: `chapter-${index + 1}`,
+                sectionId,
+                headline,
+                visualArchetype: normalizeVisualType(undefined, index),
+                viewerPurpose: 'AI 스토리보드 JSON이 깨져도 검수 가능한 기본 장면 구조를 유지한다.',
+                objects: [
+                    { id: `${sectionId}-headline`, type: 'headline', text: headline },
+                    { id: `${sectionId}-body`, type: 'caption', text: trimText(narration, 120) },
+                ],
+                motionPlan: 'stable chapter canvas with headline reveal and body highlight',
+                evidenceRefs: sourceIdsForSection(sourceMap, sectionId),
+            };
+        }),
+    };
 }
 
 function compactSourceForAi(source: RecordValue): RecordValue {
@@ -692,6 +808,12 @@ function normalizeVisualChapters(value: unknown, sections: RecordValue[], script
         normalizeVisualChapter(chapter, sections, script, index)
     );
     if (chapters.length === 0) throw new Error('AI storyboard output requires at least one visual chapter');
+    if (sections.length > 0 && chapters.length < sections.length) {
+        const fallbackChapters = arrayOfRecords(buildFallbackStoryboard(script).visualChapters).map((chapter, index) =>
+            normalizeVisualChapter(chapter, sections, script, index)
+        );
+        return [...chapters, ...fallbackChapters.slice(chapters.length, sections.length)];
+    }
     return chapters;
 }
 
