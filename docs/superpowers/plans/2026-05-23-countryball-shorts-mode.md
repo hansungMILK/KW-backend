@@ -2,22 +2,24 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a countryball-specific mode to the existing Shorts workflow so users can request or select countryball Shorts and receive source-grounded situation reenactment scripts and scene-structured image prompts.
+**Goal:** Add a countryball-specific mode to the existing Shorts workflow so users can request or select countryball Shorts and receive user-requested situation reenactment scripts and scene-structured image prompts. Real-event grounding is conditional: it is required only when the user's request or generated script makes factual claims.
 
-**Architecture:** Keep the existing `shorts` recipe and add countryball as a Shorts content/profile mode plus image style preset. Countryball is a narrative mode, not just an image style: it reenacts a real event, conflict, negotiation, economic situation, diplomatic moment, or historical situation with countryball characters. The mode is selected only by explicit countryball/polandball/national-ball intent or proposal-card choice, then propagated through content, data, analysis, media-image, TTS, video, and integration node configs. The implementation is additive: existing general Shorts, image-only, longform, script-first review, and recovery behavior must remain unchanged.
+**Architecture:** Keep the existing `shorts` recipe and add countryball as a Shorts content/profile mode plus image style preset. Countryball is a narrative mode, not just an image style: it reenacts the situation the user requested with countryball characters. That situation may be factual, fictional, hypothetical, satirical, historical, political, economic, diplomatic, military, cultural, or metaphorical. The mode is selected only by explicit countryball/polandball/national-ball intent or proposal-card choice, then propagated through content, data, analysis, media-image, TTS, video, and integration node configs. The implementation is additive: existing general Shorts, image-only, longform, script-first review, and recovery behavior must remain unchanged.
 
-**Core Contract:** Countryball output must distinguish `factualClaim` from `dramatizedAction`. Dialogue lines are a reenactment tool, not the primary success criterion. Each countryball run should expose:
+**Core Contract:** Countryball output must start from the user's requested situation and distinguish `factualClaim` from `dramatizedAction` only when factual claims exist. Dialogue lines are a reenactment tool, not the primary success criterion. Each countryball run should expose:
 
 - `contentProfileId: 'shorts.countryball.v1'`
-- `narrativeMode: 'historical-situation-reenactment'`
+- `narrativeMode: 'countryball-situation-reenactment'`
 - `visualStyle: 'countryball-comic'`
-- `sourceEvent`
+- `requestBasis: 'factual' | 'fictional' | 'hypothetical' | 'satirical' | 'metaphorical'`
+- `requestedSituation`
+- `sourceEvent` only for factual requests or factual scene claims
 - `reenactmentFrame`
 - `cast`
 - `sceneBeats[]`
 - scene prompt fields: `characters`, `props`, `background`, `historicalContext`, `captionIntent`, `safetyNotes`
 
-**Execution Order:** Implement in this order even though file-level tasks are listed by code surface below: shared contract -> countryball situation profile -> image style -> source/event grounding rulepack -> reenactment content generator -> analysis/QA -> proposal propagation -> frontend controls -> full regression verification.
+**Execution Order:** Implement in this order even though file-level tasks are listed by code surface below: shared contract -> countryball situation profile -> image style -> request-basis and factual-grounding rulepack -> reenactment content generator -> analysis/QA -> proposal propagation -> frontend controls -> full regression verification.
 
 **Tech Stack:** TypeScript, Zod contracts in `libs/contracts`, backend Vitest, React/Vitest/jsdom frontend tests, existing `@flows/backend` and `@flows/web` Nx targets.
 
@@ -36,7 +38,7 @@
 - Test: `apps/backend/src/modules/orchestrator/workflow-compiler.spec.ts`
     - Existing image-style preference tests can cover preset normalization if needed.
 - Create: `apps/backend/src/modules/shorts/rulepacks/countryball-shorts-rulepack.ts`
-    - Holds countryball situation-reenactment, scene prompt, grounding, visual, and review prompt rules.
+    - Holds countryball user-requested situation-reenactment, scene prompt, conditional factual grounding, visual, and review prompt rules.
 - Modify: `apps/backend/src/modules/shorts/rulepacks/base-shorts-rulepack.ts`
     - Extends `ShortsRulepack.id`.
 - Modify: `apps/backend/src/modules/shorts/topic-router.ts`
@@ -44,7 +46,7 @@
 - Test: create or extend `apps/backend/src/modules/shorts/topic-router.spec.ts`
     - Verifies countryball routing and default routing.
 - Modify: `apps/backend/src/modules/blocks/content-block.ts`
-    - Lets countryball content profile enrich the Shorts prompt with countryball dialogue contract.
+    - Lets countryball content profile enrich the Shorts prompt with countryball reenactment contract.
 - Modify: `apps/backend/src/modules/blocks/content-block.spec.ts`
     - Tests countryball prompt/config behavior without making paid calls.
 - Modify: `apps/backend/src/modules/blocks/analysis-block.ts`
@@ -167,7 +169,7 @@ it('detects countryball Shorts requests and keeps general Shorts selectable', ()
 
     expect(prefs.contentProfileId).toBe('shorts.countryball.v1');
     expect(prefs.scriptToneId).toBe('story-dialogue');
-    expect(prefs.narrativeMode).toBe('historical-situation-reenactment');
+    expect(prefs.narrativeMode).toBe('countryball-situation-reenactment');
     expect(prefs.profileOptions.map(option => option.id)).toEqual(['shorts.info.v1', 'shorts.countryball.v1']);
 });
 
@@ -198,7 +200,8 @@ Expected: FAIL because countryball detection and options are not implemented.
 In `apps/backend/src/modules/content-profile/content-profile.ts`, add an optional `narrativeMode` field to `ContentProfilePreferences`:
 
 ```ts
-narrativeMode?: 'historical-situation-reenactment';
+narrativeMode?: 'countryball-situation-reenactment';
+requestBasis?: 'factual' | 'fictional' | 'hypothetical' | 'satirical' | 'metaphorical';
 ```
 
 Then update `CONTENT_PROFILE_OPTIONS`:
@@ -211,7 +214,7 @@ export const CONTENT_PROFILE_OPTIONS: ContentProfilePreferences['profileOptions'
     {
         id: 'shorts.countryball.v1',
         label: '컨트리볼',
-        description: '국가볼 캐릭터가 실제 사건/상황을 상황극으로 재연하는 쇼츠 형식',
+        description: '국가볼 캐릭터가 사용자가 요청한 사건/상황을 상황극으로 재연하는 쇼츠 형식',
     },
     { id: 'shorts.story.v1', label: '쇼츠 제작', description: '이전 워크플로우 호환용 쇼츠 프로필' },
     { id: 'longform.explainer.v1', label: '롱폼 해설', description: '3-5분 이상 해설 영상' },
@@ -275,7 +278,7 @@ scriptToneId:
         ? normalizeScriptToneId(params.scriptToneId ?? 'story-dialogue')
         : normalizeScriptToneId(params.scriptToneId ?? params.userMessage),
 narrativeMode:
-    contentProfileId === 'shorts.countryball.v1' ? 'historical-situation-reenactment' : undefined,
+    contentProfileId === 'shorts.countryball.v1' ? 'countryball-situation-reenactment' : undefined,
 ```
 
 - [ ] **Step 7: Run focused test**
@@ -348,9 +351,9 @@ Append this object to `IMAGE_STYLE_PRESETS`:
 {
     id: 'countryball-comic',
     label: '컨트리볼 만화',
-    description: '국가볼 캐릭터가 실제 사건/상황을 상황극으로 재연하는 만화 컷',
+    description: '국가볼 캐릭터가 사용자가 요청한 사건/상황을 상황극으로 재연하는 만화 컷',
     promptPrefix:
-        'countryball comic style for Korean Shorts, source-grounded situation reenactment, spherical flag-colored country characters, expressive eyes and eyebrows, simple hands, clear props, bold clean outlines, historical/political/economic/diplomatic reenactment scene, mobile-first composition, avoid offensive national or ethnic stereotypes',
+        'countryball comic style for Korean Shorts, user-requested situation reenactment, spherical flag-colored country characters, expressive eyes and eyebrows, simple hands, clear props, bold clean outlines, factual/fictional/hypothetical/satirical reenactment scene based on the user request, mobile-first composition, avoid offensive national or ethnic stereotypes',
 },
 ```
 
@@ -460,19 +463,27 @@ export const COUNTRYBALL_SHORTS_RULEPACK: ShortsRulepack = {
     label: '컨트리볼 쇼츠',
     triggerKeywords: ['컨트리볼', 'countryball', 'polandball', '폴란드볼', '국가볼', '국가 의인화'],
     sourcePolicy: `Countryball source policy:
-- Historical, political, military, diplomatic, and economic claims need evidenceRefs when source material exists.
-- Satire is allowed, but factual framing must stay source-backed.
+- Historical, political, military, diplomatic, and economic factual claims need evidenceRefs when source material exists.
+- Fictional, hypothetical, metaphorical, or satirical requests do not need sourceEvent grounding unless the scene presents factual claims.
+- Satire is allowed, but factual framing must stay source-backed when facts are asserted.
 - Do not invent exact statistics, dates, documents, textbook claims, or official positions.
 - Keep factualClaim separate from dramatizedAction so review can distinguish fact from satire.`,
     searchPrompt: `Countryball search rules:
 - Search for the factual spine: who, what, when, where, why it matters.
 - Prefer official, museum, academic, reputable news, or primary source material.
 - Keep direct source coverage separate from background context.`,
+    situationPolicy: `Countryball situation policy:
+- The user's request is the source of what to make.
+- Classify the request as factual, fictional, hypothetical, satirical, or metaphorical.
+- Do not force fictional or hypothetical requests into real-event grounding.
+- If the generated scene makes a factual claim, add evidenceRefs for that claim.`,
     contentPrompt: `Countryball script rules:
 - Write a countryball situation reenactment, not a one-speaker lecture and not dialogue for its own sake.
+- Base the situation on the user's request first.
 - Use 2-4 recurring country characters when useful, each with a clear role in the situation.
-- Add top-level sourceEvent, reenactmentFrame, cast, and sceneBeats when possible.
-- Each sceneBeat should separate factualClaim, dramatizedAction, dialogueLines, visualPromptBrief, and evidenceRefs.
+- Add top-level requestBasis, requestedSituation, reenactmentFrame, cast, and sceneBeats when possible.
+- Add sourceEvent only when the requested situation or a scene claim is factual.
+- Each sceneBeat should include dramatizedAction and may include factualClaim, dialogueLines, visualPromptBrief, and evidenceRefs.
 - Each scene should have a clear story beat: hook, setup, conflict, reveal, reaction, consequence, takeaway, or CTA.
 - Each scene may include dialogue: [{ "speaker": "korea", "line": "..." }], but dialogue is only a reenactment tool.
 - Narration should be short and can frame the scene, but the perceived story should come from countryball actions, reactions, props, and situation changes.
@@ -488,8 +499,9 @@ export const COUNTRYBALL_SHORTS_RULEPACK: ShortsRulepack = {
     analysisPrompt: `Countryball analysis rules:
 - Reject or request revision for national or ethnic slurs.
 - Reject captions that imply an entire nationality is stupid, evil, dirty, inferior, or subhuman.
-- Reject unsupported historical claims presented as fact.
+- Reject unsupported historical, political, military, diplomatic, or statistical claims presented as fact.
 - Reject factual claims without evidenceRefs when the scene presents specific dates, statistics, documents, textbook claims, official positions, wars, current conflicts, or diplomatic decisions.
+- Do not reject fictional, hypothetical, metaphorical, or satirical setup just because it lacks sourceEvent.
 - Reject glorification of war crimes, colonization, or civilian harm.
 - Reject insulting national or ethnic stereotypes.
 - Allow light satire only when the factual spine remains accurate, source-backed, and separated from dramatizedAction.`,
@@ -571,7 +583,7 @@ it('adds countryball reenactment instructions when the content profile is countr
                     mode: 'countryball',
                     reenactment: true,
                 }),
-                narrativeMode: 'historical-situation-reenactment',
+                narrativeMode: 'countryball-situation-reenactment',
                 visualStyle: 'countryball-comic',
             }),
         })
@@ -615,12 +627,13 @@ When constructing the Shorts system prompt, append countryball-specific output i
 ```ts
 const countryballOutputRules = isCountryballContentProfile(input, config)
     ? `Countryball output addendum:
-- Add top-level "sourceEvent", "reenactmentFrame", and "cast" when possible.
-- Each scene should separate "factualClaim" from "dramatizedAction".
+- Add top-level "requestBasis", "requestedSituation", "reenactmentFrame", and "cast" when possible.
+- Add top-level "sourceEvent" only when the requested situation or scene claims are factual.
+- Each scene should always include "dramatizedAction" and should include "factualClaim" only when it asserts a fact.
 - Each scene may include "dialogue": [{ "speaker": "korea", "line": "..." }], but dialogue supports reenactment and is not the goal.
 - Add "countryballScene" with sceneNumber, characters[{countryCode, expression, pose}], props, background, historicalContext, captionIntent, and safetyNotes.
-- Set style.narrativeMode to "historical-situation-reenactment", style.visualStyle to "countryball-comic", style.visualGrammar.mode to "countryball", and style.visualGrammar.reenactment to true.
-- Keep narration short; make the scene feel like country characters are reenacting a real situation.`
+- Set style.narrativeMode to "countryball-situation-reenactment", style.visualStyle to "countryball-comic", style.visualGrammar.mode to "countryball", and style.visualGrammar.reenactment to true.
+- Keep narration short; make the scene feel like country characters are reenacting the user's requested situation.`
     : '';
 ```
 
@@ -642,7 +655,7 @@ if (
             mode: 'countryball',
             reenactment: true,
         },
-        narrativeMode: 'historical-situation-reenactment',
+        narrativeMode: 'countryball-situation-reenactment',
         visualStyle: 'countryball-comic',
     };
 }
@@ -710,7 +723,7 @@ it('defaults countryball Shorts requests to the countryball profile and image st
         expect.objectContaining({
             contentProfileId: 'shorts.countryball.v1',
             scriptToneId: 'story-dialogue',
-            narrativeMode: 'historical-situation-reenactment',
+            narrativeMode: 'countryball-situation-reenactment',
         })
     );
     expect(proposal.metadata?.['imageGeneration']).toEqual(
@@ -813,7 +826,7 @@ it('lets the user select countryball mode for Shorts proposals', async () => {
                     {
                         id: 'shorts.countryball.v1',
                         label: '컨트리볼',
-                        description: '국가볼 캐릭터가 실제 사건/상황을 상황극으로 재연하는 쇼츠',
+                        description: '국가볼 캐릭터가 사용자가 요청한 사건/상황을 상황극으로 재연하는 쇼츠',
                     },
                 ],
             },
@@ -997,7 +1010,7 @@ it('rejects countryball scripts with unsupported specific historical claims', as
             style: {
                 format: 'vertical-shorts',
                 contentProfileId: 'shorts.countryball.v1',
-                narrativeMode: 'historical-situation-reenactment',
+                narrativeMode: 'countryball-situation-reenactment',
                 visualGrammar: { mode: 'countryball', reenactment: true },
             },
             scenes: [
@@ -1177,7 +1190,7 @@ Expected:
 - Proposal card shows `컨트리볼`.
 - `컨트리볼 만화` image style is selected or selectable.
 - Approval payload includes `contentProfileId: shorts.countryball.v1`.
-- Script-first output includes `sourceEvent`, `reenactmentFrame`, `cast`, `factualClaim`, `dramatizedAction`, dialogue lines as needed, and scene prompt fields for countryball reenactment.
+- Script-first output includes `requestedSituation`, `requestBasis`, `reenactmentFrame`, `cast`, `dramatizedAction`, dialogue lines as needed, and scene prompt fields for countryball reenactment. Factual requests or factual scene claims also include `sourceEvent`, `factualClaim`, and `evidenceRefs`.
 - A generic `미중갈등 쇼츠 만들어줘` prompt stays on normal Shorts unless the proposal card is changed to `컨트리볼`.
 
 - [ ] **Step 6: Final commit if any verification fixes were needed**
