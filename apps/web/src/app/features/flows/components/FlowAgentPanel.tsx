@@ -304,6 +304,8 @@ export const FlowAgentPanel = ({
         runActivity?.runId &&
         runActivity?.nodeId &&
         (runActivity.errorCode === 'ANALYSIS_REJECTED' ||
+            runActivity.errorCode === 'ANALYSIS_RECOVERY_FAILED' ||
+            runActivity.error === 'SCRIPT_RECOVERY_INVALID_JSON' ||
             Boolean(runActivity.error?.startsWith('Analysis rejected content:')));
     const isAnalysisRecoveryInProgress =
         (isRecoveringAnalysis && Boolean(canRecoverAnalysisFailure)) ||

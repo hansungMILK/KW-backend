@@ -224,6 +224,127 @@ describe('runService cost guards', () => {
         );
     });
 
+    it('re-queues recovery after a script recovery JSON failure without losing the original review feedback', async () => {
+        getRunNode.mockResolvedValueOnce({
+            runId: 'run-analysis-request',
+            nodeId: 'node-analysis',
+            blockType: 'analysis',
+            label: '사실성 및 형식 검수',
+            status: 'FAILED',
+            progress: 100,
+            retryCount: 1,
+            parentNodeIds: ['node-content'],
+            errorCode: 'ANALYSIS_RECOVERY_FAILED',
+            errorMessage: 'SCRIPT_RECOVERY_INVALID_JSON',
+            outputPayload: {
+                recoveryRequest: {
+                    requestedAt: '2026-05-13T00:00:00.000Z',
+                    reason: 'quality review feedback',
+                    reviewError: 'Analysis rejected content: 서울 명소가 충분히 반영되지 않았습니다.',
+                    reviewIssues: [
+                        {
+                            severity: 'high',
+                            message: '서울 명소가 대본 본문/자막에 충분히 반영되지 않았습니다.',
+                        },
+                    ],
+                    sourceNodeId: 'node-content',
+                },
+            },
+            updatedAt: '2026-05-13T00:00:00.000Z',
+        });
+        getRun.mockResolvedValueOnce({
+            runId: 'run-analysis-request',
+            flowId: 'flow-analysis-request',
+            runType: 'FULL_FLOW',
+            status: 'FAILED',
+            triggerSource: 'MANUAL',
+            flowSnapshot: {
+                nodes: [
+                    { id: 'node-content', blockType: 'content', config: {} },
+                    { id: 'node-analysis', blockType: 'analysis', config: {} },
+                    { id: 'node-image', blockType: 'media-image', config: {} },
+                ],
+                edges: [
+                    { source: 'node-content', target: 'node-analysis' },
+                    { source: 'node-analysis', target: 'node-image' },
+                ],
+            },
+            createdAt: '2026-05-13T00:00:00.000Z',
+        });
+        listRunNodes.mockResolvedValueOnce([
+            {
+                runId: 'run-analysis-request',
+                nodeId: 'node-content',
+                blockType: 'content',
+                label: '스크립트 생성',
+                status: 'COMPLETED',
+                progress: 100,
+                retryCount: 0,
+                parentNodeIds: [],
+                outputPayload: { scenes: [{ sceneNumber: 1, narration: '원본' }] },
+                updatedAt: '2026-05-13T00:00:00.000Z',
+            },
+            {
+                runId: 'run-analysis-request',
+                nodeId: 'node-analysis',
+                blockType: 'analysis',
+                label: '사실성 및 형식 검수',
+                status: 'FAILED',
+                progress: 100,
+                retryCount: 1,
+                parentNodeIds: ['node-content'],
+                errorCode: 'ANALYSIS_RECOVERY_FAILED',
+                updatedAt: '2026-05-13T00:00:00.000Z',
+            },
+            {
+                runId: 'run-analysis-request',
+                nodeId: 'node-image',
+                blockType: 'media-image',
+                label: '이미지 생성',
+                status: 'PENDING',
+                progress: 0,
+                retryCount: 0,
+                parentNodeIds: ['node-analysis'],
+                updatedAt: '2026-05-13T00:00:00.000Z',
+            },
+        ]);
+        updateRunNodeStatus.mockResolvedValue({ ok: true });
+        updateRunStatus.mockResolvedValue({ ok: true });
+        sendQueueMessage.mockResolvedValue(undefined);
+
+        const result = await runService.requestAnalysisRecovery(
+            'run-analysis-request',
+            'node-analysis',
+            'quality review feedback'
+        );
+
+        expect(result).toEqual({ ok: true, repairedSourceNodeId: 'node-content' });
+        expect(updateRunNodeStatus).toHaveBeenCalledWith(
+            'run-analysis-request',
+            'node-analysis',
+            'PENDING',
+            expect.objectContaining({
+                outputPayload: expect.objectContaining({
+                    recoveryRequest: expect.objectContaining({
+                        reviewError: 'Analysis rejected content: 서울 명소가 충분히 반영되지 않았습니다.',
+                        reviewIssues: expect.arrayContaining([
+                            expect.objectContaining({
+                                message: '서울 명소가 대본 본문/자막에 충분히 반영되지 않았습니다.',
+                            }),
+                        ]),
+                    }),
+                }),
+            })
+        );
+        expect(sendQueueMessage).toHaveBeenCalledWith(
+            expect.objectContaining({
+                type: 'RECOVER_ANALYSIS_NODE',
+                runId: 'run-analysis-request',
+                nodeId: 'node-analysis',
+            })
+        );
+    });
+
     it('creates a run snapshot from only the selected workflow group', async () => {
         getFlow.mockResolvedValueOnce({
             id: 'flow-multi-group',

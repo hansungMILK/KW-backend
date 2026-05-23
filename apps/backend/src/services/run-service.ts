@@ -284,6 +284,9 @@ const isRecoverableAnalysisFailure = (node: RunNode): boolean =>
     node.blockType === 'analysis' &&
     node.status === 'FAILED' &&
     (node.errorCode === 'ANALYSIS_REJECTED' ||
+        (node.errorCode === 'ANALYSIS_RECOVERY_FAILED' &&
+            isRecord(node.outputPayload) &&
+            isRecord(node.outputPayload['recoveryRequest'])) ||
         (typeof node.errorMessage === 'string' && node.errorMessage.startsWith('Analysis rejected content:')));
 
 const extractAnalysisIssues = (node: RunNode): Array<Record<string, unknown>> => {
@@ -1197,7 +1200,12 @@ export const runService = {
         const nodeIds = allNodes.map(n => n.nodeId);
         const edges = run.flowSnapshot.edges as Array<Record<string, unknown>>;
         const descendantNodeIds = collectDescendantNodeIds(nodeId, nodeIds, edges);
-        const issues = extractAnalysisIssues(node);
+        const existingRecoveryRequest = readRecoveryRequest(node);
+        const issues = readRecoveryIssues(existingRecoveryRequest, node);
+        const reviewError =
+            typeof existingRecoveryRequest?.['reviewError'] === 'string'
+                ? existingRecoveryRequest['reviewError']
+                : node.errorMessage;
 
         const resetResult = await runRepo.updateRunNodeStatus(runId, nodeId, 'PENDING', {
             outputPayload: {
@@ -1205,7 +1213,7 @@ export const runService = {
                     requestedAt: now,
                     reason,
                     reviewIssues: issues,
-                    reviewError: node.errorMessage,
+                    reviewError,
                     sourceNodeId: sourceNode.nodeId,
                 },
             },

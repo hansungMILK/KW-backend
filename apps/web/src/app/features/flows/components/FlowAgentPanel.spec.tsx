@@ -333,6 +333,36 @@ describe('FlowAgentPanel proposal content profile controls', () => {
         resolveRecovery?.();
     });
 
+    it('lets the user retry after a prior script recovery JSON failure', async () => {
+        const onRecoverAnalysisFailure = vi.fn(async () => undefined);
+
+        render(
+            <FlowAgentPanel
+                open
+                onClose={() => undefined}
+                flowId="flow-1"
+                runStatus="failed"
+                runActivity={{
+                    state: 'failed',
+                    runId: 'run-1',
+                    nodeId: 'node-analysis',
+                    nodeLabel: '사실성 및 형식 검수',
+                    errorCode: 'ANALYSIS_RECOVERY_FAILED',
+                    error: 'SCRIPT_RECOVERY_INVALID_JSON',
+                    message: '워크플로우 실행이 실패했습니다.',
+                    progress: 100,
+                }}
+                onRecoverAnalysisFailure={onRecoverAnalysisFailure}
+            />
+        );
+
+        fireEvent.click(await screen.findByRole('button', { name: /피드백 반영해 다시 생성/ }));
+
+        await waitFor(() => {
+            expect(onRecoverAnalysisFailure).toHaveBeenCalledWith('run-1', 'node-analysis');
+        });
+    });
+
     it('keeps quality feedback recovery labeled after the parent switches the run back to running', async () => {
         render(
             <FlowAgentPanel
