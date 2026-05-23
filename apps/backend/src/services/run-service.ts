@@ -265,6 +265,8 @@ const ANALYSIS_RECOVERY_SYSTEM_PROMPT = [
     'Remove repeated sentences and make each scene advance a different point.',
     'Do not add markdown fences or explanation.',
 ].join('\n');
+const ANALYSIS_RECOVERY_MAX_TOKENS = 8192;
+const ANALYSIS_RECOVERY_MAX_PARSE_ATTEMPTS = 2;
 
 const getProviderForBlock = (blockType: string): ApiKeyProvider | undefined => {
     return env.aiProvider === 'legacy' ? LEGACY_BLOCK_PROVIDER_MAP[blockType] : OPENAI_BLOCK_PROVIDER_MAP[blockType];
@@ -329,14 +331,67 @@ const findRecoverableContentAncestor = (analysisNode: RunNode, allNodes: RunNode
     return undefined;
 };
 
+const extractJsonObjectText = (content: string): string => {
+    const trimmed = content.trim();
+    const start = trimmed.indexOf('{');
+    const end = trimmed.lastIndexOf('}');
+    return start >= 0 && end > start ? trimmed.slice(start, end + 1) : trimmed;
+};
+
+const repairPossiblyTruncatedJsonObject = (json: string): string | undefined => {
+    const start = json.indexOf('{');
+    if (start < 0) return undefined;
+
+    let result = json
+        .slice(start)
+        .replace(/,\s*([}\]])/g, '$1')
+        .trimEnd();
+    const stack: string[] = [];
+    let inString = false;
+    let escaped = false;
+
+    for (const char of result) {
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (char === '\\' && inString) {
+            escaped = true;
+            continue;
+        }
+        if (char === '"') {
+            inString = !inString;
+            continue;
+        }
+        if (inString) continue;
+        if (char === '{') stack.push('}');
+        if (char === '[') stack.push(']');
+        if ((char === '}' || char === ']') && stack[stack.length - 1] === char) stack.pop();
+    }
+
+    if (inString) result += '"';
+    while (stack.length > 0) result += stack.pop();
+    return result.replace(/,\s*([}\]])/g, '$1');
+};
+
 const parseRecoveredContentOutput = (
-    content: string
+    content: string,
+    expectedSourceOutput?: Record<string, unknown>
 ): { ok: true; output: Record<string, unknown> } | { ok: false; error: string } => {
     let parsed: unknown;
+    const json = extractJsonObjectText(content);
     try {
-        parsed = JSON.parse(content);
+        parsed = JSON.parse(json);
     } catch {
-        return { ok: false, error: 'SCRIPT_RECOVERY_INVALID_JSON' };
+        const repairedJson = repairPossiblyTruncatedJsonObject(json);
+        if (!repairedJson || repairedJson === json) {
+            return { ok: false, error: 'SCRIPT_RECOVERY_INVALID_JSON' };
+        }
+        try {
+            parsed = JSON.parse(repairedJson);
+        } catch {
+            return { ok: false, error: 'SCRIPT_RECOVERY_INVALID_JSON' };
+        }
     }
 
     const validated = ContentOutputSchema.safeParse(parsed);
@@ -344,6 +399,13 @@ const parseRecoveredContentOutput = (
         return {
             ok: false,
             error: `SCRIPT_RECOVERY_INVALID_OUTPUT: ${validated.error.issues.map(issue => issue.message).join(', ')}`,
+        };
+    }
+    const expectedSceneCount = Array.isArray(expectedSourceOutput?.['scenes']) ? expectedSourceOutput.scenes.length : 0;
+    if (expectedSceneCount > 0 && validated.data.scenes.length !== expectedSceneCount) {
+        return {
+            ok: false,
+            error: `SCRIPT_RECOVERY_SCENE_COUNT_MISMATCH: expected ${expectedSceneCount}, got ${validated.data.scenes.length}`,
         };
     }
     return { ok: true, output: validated.data as Record<string, unknown> };
@@ -380,35 +442,48 @@ const rewriteRecoverableContentOutput = async (
     issues: Array<Record<string, unknown>>,
     reviewError?: string | null
 ): Promise<{ ok: true; output: Record<string, unknown> } | RunServiceFailure> => {
-    let response;
-    try {
-        response = await openaiAdapter.chatJson({
-            systemPrompt: ANALYSIS_RECOVERY_SYSTEM_PROMPT,
-            userMessage: JSON.stringify(
-                {
-                    runId,
-                    analysisNodeId: nodeId,
-                    reason,
-                    reviewIssues: issues,
-                    reviewError: reviewError ?? node.errorMessage,
-                    originalScript: sourceNode.outputPayload,
-                },
-                null,
-                2
-            ),
-            maxTokens: 4096,
-        });
-    } catch (error) {
-        return {
-            ok: false,
-            error: error instanceof Error ? error.message : String(error),
-            status: 400,
-        };
+    let lastParseError = 'SCRIPT_RECOVERY_INVALID_JSON';
+    for (let attempt = 1; attempt <= ANALYSIS_RECOVERY_MAX_PARSE_ATTEMPTS; attempt += 1) {
+        let response;
+        try {
+            response = await openaiAdapter.chatJson({
+                systemPrompt:
+                    attempt === 1
+                        ? ANALYSIS_RECOVERY_SYSTEM_PROMPT
+                        : [
+                              ANALYSIS_RECOVERY_SYSTEM_PROMPT,
+                              `The previous recovery output was rejected: ${lastParseError}.`,
+                              'Return one complete valid JSON object only. Keep all original scenes and required fields.',
+                              'Prefer concise narration and imagePrompt text over truncating the JSON.',
+                          ].join('\n'),
+                userMessage: JSON.stringify(
+                    {
+                        runId,
+                        analysisNodeId: nodeId,
+                        reason,
+                        reviewIssues: issues,
+                        reviewError: reviewError ?? node.errorMessage,
+                        originalScript: sourceNode.outputPayload,
+                    },
+                    null,
+                    2
+                ),
+                maxTokens: ANALYSIS_RECOVERY_MAX_TOKENS,
+            });
+        } catch (error) {
+            return {
+                ok: false,
+                error: error instanceof Error ? error.message : String(error),
+                status: 400,
+            };
+        }
+
+        const parsed = parseRecoveredContentOutput(response.content, sourceNode.outputPayload ?? undefined);
+        if (parsed.ok) return { ok: true, output: parsed.output };
+        lastParseError = parsed.error;
     }
 
-    const parsed = parseRecoveredContentOutput(response.content);
-    if (!parsed.ok) return { ok: false, error: parsed.error, status: 400 };
-    return { ok: true, output: parsed.output };
+    return { ok: false, error: lastParseError, status: 400 };
 };
 
 const failQueuedAnalysisRecovery = async (runId: string, nodeId: string, errorMessage: string): Promise<void> => {
@@ -1279,36 +1354,8 @@ export const runService = {
         }
 
         const issues = extractAnalysisIssues(node);
-        let response;
-        try {
-            response = await openaiAdapter.chatJson({
-                systemPrompt: ANALYSIS_RECOVERY_SYSTEM_PROMPT,
-                userMessage: JSON.stringify(
-                    {
-                        runId,
-                        analysisNodeId: nodeId,
-                        reason,
-                        reviewIssues: issues,
-                        reviewError: node.errorMessage,
-                        originalScript: sourceNode.outputPayload,
-                    },
-                    null,
-                    2
-                ),
-                maxTokens: 4096,
-            });
-        } catch (error) {
-            return {
-                ok: false,
-                error: error instanceof Error ? error.message : String(error),
-                status: 400,
-            };
-        }
-
-        const parsed = parseRecoveredContentOutput(response.content);
-        if (!parsed.ok) {
-            return { ok: false, error: parsed.error, status: 400 };
-        }
+        const parsed = await rewriteRecoverableContentOutput(runId, nodeId, node, sourceNode, reason, issues);
+        if (!parsed.ok) return parsed;
 
         await runRepo.putRunNode({
             ...sourceNode,

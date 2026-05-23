@@ -1285,13 +1285,21 @@ describe('runService cost guards', () => {
                     updatedAt: '2026-05-13T00:00:00.000Z',
                 },
             ]);
-        chatJson.mockResolvedValueOnce({
-            content: JSON.stringify(repairedOutput),
-            model: 'gpt-test',
-            inputTokens: 100,
-            outputTokens: 200,
-            latencyMs: 25,
-        });
+        chatJson
+            .mockResolvedValueOnce({
+                content: '{"hook":"truncated"',
+                model: 'gpt-test',
+                inputTokens: 100,
+                outputTokens: 200,
+                latencyMs: 25,
+            })
+            .mockResolvedValueOnce({
+                content: JSON.stringify(repairedOutput),
+                model: 'gpt-test',
+                inputTokens: 100,
+                outputTokens: 200,
+                latencyMs: 25,
+            });
         putRunNode.mockResolvedValue(undefined);
         updateRunNodeStatus.mockResolvedValue({ ok: true });
         updateRunStatus.mockResolvedValue({ ok: true });
@@ -1300,10 +1308,16 @@ describe('runService cost guards', () => {
         const result = await runService.recoverAnalysisNode('run-analysis-recover', 'node-analysis', 'user requested');
 
         expect(result).toEqual({ ok: true, repairedSourceNodeId: 'node-content' });
+        expect(chatJson).toHaveBeenCalledTimes(2);
         expect(chatJson).toHaveBeenCalledWith(
             expect.objectContaining({
                 systemPrompt: expect.stringContaining('quality-review feedback'),
                 userMessage: expect.stringContaining('요청한 핵심 주제'),
+            })
+        );
+        expect(chatJson).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+                systemPrompt: expect.stringContaining('previous recovery output was rejected'),
             })
         );
         expect(putRunNode).toHaveBeenCalledWith(
