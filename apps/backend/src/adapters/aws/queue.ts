@@ -133,6 +133,12 @@ export const queue = {
                 await executionEngine.handleNodeExecution(message.runId, message.nodeId, message.executionId);
                 break;
 
+            case 'RECOVER_ANALYSIS_NODE': {
+                const { runService } = await import('../../services/run-service');
+                await runService.performQueuedAnalysisRecovery(message.runId, message.nodeId, message.reason);
+                break;
+            }
+
             default: {
                 const _exhaustive: never = message;
                 console.warn('[queue] processLocally: unknown message type', _exhaustive);

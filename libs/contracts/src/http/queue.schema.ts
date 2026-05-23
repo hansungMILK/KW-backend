@@ -20,6 +20,14 @@ export const QueueMessageSchema = z.discriminatedUnion('type', [
         executionId: z.string(),
         timestamp: z.string(),
     }),
+    z.object({
+        type: z.literal('RECOVER_ANALYSIS_NODE'),
+        runId: z.string(),
+        nodeId: z.string(),
+        reason: z.string().optional(),
+        executionId: z.string(),
+        timestamp: z.string(),
+    }),
 ]);
 
 export type QueueMessage = z.infer<typeof QueueMessageSchema>;

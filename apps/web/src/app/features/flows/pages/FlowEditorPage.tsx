@@ -64,6 +64,7 @@ type RunActivity = {
     state?: 'queued' | 'running' | 'reviewing' | 'completed' | 'failed';
     message?: string;
     error?: string | null;
+    recoveryType?: 'analysis-feedback';
 };
 
 type RunReviewSummary = {
@@ -1219,8 +1220,9 @@ export const FlowEditorPage = () => {
     };
 
     const handleRecoverAnalysisFailure = async (runId: string, nodeId: string) => {
+        const previousRunStatus = runStatus;
+        const previousRunActivity = runActivity;
         try {
-            await recoverRunNode(runId, nodeId, 'quality review feedback');
             setActiveRunId(runId);
             setRunStatus('running');
             setRunActivity({
@@ -1230,9 +1232,13 @@ export const FlowEditorPage = () => {
                 progress: 0,
                 state: 'running',
                 message: '품질검수 피드백을 반영해 새 대본을 생성하고 있습니다.',
+                recoveryType: 'analysis-feedback',
             });
+            await recoverRunNode(runId, nodeId, 'quality review feedback');
             showNotification('품질검수 피드백을 반영해 대본을 다시 생성합니다.', 'success');
         } catch (error) {
+            setRunStatus(previousRunStatus);
+            setRunActivity(previousRunActivity);
             showNotification(error instanceof Error ? error.message : '대본 재생성 요청 실패', 'error');
             throw error;
         }

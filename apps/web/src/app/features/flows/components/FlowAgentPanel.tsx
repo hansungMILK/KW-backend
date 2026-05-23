@@ -117,6 +117,7 @@ interface FlowAgentPanelProps {
         state?: 'queued' | 'running' | 'reviewing' | 'completed' | 'failed';
         message?: string;
         error?: string | null;
+        recoveryType?: 'analysis-feedback';
     } | null;
     onRecoverAnalysisFailure?: (runId: string, nodeId: string) => void | Promise<void>;
 }
@@ -304,6 +305,18 @@ export const FlowAgentPanel = ({
         runActivity?.nodeId &&
         (runActivity.errorCode === 'ANALYSIS_REJECTED' ||
             Boolean(runActivity.error?.startsWith('Analysis rejected content:')));
+    const isAnalysisRecoveryInProgress =
+        (isRecoveringAnalysis && Boolean(canRecoverAnalysisFailure)) ||
+        (runStatus === 'running' && runActivity?.recoveryType === 'analysis-feedback');
+    const displayRunStatus = isAnalysisRecoveryInProgress ? 'running' : runStatus;
+    const displayRunActivity = isAnalysisRecoveryInProgress
+        ? {
+              ...runActivity,
+              progress: 10,
+              state: 'running' as const,
+              message: '검수 피드백을 반영해 새 대본을 생성하고 있습니다.',
+          }
+        : runActivity;
 
     // Handle externally pushed proposal.created WS event
     useEffect(() => {
@@ -458,57 +471,63 @@ export const FlowAgentPanel = ({
                 </button>
             </div>
 
-            {runStatus && (
+            {displayRunStatus && (
                 <div className="px-4 py-3 border-b border-border/70 bg-muted/20 shrink-0">
                     <div
                         className={`rounded-lg border px-3 py-2 text-[12px] ${
-                            runStatus === 'running'
+                            displayRunStatus === 'running'
                                 ? 'border-status-running/30 bg-status-running/10 text-status-running'
-                                : runStatus === 'reviewing'
+                                : displayRunStatus === 'reviewing'
                                   ? 'border-primary/40 bg-primary/10 text-primary'
-                                  : runStatus === 'completed'
+                                  : displayRunStatus === 'completed'
                                     ? 'border-status-completed/30 bg-status-completed/10 text-status-completed'
                                     : 'border-destructive/30 bg-destructive/10 text-destructive'
                         }`}
                     >
                         <div className="flex items-center gap-2 font-semibold">
-                            {runStatus === 'running' && (
+                            {displayRunStatus === 'running' && (
                                 <span className="relative flex h-2.5 w-2.5">
                                     <span className="absolute inline-flex h-full w-full rounded-full bg-status-running opacity-70 animate-ping" />
                                     <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-status-running" />
                                 </span>
                             )}
                             <span>
-                                {runStatus === 'running' && '워크플로우 실행 중'}
-                                {runStatus === 'reviewing' && '대본 검수 대기'}
-                                {runStatus === 'completed' && '워크플로우 실행 완료'}
-                                {runStatus === 'failed' && '워크플로우 실행 실패'}
+                                {isAnalysisRecoveryInProgress
+                                    ? '품질검수 피드백 반영 중'
+                                    : displayRunStatus === 'running'
+                                      ? '워크플로우 실행 중'
+                                      : null}
+                                {displayRunStatus === 'reviewing' && '대본 검수 대기'}
+                                {displayRunStatus === 'completed' && '워크플로우 실행 완료'}
+                                {displayRunStatus === 'failed' && '워크플로우 실행 실패'}
                             </span>
                         </div>
-                        {runActivity?.nodeLabel && (
+                        {displayRunActivity?.nodeLabel && (
                             <div className="mt-1 text-muted-foreground">
-                                현재 노드: <span className="text-foreground">{runActivity.nodeLabel}</span>
+                                현재 노드: <span className="text-foreground">{displayRunActivity.nodeLabel}</span>
                             </div>
                         )}
-                        {runActivity?.message && <div className="mt-1 text-foreground/90">{runActivity.message}</div>}
-                        {typeof runActivity?.progress === 'number' && (
+                        {displayRunActivity?.message && (
+                            <div className="mt-1 text-foreground/90">{displayRunActivity.message}</div>
+                        )}
+                        {typeof displayRunActivity?.progress === 'number' && (
                             <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
                                 <div
                                     className={`h-full rounded-full transition-all duration-300 ${
-                                        runStatus === 'failed'
+                                        displayRunStatus === 'failed'
                                             ? 'bg-destructive'
-                                            : runStatus === 'reviewing'
+                                            : displayRunStatus === 'reviewing'
                                               ? 'bg-primary'
                                               : 'bg-status-running'
                                     }`}
-                                    style={{ width: `${Math.min(100, Math.max(3, runActivity.progress))}%` }}
+                                    style={{ width: `${Math.min(100, Math.max(3, displayRunActivity.progress))}%` }}
                                 />
                             </div>
                         )}
-                        {runStatus === 'failed' && runActivity?.error && (
-                            <div className="mt-1 text-destructive/90">{runActivity.error}</div>
+                        {displayRunStatus === 'failed' && displayRunActivity?.error && (
+                            <div className="mt-1 text-destructive/90">{displayRunActivity.error}</div>
                         )}
-                        {canRecoverAnalysisFailure && (
+                        {canRecoverAnalysisFailure && !isAnalysisRecoveryInProgress && (
                             <div className="mt-3 rounded-md border border-border/80 bg-background/40 p-2 text-foreground">
                                 <div className="text-[12px] font-semibold">
                                     품질검수 피드백을 반영한 새 대본을 생성할까요?

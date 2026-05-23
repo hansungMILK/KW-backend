@@ -86,6 +86,48 @@ describe('queue local dispatch', () => {
         expect(handleRunExecution).toHaveBeenCalledWith('run-inline', 'exec-inline');
     });
 
+    it('processes queued analysis recovery through run service', async () => {
+        const performQueuedAnalysisRecovery = vi.fn(async () => undefined);
+
+        vi.doMock('../../config/env', () => ({
+            env: {
+                awsRegion: 'ap-northeast-2',
+                executionQueueUrl: '',
+                localQueueMode: 'inline',
+                stage: 'local',
+            },
+            isAwsExecutionEnvironment: false,
+            isLocalStage: true,
+        }));
+        vi.doMock('../../services/execution-engine', () => ({
+            executionEngine: {
+                handleNodeExecution: vi.fn(),
+                handleRunExecution: vi.fn(),
+            },
+        }));
+        vi.doMock('../../services/run-service', () => ({
+            runService: {
+                performQueuedAnalysisRecovery,
+            },
+        }));
+
+        const { queue } = await import('./queue');
+        await queue.processLocally({
+            type: 'RECOVER_ANALYSIS_NODE',
+            runId: 'run-recover',
+            nodeId: 'node-analysis',
+            reason: 'quality review feedback',
+            executionId: 'exec-recover',
+            timestamp: '2026-05-12T00:00:00.000Z',
+        });
+
+        expect(performQueuedAnalysisRecovery).toHaveBeenCalledWith(
+            'run-recover',
+            'node-analysis',
+            'quality review feedback'
+        );
+    });
+
     it('does not fall back to the local worker in AWS Lambda', async () => {
         const spawn = vi.fn();
 

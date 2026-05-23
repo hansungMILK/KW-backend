@@ -100,6 +100,130 @@ describe('runService cost guards', () => {
         expect(sendQueueMessage).toHaveBeenCalled();
     });
 
+    it('accepts analysis recovery quickly by queuing the rewrite worker', async () => {
+        getRunNode.mockResolvedValueOnce({
+            runId: 'run-analysis-request',
+            nodeId: 'node-analysis',
+            blockType: 'analysis',
+            label: '사실성 및 형식 검수',
+            status: 'FAILED',
+            progress: 100,
+            retryCount: 0,
+            parentNodeIds: ['node-content'],
+            errorCode: 'ANALYSIS_REJECTED',
+            errorMessage: 'Analysis rejected content: 핵심 주제가 부족합니다.',
+            outputPayload: {
+                issues: [{ severity: 'high', message: '핵심 주제가 부족합니다.' }],
+            },
+            updatedAt: '2026-05-13T00:00:00.000Z',
+        });
+        getRun.mockResolvedValueOnce({
+            runId: 'run-analysis-request',
+            flowId: 'flow-analysis-request',
+            runType: 'FULL_FLOW',
+            status: 'FAILED',
+            triggerSource: 'MANUAL',
+            flowSnapshot: {
+                nodes: [
+                    { id: 'node-content', blockType: 'content', config: {} },
+                    { id: 'node-analysis', blockType: 'analysis', config: {} },
+                    { id: 'node-image', blockType: 'media-image', config: {} },
+                ],
+                edges: [
+                    { source: 'node-content', target: 'node-analysis' },
+                    { source: 'node-analysis', target: 'node-image' },
+                ],
+            },
+            createdAt: '2026-05-13T00:00:00.000Z',
+        });
+        listRunNodes.mockResolvedValueOnce([
+            {
+                runId: 'run-analysis-request',
+                nodeId: 'node-content',
+                blockType: 'content',
+                label: '스크립트 생성',
+                status: 'COMPLETED',
+                progress: 100,
+                retryCount: 0,
+                parentNodeIds: [],
+                outputPayload: { scenes: [{ sceneNumber: 1, narration: '원본' }] },
+                updatedAt: '2026-05-13T00:00:00.000Z',
+            },
+            {
+                runId: 'run-analysis-request',
+                nodeId: 'node-analysis',
+                blockType: 'analysis',
+                label: '사실성 및 형식 검수',
+                status: 'FAILED',
+                progress: 100,
+                retryCount: 0,
+                parentNodeIds: ['node-content'],
+                errorCode: 'ANALYSIS_REJECTED',
+                updatedAt: '2026-05-13T00:00:00.000Z',
+            },
+            {
+                runId: 'run-analysis-request',
+                nodeId: 'node-image',
+                blockType: 'media-image',
+                label: '이미지 생성',
+                status: 'SKIPPED',
+                progress: 0,
+                retryCount: 0,
+                parentNodeIds: ['node-analysis'],
+                updatedAt: '2026-05-13T00:00:00.000Z',
+            },
+        ]);
+        updateRunNodeStatus.mockResolvedValue({ ok: true });
+        updateRunStatus.mockResolvedValue({
+            ok: true,
+            run: {
+                runId: 'run-analysis-request',
+                flowId: 'flow-analysis-request',
+                runType: 'FULL_FLOW',
+                status: 'RUNNING',
+                triggerSource: 'MANUAL',
+                flowSnapshot: { nodes: [], edges: [] },
+                createdAt: '2026-05-13T00:00:00.000Z',
+            },
+        });
+        sendQueueMessage.mockResolvedValue(undefined);
+
+        const result = await runService.requestAnalysisRecovery(
+            'run-analysis-request',
+            'node-analysis',
+            'quality review feedback'
+        );
+
+        expect(result).toEqual({ ok: true, repairedSourceNodeId: 'node-content' });
+        expect(chatJson).not.toHaveBeenCalled();
+        expect(updateRunNodeStatus).toHaveBeenCalledWith(
+            'run-analysis-request',
+            'node-analysis',
+            'PENDING',
+            expect.objectContaining({
+                outputPayload: expect.objectContaining({
+                    recoveryRequest: expect.objectContaining({
+                        reason: 'quality review feedback',
+                        reviewError: 'Analysis rejected content: 핵심 주제가 부족합니다.',
+                    }),
+                }),
+            })
+        );
+        expect(updateRunNodeStatus).toHaveBeenCalledWith('run-analysis-request', 'node-image', 'PENDING');
+        expect(updateRunStatus).toHaveBeenCalledWith(
+            'run-analysis-request',
+            'RUNNING',
+            expect.objectContaining({ completedAt: null, finalOutputSummary: null })
+        );
+        expect(sendQueueMessage).toHaveBeenCalledWith(
+            expect.objectContaining({
+                type: 'RECOVER_ANALYSIS_NODE',
+                runId: 'run-analysis-request',
+                nodeId: 'node-analysis',
+            })
+        );
+    });
+
     it('creates a run snapshot from only the selected workflow group', async () => {
         getFlow.mockResolvedValueOnce({
             id: 'flow-multi-group',

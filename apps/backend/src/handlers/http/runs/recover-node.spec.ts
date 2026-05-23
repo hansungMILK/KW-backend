@@ -7,11 +7,11 @@ import type { APIGatewayProxyEvent } from 'aws-lambda';
 
 vi.mock('../../../services/run-service', () => ({
     runService: {
-        recoverAnalysisNode: vi.fn(),
+        requestAnalysisRecovery: vi.fn(),
     },
 }));
 
-const recoverAnalysisNode = vi.mocked(runService.recoverAnalysisNode);
+const requestAnalysisRecovery = vi.mocked(runService.requestAnalysisRecovery);
 
 describe('recover node handler', () => {
     beforeEach(() => {
@@ -21,7 +21,7 @@ describe('recover node handler', () => {
     });
 
     it('accepts analysis recovery requests', async () => {
-        recoverAnalysisNode.mockResolvedValueOnce({ ok: true, repairedSourceNodeId: 'node-content' });
+        requestAnalysisRecovery.mockResolvedValueOnce({ ok: true, repairedSourceNodeId: 'node-content' });
 
         const response = await main({
             httpMethod: 'POST',
@@ -32,7 +32,7 @@ describe('recover node handler', () => {
         } as APIGatewayProxyEvent);
 
         expect(response.statusCode).toBe(200);
-        expect(recoverAnalysisNode).toHaveBeenCalledWith('run-1', 'node-analysis', 'apply review feedback');
+        expect(requestAnalysisRecovery).toHaveBeenCalledWith('run-1', 'node-analysis', 'apply review feedback');
         expect(JSON.parse(response.body)).toEqual({
             runId: 'run-1',
             nodeId: 'node-analysis',

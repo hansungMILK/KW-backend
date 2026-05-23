@@ -289,4 +289,71 @@ describe('FlowAgentPanel proposal content profile controls', () => {
         expect(screen.getByText('대본 노드에서 검수본을 저장한 뒤 이어서 실행하세요.')).toBeTruthy();
         expect(screen.queryByText('워크플로우 실행 완료')).toBeNull();
     });
+
+    it('shows recovery as an in-progress state immediately after clicking quality feedback retry', async () => {
+        let resolveRecovery: (() => void) | undefined;
+        const onRecoverAnalysisFailure = vi.fn(
+            () =>
+                new Promise<void>(resolve => {
+                    resolveRecovery = resolve;
+                })
+        );
+
+        render(
+            <FlowAgentPanel
+                open
+                onClose={() => undefined}
+                flowId="flow-1"
+                runStatus="failed"
+                runActivity={{
+                    state: 'failed',
+                    runId: 'run-1',
+                    nodeId: 'node-analysis',
+                    nodeLabel: '사실성 및 형식 검수',
+                    errorCode: 'ANALYSIS_REJECTED',
+                    error: 'Analysis rejected content: 요청한 핵심 주제가 충분히 반영되지 않았습니다.',
+                    message: '워크플로우 실행이 실패했습니다.',
+                    progress: 100,
+                }}
+                onRecoverAnalysisFailure={onRecoverAnalysisFailure}
+            />
+        );
+
+        expect(await screen.findByText('워크플로우 실행 실패')).toBeTruthy();
+
+        fireEvent.click(screen.getByRole('button', { name: /피드백 반영해 다시 생성/ }));
+
+        await waitFor(() => {
+            expect(onRecoverAnalysisFailure).toHaveBeenCalledWith('run-1', 'node-analysis');
+            expect(screen.getByText('품질검수 피드백 반영 중')).toBeTruthy();
+        });
+        expect(screen.queryByText('워크플로우 실행 실패')).toBeNull();
+        expect(screen.queryByText(/Analysis rejected content/)).toBeNull();
+
+        resolveRecovery?.();
+    });
+
+    it('keeps quality feedback recovery labeled after the parent switches the run back to running', async () => {
+        render(
+            <FlowAgentPanel
+                open
+                onClose={() => undefined}
+                flowId="flow-1"
+                runStatus="running"
+                runActivity={{
+                    state: 'running',
+                    runId: 'run-1',
+                    nodeId: 'node-analysis',
+                    nodeLabel: '사실성 및 형식 검수',
+                    message: '품질검수 피드백을 반영해 새 대본을 생성하고 있습니다.',
+                    progress: 0,
+                    recoveryType: 'analysis-feedback',
+                }}
+            />
+        );
+
+        expect(await screen.findByText('품질검수 피드백 반영 중')).toBeTruthy();
+        expect(screen.queryByText('워크플로우 실행 실패')).toBeNull();
+        expect(screen.queryByText('워크플로우 실행 중')).toBeNull();
+    });
 });

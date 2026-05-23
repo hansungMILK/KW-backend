@@ -349,6 +349,102 @@ const parseRecoveredContentOutput = (
     return { ok: true, output: validated.data as Record<string, unknown> };
 };
 
+const readRecoveryRequest = (node: RunNode): Record<string, unknown> | null => {
+    if (!isRecord(node.outputPayload)) return null;
+    const request = node.outputPayload['recoveryRequest'];
+    return isRecord(request) ? request : null;
+};
+
+const readRecoveryIssues = (request: Record<string, unknown> | null, node: RunNode): Array<Record<string, unknown>> => {
+    const requestIssues = request?.['reviewIssues'];
+    if (Array.isArray(requestIssues)) {
+        const issues = requestIssues
+            .filter(isRecord)
+            .map(issue => ({
+                severity: typeof issue['severity'] === 'string' ? issue['severity'] : 'high',
+                message: String(issue['message'] ?? ''),
+                ...(typeof issue['sceneNumber'] === 'number' ? { sceneNumber: issue['sceneNumber'] } : {}),
+            }))
+            .filter(issue => String(issue['message']).trim().length > 0);
+        if (issues.length > 0) return issues;
+    }
+    return extractAnalysisIssues(node);
+};
+
+const rewriteRecoverableContentOutput = async (
+    runId: string,
+    nodeId: string,
+    node: RunNode,
+    sourceNode: RunNode,
+    reason: string | undefined,
+    issues: Array<Record<string, unknown>>,
+    reviewError?: string | null
+): Promise<{ ok: true; output: Record<string, unknown> } | RunServiceFailure> => {
+    let response;
+    try {
+        response = await openaiAdapter.chatJson({
+            systemPrompt: ANALYSIS_RECOVERY_SYSTEM_PROMPT,
+            userMessage: JSON.stringify(
+                {
+                    runId,
+                    analysisNodeId: nodeId,
+                    reason,
+                    reviewIssues: issues,
+                    reviewError: reviewError ?? node.errorMessage,
+                    originalScript: sourceNode.outputPayload,
+                },
+                null,
+                2
+            ),
+            maxTokens: 4096,
+        });
+    } catch (error) {
+        return {
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+            status: 400,
+        };
+    }
+
+    const parsed = parseRecoveredContentOutput(response.content);
+    if (!parsed.ok) return { ok: false, error: parsed.error, status: 400 };
+    return { ok: true, output: parsed.output };
+};
+
+const failQueuedAnalysisRecovery = async (runId: string, nodeId: string, errorMessage: string): Promise<void> => {
+    const now = new Date().toISOString();
+    const node = await runRepo.getRunNode(runId, nodeId);
+    if (node?.status === 'PENDING') {
+        await runRepo.updateRunNodeStatus(runId, nodeId, 'RUNNING', { startedAt: now, progress: 0 });
+        await runRepo.updateRunNodeStatus(runId, nodeId, 'FAILED', {
+            completedAt: now,
+            progress: 100,
+            errorCode: 'ANALYSIS_RECOVERY_FAILED',
+            errorMessage,
+        });
+    } else if (node?.status === 'RUNNING') {
+        await runRepo.updateRunNodeStatus(runId, nodeId, 'FAILED', {
+            completedAt: now,
+            progress: 100,
+            errorCode: 'ANALYSIS_RECOVERY_FAILED',
+            errorMessage,
+        });
+    }
+
+    const run = await runRepo.getRun(runId);
+    if (run?.status === 'RUNNING') {
+        await runRepo.updateRunStatus(runId, 'FAILED', {
+            completedAt: now,
+            finalOutputSummary: {
+                failedNodeId: nodeId,
+                errorCode: 'ANALYSIS_RECOVERY_FAILED',
+                errorMessage,
+                failedAt: now,
+            },
+        });
+    }
+};
+
 const getNodeConfig = (node: Record<string, unknown>): Record<string, unknown> => {
     const data = node['data'] as Record<string, unknown> | undefined;
     const config = (node['config'] ?? data?.['config']) as Record<string, unknown> | undefined;
@@ -993,6 +1089,166 @@ export const runService = {
         // Cancel the run
         await runRepo.updateRunStatus(runId, 'CANCELLED');
         return { ok: true };
+    },
+
+    /**
+     * Accept an analysis recovery request without doing model work in the HTTP
+     * request path. The queued worker rewrites the script, then resumes the DAG.
+     */
+    async requestAnalysisRecovery(
+        runId: string,
+        nodeId: string,
+        reason?: string
+    ): Promise<{ ok: true; repairedSourceNodeId: string } | RunServiceFailure> {
+        const node = await runRepo.getRunNode(runId, nodeId);
+        if (!node) return { ok: false, error: `RunNode ${runId}#${nodeId} not found`, status: 404 };
+        if (!isRecoverableAnalysisFailure(node)) {
+            return {
+                ok: false,
+                error: 'ANALYSIS_RECOVERY_REQUIRES_REJECTED_ANALYSIS_NODE',
+                status: 409,
+            };
+        }
+
+        const run = await runRepo.getRun(runId);
+        if (!run) return { ok: false, error: `Run ${runId} not found`, status: 404 };
+        const allNodes = await runRepo.listRunNodes(runId);
+        const sourceNode = findRecoverableContentAncestor(node, allNodes);
+        if (!sourceNode || !isRecord(sourceNode.outputPayload)) {
+            return { ok: false, error: 'ANALYSIS_RECOVERY_SOURCE_CONTENT_NOT_FOUND', status: 409 };
+        }
+
+        const now = new Date().toISOString();
+        const nodeIds = allNodes.map(n => n.nodeId);
+        const edges = run.flowSnapshot.edges as Array<Record<string, unknown>>;
+        const descendantNodeIds = collectDescendantNodeIds(nodeId, nodeIds, edges);
+        const issues = extractAnalysisIssues(node);
+
+        const resetResult = await runRepo.updateRunNodeStatus(runId, nodeId, 'PENDING', {
+            outputPayload: {
+                recoveryRequest: {
+                    requestedAt: now,
+                    reason,
+                    reviewIssues: issues,
+                    reviewError: node.errorMessage,
+                    sourceNodeId: sourceNode.nodeId,
+                },
+            },
+        });
+        if (!resetResult.ok) return { ok: false, error: resetResult.error, status: 409 };
+
+        for (const descendantNodeId of descendantNodeIds) {
+            const descendant = allNodes.find(n => n.nodeId === descendantNodeId);
+            if (descendant?.status === 'SKIPPED' || descendant?.status === 'FAILED') {
+                const descendantResult = await runRepo.updateRunNodeStatus(runId, descendantNodeId, 'PENDING');
+                if (!descendantResult.ok) return { ok: false, error: descendantResult.error, status: 409 };
+            }
+        }
+
+        if (run.status === 'FAILED') {
+            const runResult = await runRepo.updateRunStatus(runId, 'RUNNING', {
+                startedAt: run.startedAt ?? now,
+                completedAt: null,
+                finalOutputSummary: null,
+            });
+            if (!runResult.ok) return { ok: false, error: runResult.error, status: 409 };
+        }
+
+        try {
+            await queue.send({
+                type: 'RECOVER_ANALYSIS_NODE',
+                runId,
+                nodeId,
+                reason,
+                executionId: generateNumericId(),
+                timestamp: now,
+            });
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            await failQueuedAnalysisRecovery(runId, nodeId, errorMessage);
+            return { ok: false, error: errorMessage, status: 400 };
+        }
+
+        return { ok: true, repairedSourceNodeId: sourceNode.nodeId };
+    },
+
+    /**
+     * Worker-side analysis recovery. This performs the model rewrite outside
+     * the HTTP request lifecycle, then queues normal DAG execution.
+     */
+    async performQueuedAnalysisRecovery(
+        runId: string,
+        nodeId: string,
+        reason?: string
+    ): Promise<{ ok: true; repairedSourceNodeId: string } | RunServiceFailure> {
+        const node = await runRepo.getRunNode(runId, nodeId);
+        if (!node) return { ok: false, error: `RunNode ${runId}#${nodeId} not found`, status: 404 };
+
+        if (isRecoverableAnalysisFailure(node)) {
+            return this.recoverAnalysisNode(runId, nodeId, reason);
+        }
+
+        const recoveryRequest = readRecoveryRequest(node);
+        if (node.status !== 'PENDING' || !recoveryRequest) {
+            return {
+                ok: false,
+                error: 'ANALYSIS_RECOVERY_WORKER_REQUIRES_PENDING_RECOVERY_NODE',
+                status: 409,
+            };
+        }
+
+        const allNodes = await runRepo.listRunNodes(runId);
+        const sourceNode = findRecoverableContentAncestor(node, allNodes);
+        if (!sourceNode || !isRecord(sourceNode.outputPayload)) {
+            const error = 'ANALYSIS_RECOVERY_SOURCE_CONTENT_NOT_FOUND';
+            await failQueuedAnalysisRecovery(runId, nodeId, error);
+            return { ok: false, error, status: 409 };
+        }
+
+        const recoveryReason =
+            typeof recoveryRequest['reason'] === 'string' && recoveryRequest['reason'].trim().length > 0
+                ? recoveryRequest['reason']
+                : reason;
+        const reviewError =
+            typeof recoveryRequest['reviewError'] === 'string' ? recoveryRequest['reviewError'] : node.errorMessage;
+        const issues = readRecoveryIssues(recoveryRequest, node);
+        const rewriteResult = await rewriteRecoverableContentOutput(
+            runId,
+            nodeId,
+            node,
+            sourceNode,
+            recoveryReason,
+            issues,
+            reviewError
+        );
+        if (!rewriteResult.ok) {
+            await failQueuedAnalysisRecovery(runId, nodeId, rewriteResult.error);
+            return rewriteResult;
+        }
+
+        const now = new Date().toISOString();
+        await runRepo.putRunNode({
+            ...sourceNode,
+            outputPayload: {
+                ...rewriteResult.output,
+                recovery: {
+                    recoveredFromNodeId: nodeId,
+                    recoveredAt: now,
+                    reason: recoveryReason,
+                    issues,
+                },
+            },
+            updatedAt: now,
+        });
+
+        await queue.send({
+            type: 'EXECUTE_RUN',
+            runId,
+            executionId: generateNumericId(),
+            timestamp: now,
+        });
+
+        return { ok: true, repairedSourceNodeId: sourceNode.nodeId };
     },
 
     /**

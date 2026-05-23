@@ -10,7 +10,7 @@ import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
  * POST /runs/{runId}/nodes/{nodeId}/recover
  *
  * Body: { reason?: string }
- * Recovers a failed analysis node by rewriting the upstream script from review feedback.
+ * Accepts failed analysis recovery and queues the rewrite work.
  */
 const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
     const runId = getPathParam(event, 'runId');
@@ -22,7 +22,7 @@ const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResu
     const bodyParsed = RunNodeRetryRequestSchema.safeParse(body);
     const reason = bodyParsed.success ? bodyParsed.data.reason : undefined;
 
-    const result = await runService.recoverAnalysisNode(paramsParsed.data.runId, paramsParsed.data.nodeId, reason);
+    const result = await runService.requestAnalysisRecovery(paramsParsed.data.runId, paramsParsed.data.nodeId, reason);
 
     if (!result.ok) {
         if (result.status === 404) return notFound(result.error);
