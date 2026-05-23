@@ -60,6 +60,14 @@ const VisualSchema = z.object({
 
 const ClaimTypeSchema = z.enum(['fact', 'hypothetical', 'opinion', 'joke']);
 
+const DialogueLineSchema = z.object({
+    speaker: z.string().optional(),
+    text: z.string(),
+    emotion: z.string().optional(),
+    captionStyle: z.string().optional(),
+    durationSec: z.number().optional(),
+});
+
 /**
  * Common block executor interface.
  * Every block implements this contract.
@@ -172,7 +180,7 @@ export const ContentOutputSchema = z.object({
             sourceRefs: z.array(SourceRefSchema.or(z.string())),
             characters: z.array(z.record(z.unknown())).optional(),
             dramatizedAction: z.string().optional(),
-            dialogueLines: z.array(z.string()).optional(),
+            dialogueLines: z.array(DialogueLineSchema.or(z.string())).optional(),
             factualClaim: z.string().optional(),
             evidenceRefs: z.array(SourceRefSchema.or(z.string())).optional(),
             durationSec: z.number().optional(),
@@ -201,7 +209,7 @@ export const DataOutputSchema = z.object({
             sourceRefs: z.array(SourceRefSchema.or(z.string())),
             characters: z.array(z.record(z.unknown())).optional(),
             dramatizedAction: z.string().optional(),
-            dialogueLines: z.array(z.string()).optional(),
+            dialogueLines: z.array(DialogueLineSchema.or(z.string())).optional(),
             factualClaim: z.string().optional(),
             evidenceRefs: z.array(SourceRefSchema.or(z.string())).optional(),
             durationSec: z.number().optional(),

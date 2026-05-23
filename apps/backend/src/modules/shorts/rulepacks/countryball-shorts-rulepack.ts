@@ -29,9 +29,12 @@ export const COUNTRYBALL_SHORTS_RULEPACK: ShortsRulepack = {
 - Required extra scene fields:
   - characters: [{ countryCode, roleInScene, expression, pose }]
   - dramatizedAction: the skit action happening in this scene
-  - dialogueLines: short Korean lines spoken by countryball characters when useful
+  - dialogueLines: [{ speaker, text, emotion, captionStyle, durationSec }]
   - factualClaim: only when the scene states a real-world fact
   - evidenceRefs: source ids only when factualClaim is present
+- dialogueLines must be short skit lines, not exposition. Use max 2 dialogue lines per scene.
+- speaker must identify the countryball character or role, such as "한국볼", "일본볼", "KR", or "JP"; do not use narrator as speaker.
+- Every scene still needs dramatizedAction. Dialogue cannot replace the drawable action beat.
 - Use claimType "hypothetical", "opinion", or "joke" for fictional/satirical/user-imagined situations without factual claims.
 - Keep imagePrompt focused on the reenacted action, countryball cast, expressions, props, and background. Do not write generic explainer visuals.`,
     imagePrompt: `Countryball visual rules:
@@ -43,6 +46,8 @@ export const COUNTRYBALL_SHORTS_RULEPACK: ShortsRulepack = {
     analysisPrompt: `Countryball quality rules:
 - Check that each scene reenacts the requested situation through countryball characters.
 - Check that factualClaim/evidenceRefs are separated from dramatizedAction/dialogueLines.
+- Check that dialogueLines use speaker/text objects, stay under 2 lines per scene, and remain short enough for Shorts pacing.
+- Reject scenes that are only dialogue without a concrete dramatizedAction.
 - Reject slurs, dehumanizing language, and claims that a whole country, people, ethnicity, or nationality is inherently inferior, dirty, stupid, criminal, or evil.
 - Do not reject fictional/hypothetical countryball skits just because sourceRefs are empty.
 - Reject unsupported factual claims only when the scene actually claims a real-world fact.`,

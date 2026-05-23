@@ -110,10 +110,14 @@ function buildCountryballContentPrompt(
         `- Requested situation: ${userRequest}`,
         '- This is user-request driven. It does not have to be a real historical event unless the user asks for one.',
         '- Reenact the requested situation through countryball characters, actions, reactions, props, and scene background.',
-        '- Dialogue is optional support, not the whole format.',
+        '- Dialogue is support for the skit, but countryball Shorts should feel like characters acting inside the situation, not narrator explanation.',
         '- For every scene include characters, dramatizedAction, dialogueLines, factualClaim, and evidenceRefs.',
+        '- dialogueLines must be objects: [{ speaker, text, emotion, captionStyle, durationSec }].',
+        '- speaker must identify the countryball character or role, such as "한국볼", "일본볼", "KR", or "JP"; do not use narrator as speaker.',
+        '- Use max 2 dialogue lines per scene and keep each text short enough for a 1-2 second Shorts beat.',
         '- factualClaim must be empty or omitted unless the scene states a real-world fact.',
         '- dramatizedAction must describe the skit action and must not be presented as evidence.',
+        '- Do not rely on dialogue alone. Every scene still needs a drawable dramatizedAction.',
         '- Avoid slurs, hateful stereotypes, and claims that a whole nation or ethnicity is inferior.',
     ].join('\n');
 }

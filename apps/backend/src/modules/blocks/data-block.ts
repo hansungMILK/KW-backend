@@ -82,6 +82,14 @@ interface RawScene {
     durationSec?: unknown;
 }
 
+interface DialogueLine {
+    speaker?: string;
+    text: string;
+    emotion?: string;
+    captionStyle?: string;
+    durationSec?: number;
+}
+
 /**
  * Extract the upstream keywords list from a search-block output embedded
  * in the input (if available). Falls back to [].
@@ -202,7 +210,7 @@ function normalizeContent(input: unknown): BlockExecutorResult {
             sourceRefs,
             characters: Array.isArray(scene.characters) ? scene.characters : undefined,
             dramatizedAction: typeof scene.dramatizedAction === 'string' ? scene.dramatizedAction : undefined,
-            dialogueLines: Array.isArray(scene.dialogueLines) ? scene.dialogueLines.map(String) : undefined,
+            dialogueLines: normalizeDialogueLines(scene.dialogueLines),
             factualClaim: typeof scene.factualClaim === 'string' ? scene.factualClaim : undefined,
             evidenceRefs,
             durationSec,
@@ -271,6 +279,37 @@ export const dataBlock: BlockExecutor = {
 
 function isRecord(input: unknown): input is Record<string, unknown> {
     return input != null && typeof input === 'object' && !Array.isArray(input);
+}
+
+function normalizeDialogueLines(input: unknown): DialogueLine[] | undefined {
+    if (!Array.isArray(input)) return undefined;
+    const lines = input
+        .map(item => {
+            if (typeof item === 'string') {
+                const text = item.trim();
+                return text ? { text } : undefined;
+            }
+            if (!isRecord(item) || typeof item['text'] !== 'string') return undefined;
+            const text = item['text'].trim();
+            if (!text) return undefined;
+            return {
+                ...(typeof item['speaker'] === 'string' && item['speaker'].trim()
+                    ? { speaker: item['speaker'].trim() }
+                    : {}),
+                text,
+                ...(typeof item['emotion'] === 'string' && item['emotion'].trim()
+                    ? { emotion: item['emotion'].trim() }
+                    : {}),
+                ...(typeof item['captionStyle'] === 'string' && item['captionStyle'].trim()
+                    ? { captionStyle: item['captionStyle'].trim() }
+                    : {}),
+                ...(typeof item['durationSec'] === 'number' && Number.isFinite(item['durationSec'])
+                    ? { durationSec: item['durationSec'] }
+                    : {}),
+            };
+        })
+        .filter((line): line is DialogueLine => Boolean(line));
+    return lines.length > 0 ? lines : undefined;
 }
 
 function extractRequestTopic(input: Record<string, unknown>): string | undefined {

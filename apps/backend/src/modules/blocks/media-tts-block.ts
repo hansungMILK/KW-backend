@@ -59,7 +59,13 @@ export const mediaTtsBlock: BlockExecutor = {
         //   content block: { scenes: [{ narration }], hook, cta }
         //   data block:    { normalizedScenes: [{ narration }] }
         const inp = input as Record<string, unknown> | null;
-        type RawScene = { sceneNumber?: number; caption?: string; narration?: string; durationSec?: number };
+        type RawScene = {
+            sceneNumber?: number;
+            caption?: string;
+            narration?: string;
+            durationSec?: number;
+            dialogueLines?: unknown;
+        };
 
         const rawScenes: RawScene[] =
             (inp?.normalizedScenes as RawScene[] | undefined) ?? (inp?.scenes as RawScene[] | undefined) ?? [];
@@ -73,7 +79,7 @@ export const mediaTtsBlock: BlockExecutor = {
                   ? (metadata['cta'] as string)
                   : '';
 
-        const segments = buildNarrationSegments(rawScenes, hook, cta);
+        const segments = buildNarrationSegments(rawScenes, hook, cta, isCountryballMetadata(metadata));
 
         if (segments.length === 0) {
             throw new Error('media-tts requires narration text from content or data block');
@@ -214,9 +220,10 @@ type NarrationSegment = {
 };
 
 function buildNarrationSegments(
-    scenes: Array<{ sceneNumber?: number; narration?: string }>,
+    scenes: Array<{ sceneNumber?: number; narration?: string; dialogueLines?: unknown }>,
     hook: string,
-    cta: string
+    cta: string,
+    preferDialogueLines = false
 ): NarrationSegment[] {
     const segments: NarrationSegment[] = [];
     const firstSceneNumber = normalizeSceneNumber(scenes[0]?.sceneNumber, 1);
@@ -228,7 +235,8 @@ function buildNarrationSegments(
     }
 
     scenes.forEach((scene, index) => {
-        const text = normalizeSubtitleText(scene.narration);
+        const dialogueText = preferDialogueLines ? normalizeSubtitleText(formatDialogueLines(scene.dialogueLines)) : '';
+        const text = dialogueText || normalizeSubtitleText(scene.narration);
         if (!text) return;
         segments.push({
             sceneNumber: normalizeSceneNumber(scene.sceneNumber, index + 1),
@@ -243,6 +251,61 @@ function buildNarrationSegments(
     }
 
     return segments;
+}
+
+function isCountryballMetadata(metadata: Record<string, unknown> | undefined): boolean {
+    if (!metadata) return false;
+    if (metadata['presetId'] === 'countryball-shorts') return true;
+    if (metadata['contentProfileId'] === 'shorts.countryball.v1') return true;
+    if (metadata['imageStyleId'] === 'countryball-comic') return true;
+    if (metadata['narrativeMode'] === 'countryball-situation-reenactment') return true;
+    const outputContract = metadata['outputContract'];
+    if (outputContract != null && typeof outputContract === 'object' && !Array.isArray(outputContract)) {
+        const contract = outputContract as Record<string, unknown>;
+        return (
+            contract['contentProfileId'] === 'shorts.countryball.v1' ||
+            contract['imageStyleId'] === 'countryball-comic' ||
+            contract['narrativeMode'] === 'countryball-situation-reenactment'
+        );
+    }
+    return false;
+}
+
+function formatDialogueLines(input: unknown): string {
+    if (!Array.isArray(input)) return '';
+    return input
+        .map(line => {
+            if (typeof line === 'string') return line.trim();
+            if (line == null || typeof line !== 'object' || Array.isArray(line)) return '';
+            const item = line as Record<string, unknown>;
+            const text = typeof item['text'] === 'string' ? item['text'].trim() : '';
+            if (!text) return '';
+            const speaker = typeof item['speaker'] === 'string' ? formatDialogueSpeaker(item['speaker']) : '';
+            return speaker ? `${speaker}: ${text}` : text;
+        })
+        .filter(Boolean)
+        .join(' ');
+}
+
+function formatDialogueSpeaker(input: string): string {
+    const normalized = input.trim();
+    const upper = normalized.toUpperCase();
+    const map: Record<string, string> = {
+        KR: '한국볼',
+        KOR: '한국볼',
+        JP: '일본볼',
+        JPN: '일본볼',
+        US: '미국볼',
+        USA: '미국볼',
+        CN: '중국볼',
+        CHN: '중국볼',
+        UK: '영국볼',
+        GB: '영국볼',
+        FR: '프랑스볼',
+        DE: '독일볼',
+        RU: '러시아볼',
+    };
+    return map[upper] ?? normalized;
 }
 
 function buildSceneSubtitleCues(segments: NarrationSegment[], totalDurationSec: number) {

@@ -57,6 +57,45 @@ describe('dataBlock', () => {
         });
     });
 
+    it('preserves structured countryball dialogue lines during scene normalization', async () => {
+        const result = await dataBlock.execute({
+            title: '국가볼 협상극',
+            presetId: 'countryball-shorts',
+            scenes: [
+                {
+                    sceneNumber: 1,
+                    caption: '협상 시작',
+                    narration: '한국볼과 일본볼이 협상장에 들어옵니다.',
+                    imagePrompt: 'Korea countryball and Japan countryball in a tense negotiation room.',
+                    claimType: 'hypothetical',
+                    sourceRefs: [],
+                    dramatizedAction: '한국볼이 두꺼운 계약서를 내밀고 일본볼이 식은땀을 흘립니다.',
+                    dialogueLines: [
+                        {
+                            speaker: 'KR',
+                            text: '도장 찍기 전에 읽어.',
+                            emotion: 'stern',
+                            captionStyle: 'yellow-pop',
+                            durationSec: 1.4,
+                        },
+                    ],
+                    durationSec: 5,
+                },
+            ],
+        });
+
+        const output = result.output as { normalizedScenes: Array<Record<string, unknown>> };
+        expect(output.normalizedScenes[0]?.['dialogueLines']).toEqual([
+            {
+                speaker: 'KR',
+                text: '도장 찍기 전에 읽어.',
+                emotion: 'stern',
+                captionStyle: 'yellow-pop',
+                durationSec: 1.4,
+            },
+        ]);
+    });
+
     it('backfills fact scene sourceRefs from upstream source metadata', async () => {
         const result = await dataBlock.execute({
             title: '원문 기반 쇼츠',

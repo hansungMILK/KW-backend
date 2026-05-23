@@ -732,6 +732,9 @@ describe('contentBlock', () => {
         expect(request?.systemPrompt).toContain('Countryball situation reenactment');
         expect(request?.systemPrompt).toContain('factualClaim');
         expect(request?.systemPrompt).toContain('dramatizedAction');
+        expect(request?.systemPrompt).toContain('speaker');
+        expect(request?.systemPrompt).toContain('durationSec');
+        expect(request?.systemPrompt).toContain('2 dialogue lines');
         expect(result.output).toMatchObject({
             presetId: 'countryball-shorts',
             style: expect.objectContaining({

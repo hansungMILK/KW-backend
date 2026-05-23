@@ -110,6 +110,37 @@ describe('mediaTtsBlock', () => {
         expect(ttsAdapter.synthesize).toHaveBeenCalledWith(expect.objectContaining({ signal: controller.signal }));
     });
 
+    it('uses structured countryball dialogue lines as spoken Shorts segments', async () => {
+        const result = await mediaTtsBlock.execute({
+            normalizedScenes: [
+                {
+                    sceneNumber: 1,
+                    narration: '한국볼과 일본볼이 협상장에 들어옵니다.',
+                    dialogueLines: [
+                        { speaker: 'KR', text: '도장 찍기 전에 읽어.' },
+                        { speaker: 'JP', text: '잠깐, 조건이 이상한데?' },
+                    ],
+                },
+            ],
+            metadata: {
+                presetId: 'countryball-shorts',
+            },
+        });
+
+        expect(ttsAdapter.synthesize).toHaveBeenCalledWith(
+            expect.objectContaining({
+                text: '한국볼: 도장 찍기 전에 읽어. 일본볼: 잠깐, 조건이 이상한데?',
+            })
+        );
+        expect(result.output['subtitleCues']).toMatchObject([
+            {
+                sceneNumber: 1,
+                text: '한국볼: 도장 찍기 전에 읽어. 일본볼: 잠깐, 조건이 이상한데?',
+                role: 'scene',
+            },
+        ]);
+    });
+
     it('preserves the TTS provider selected by the adapter', async () => {
         vi.mocked(ttsAdapter.synthesize).mockResolvedValueOnce({
             audioBuffer: Buffer.from('openai-audio'),
