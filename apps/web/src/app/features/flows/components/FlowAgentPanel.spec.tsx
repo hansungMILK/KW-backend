@@ -112,6 +112,54 @@ describe('FlowAgentPanel proposal content profile controls', () => {
         });
     });
 
+    it('shows the countryball option for shorts proposals even when profile options are missing', async () => {
+        const legacyShortsProposal: MessageProposal = {
+            ...proposal,
+            id: 'proposal-legacy-shorts',
+            metadata: {
+                ...proposal.metadata,
+                contentProfile: {
+                    ...proposal.metadata?.contentProfile,
+                    contentProfileId: 'shorts.info.v1',
+                    profileOptions: undefined,
+                },
+            },
+        };
+
+        render(
+            <FlowAgentPanel
+                open
+                onClose={() => undefined}
+                flowId="flow-1"
+                externalProposal={{
+                    type: 'proposal.created',
+                    id: 'proposal-created-legacy',
+                    proposalId: legacyShortsProposal.id,
+                    flowId: 'flow-1',
+                    blocks: legacyShortsProposal.blocks,
+                    estimatedCost: legacyShortsProposal.estimatedCost,
+                    metadata: legacyShortsProposal.metadata,
+                    description: '제안 설명',
+                    timestamp: Date.now(),
+                }}
+            />
+        );
+
+        expect(await screen.findByText('대본/콘텐츠 설정')).toBeTruthy();
+        fireEvent.click(screen.getByRole('button', { name: '컨트리볼 상황극' }));
+        fireEvent.click(screen.getByRole('button', { name: '승인' }));
+
+        await waitFor(() => {
+            expect(approveProposal).toHaveBeenCalledWith(
+                'proposal-legacy-shorts',
+                expect.objectContaining({
+                    contentProfileId: 'shorts.countryball.v1',
+                    imageStyleId: 'countryball-comic',
+                })
+            );
+        });
+    });
+
     it('does not show image scene/style controls or send image options for longform proposals', async () => {
         const longformProposal: MessageProposal = {
             ...proposal,
