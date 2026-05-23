@@ -20,6 +20,7 @@ interface Message {
 type ImageQuality = 'low' | 'medium' | 'high';
 type ImageStyleId =
     | 'explainer-comic'
+    | 'countryball-comic'
     | 'animation'
     | 'photo-real'
     | 'research-visual'
@@ -65,6 +66,7 @@ type ContentProfileId =
     | 'text.explainer.v1'
     | 'image.single.v1'
     | 'shorts.info.v1'
+    | 'shorts.countryball.v1'
     | 'shorts.story.v1'
     | 'longform.explainer.v1'
     | 'longform.documentary.v1';
@@ -82,6 +84,8 @@ type ContentProfileMetadata = {
         scriptToneId?: ScriptToneId;
         scriptToneIntensity?: ScriptToneIntensity;
         reviewMode?: ReviewMode;
+        narrativeMode?: string;
+        requestBasis?: string;
         toneOptions?: ContentProfileOption<ScriptToneId>[];
         intensityOptions?: ContentProfileOption<ScriptToneIntensity>[];
         reviewModeOptions?: ContentProfileOption<ReviewMode>[];
@@ -161,6 +165,7 @@ const contentProfileFamily = (value: unknown): string | undefined => {
 const isLongformContentProfileId = (value: unknown): boolean => contentProfileFamily(value) === 'longform';
 const isImageContentProfileId = (value: unknown): boolean => contentProfileFamily(value) === 'image';
 const isShortsContentProfileId = (value: unknown): boolean => contentProfileFamily(value) === 'shorts';
+const isCountryballContentProfileId = (value: unknown): boolean => value === 'shorts.countryball.v1';
 
 const isSingleImageGeneration = (
     imageGeneration: ImageGenerationMetadata['imageGeneration'] | undefined,
@@ -190,6 +195,7 @@ const describeAiContentDecision = (
     aiRequestDecision: AiRequestDecisionMetadata['aiRequestDecision'] | undefined
 ): string => {
     if (isShortsContentProfileId(contentProfileId)) {
+        if (isCountryballContentProfileId(contentProfileId)) return '컨트리볼 상황극';
         if (aiRequestDecision?.mode === 'creative-simulation') return '시뮬레이션 쇼츠';
         if (aiRequestDecision?.mode === 'story') return '이야기형 쇼츠';
         if (aiRequestDecision?.mode === 'news') return '뉴스형 쇼츠';
@@ -405,6 +411,11 @@ export const FlowAgentPanel = ({
             const contentProfile = asContentProfileMetadata(proposal.metadata);
             const selectedContentProfileId = proposalContentProfiles[proposal.id] ?? contentProfile?.contentProfileId;
             const isImageProposal = isSingleImageGeneration(imageGeneration, selectedContentProfileId);
+            const selectedImageStyleId =
+                proposalImageStyles[proposal.id] ??
+                (isCountryballContentProfileId(selectedContentProfileId)
+                    ? 'countryball-comic'
+                    : imageGeneration?.imageStyleId);
             const approvalOptions = {
                 contentProfileId: selectedContentProfileId,
                 ...(!isImageProposal
@@ -417,7 +428,7 @@ export const FlowAgentPanel = ({
                     : {}),
                 ...(!isLongformContentProfileId(selectedContentProfileId)
                     ? {
-                          imageStyleId: proposalImageStyles[proposal.id] ?? imageGeneration?.imageStyleId,
+                          imageStyleId: selectedImageStyleId,
                           imageQuality: proposalImageQualities[proposal.id] ?? imageGeneration?.imageQuality,
                           sceneCount: proposalSceneCounts[proposal.id] ?? imageGeneration?.sceneCount,
                       }
@@ -609,9 +620,11 @@ export const FlowAgentPanel = ({
                         );
                         const isLongformProposal = isLongformContentProfileId(selectedContentProfileId);
                         const isImageProposal = isSingleImageGeneration(imageGeneration, selectedContentProfileId);
-                        const isShortsProposal = isShortsContentProfileId(selectedContentProfileId);
                         const selectedStyleId =
                             proposalImageStyles[proposal.id] ??
+                            (isCountryballContentProfileId(selectedContentProfileId)
+                                ? 'countryball-comic'
+                                : undefined) ??
                             imageGeneration?.imageStyleId ??
                             imageGeneration?.recommendedStyleId;
                         const selectedQuality =
@@ -639,7 +652,7 @@ export const FlowAgentPanel = ({
                               ];
                         const shouldShowImageGeneration = Boolean(imageGeneration) && !isLongformProposal;
                         const shouldShowContentProfile = Boolean(contentProfile) && !isImageProposal;
-                        const shouldShowProfileChoices = !isShortsProposal && visibleProfileOptions.length > 1;
+                        const shouldShowProfileChoices = visibleProfileOptions.length > 1;
                         const shouldShowSceneCountChoices = !isImageProposal && sceneCountOptions.length > 1;
                         const isApproving = Boolean(approvingProposalIds[proposal.id]);
                         const isApproved = Boolean(approvedProposalIds[proposal.id]);

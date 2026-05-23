@@ -1,7 +1,9 @@
 import { env } from '../../config/env';
+import { isCountryballShortsRequest } from '../content-profile/content-profile';
 
 export type ImageStyleId =
     | 'explainer-comic'
+    | 'countryball-comic'
     | 'animation'
     | 'photo-real'
     | 'research-visual'
@@ -54,6 +56,13 @@ export const IMAGE_STYLE_PRESETS: ImageStylePreset[] = [
         description: '쇼츠 설명에 맞는 선명한 만화/밈 컷',
         promptPrefix:
             'Korean viral explainer comic style, bold expressive characters, crisp outlines, high contrast, clean mobile composition',
+    },
+    {
+        id: 'countryball-comic',
+        label: '컨트리볼 만화',
+        description: '국가볼 캐릭터가 사용자 요청 상황을 재연하는 밈/만화 컷',
+        promptPrefix:
+            'countryball comic reenactment style, round flag-faced countryball characters, expressive eyes, simple arms, meme documentary composition, bold outlines, clean mobile frame, no hateful stereotypes',
     },
     {
         id: 'animation',
@@ -157,6 +166,7 @@ export const recommendImageStyleId = (userMessage: string, explicitStyle?: unkno
 
 function detectUserRequestedImageStyleId(userMessage: string): ImageStyleId | null {
     const text = userMessage.toLowerCase();
+    if (isCountryballShortsRequest(text)) return 'countryball-comic';
     if (/애니|animation|anime|cel[- ]?shade|셀/.test(text)) return 'animation';
     if (/실사|아이폰|iphone|사진|photo|photoreal|현실|realistic/.test(text)) return 'photo-real';
     if (/만화|웹툰|카툰|comic|cartoon|manga/.test(text)) return 'explainer-comic';

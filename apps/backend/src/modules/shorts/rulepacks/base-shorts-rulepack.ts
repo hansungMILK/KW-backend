@@ -1,5 +1,5 @@
 export interface ShortsRulepack {
-    id: 'education-admission' | 'general-shorts';
+    id: 'education-admission' | 'general-shorts' | 'countryball-shorts';
     label: string;
     triggerKeywords: string[];
     sourcePolicy: string;

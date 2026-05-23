@@ -518,10 +518,12 @@ function applyApprovalOverrides(
     metadata: Record<string, unknown> | undefined,
     proposalId?: string
 ): Array<Record<string, unknown>> {
-    const imageStyleId = normalizeImageStyleId(overrides?.imageStyleId);
+    const contentProfile = buildApprovalContentProfilePreferences(overrides, nodes, metadata);
+    const imageStyleId =
+        normalizeImageStyleId(overrides?.imageStyleId) ??
+        (contentProfile?.contentProfileId === 'shorts.countryball.v1' ? 'countryball-comic' : null);
     const imageQuality = overrides?.imageQuality ? normalizeImageQuality(overrides.imageQuality) : undefined;
     const sceneCount = overrides?.sceneCount ? normalizeSceneCount(overrides.sceneCount, 12) : undefined;
-    const contentProfile = buildApprovalContentProfilePreferences(overrides, nodes, metadata);
     if (!imageStyleId && !imageQuality && !sceneCount && !contentProfile) return nodes;
 
     return nodes.map(node => {
@@ -718,7 +720,7 @@ function applyApprovalMetadataOverrides(
 
     const imageGeneration =
         existingImageGeneration || imageNode
-            ? buildApprovalImageGenerationMetadata(existingImageGeneration, imageNode, overrides)
+            ? buildApprovalImageGenerationMetadata(existingImageGeneration, imageNode, overrides, contentProfile)
             : undefined;
 
     return {
@@ -731,7 +733,8 @@ function applyApprovalMetadataOverrides(
 function buildApprovalImageGenerationMetadata(
     existingImageGeneration: ImageGenerationMetadata | undefined,
     imageNode: Record<string, unknown> | undefined,
-    overrides: ApprovalOverrides | undefined
+    overrides: ApprovalOverrides | undefined,
+    contentProfile: ContentProfilePreferences | undefined
 ): ImageGenerationMetadata {
     const sceneCount = normalizeSceneCount(
         overrides?.sceneCount ?? existingImageGeneration?.sceneCount,
@@ -739,7 +742,11 @@ function buildApprovalImageGenerationMetadata(
     );
     const imageQuality = normalizeImageQuality(overrides?.imageQuality ?? existingImageGeneration?.imageQuality);
     const imageStyleId =
-        normalizeImageStyleId(overrides?.imageStyleId ?? existingImageGeneration?.imageStyleId) ??
+        normalizeImageStyleId(
+            overrides?.imageStyleId ??
+                (contentProfile?.contentProfileId === 'shorts.countryball.v1' ? 'countryball-comic' : undefined) ??
+                existingImageGeneration?.imageStyleId
+        ) ??
         normalizeImageStyleId(existingImageGeneration?.recommendedStyleId) ??
         'explainer-comic';
     const preset = getImageStylePreset(imageStyleId);

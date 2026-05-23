@@ -51,7 +51,7 @@ const proposal: MessageProposal = {
             ],
             profileOptions: [
                 { id: 'shorts.info.v1', label: '쇼츠 제작', description: '쇼츠' },
-                { id: 'shorts.story.v1', label: '쇼츠 제작', description: '이전 호환용 쇼츠' },
+                { id: 'shorts.countryball.v1', label: '컨트리볼 상황극', description: '국가볼 상황극 쇼츠' },
                 { id: 'longform.explainer.v1', label: '롱폼 해설', description: '예전 metadata에 남은 롱폼 옵션' },
             ],
         },
@@ -68,7 +68,7 @@ describe('FlowAgentPanel proposal content profile controls', () => {
         cleanup();
     });
 
-    it('lets the user choose script tone, intensity, and review mode while keeping shorts content type AI-decided', async () => {
+    it('lets the user choose script tone, intensity, review mode, and explicit shorts subtype', async () => {
         render(
             <FlowAgentPanel
                 open
@@ -95,7 +95,7 @@ describe('FlowAgentPanel proposal content profile controls', () => {
         fireEvent.click(screen.getByRole('button', { name: '뉴스앵커형' }));
         fireEvent.click(screen.getByRole('button', { name: '강하게' }));
         fireEvent.click(screen.getByRole('button', { name: '대본 검수 후 실행' }));
-        expect(screen.queryByRole('button', { name: '쇼츠 제작' })).toBeNull();
+        fireEvent.click(screen.getByRole('button', { name: '컨트리볼 상황극' }));
         expect(screen.queryByRole('button', { name: '롱폼 해설' })).toBeNull();
         fireEvent.click(screen.getByRole('button', { name: '승인' }));
 
@@ -106,7 +106,7 @@ describe('FlowAgentPanel proposal content profile controls', () => {
                     scriptToneId: 'news-anchor',
                     scriptToneIntensity: 'high',
                     reviewMode: 'script-first',
-                    contentProfileId: 'shorts.info.v1',
+                    contentProfileId: 'shorts.countryball.v1',
                 })
             );
         });

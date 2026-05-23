@@ -151,6 +151,9 @@ export const ContentOutputSchema = z.object({
             format: z.string().optional(),
             aspectRatio: z.string().optional(),
             sceneCount: z.number().optional(),
+            visualStyle: z.string().optional(),
+            narrativeMode: z.string().optional(),
+            requestBasis: z.string().optional(),
             visualGrammar: z.record(z.unknown()).optional(),
         })
         .optional(),
@@ -167,6 +170,11 @@ export const ContentOutputSchema = z.object({
             visual: VisualSchema,
             claimType: ClaimTypeSchema,
             sourceRefs: z.array(SourceRefSchema.or(z.string())),
+            characters: z.array(z.record(z.unknown())).optional(),
+            dramatizedAction: z.string().optional(),
+            dialogueLines: z.array(z.string()).optional(),
+            factualClaim: z.string().optional(),
+            evidenceRefs: z.array(SourceRefSchema.or(z.string())).optional(),
             durationSec: z.number().optional(),
         })
     ),
@@ -191,6 +199,11 @@ export const DataOutputSchema = z.object({
             visual: VisualSchema.optional(),
             claimType: ClaimTypeSchema,
             sourceRefs: z.array(SourceRefSchema.or(z.string())),
+            characters: z.array(z.record(z.unknown())).optional(),
+            dramatizedAction: z.string().optional(),
+            dialogueLines: z.array(z.string()).optional(),
+            factualClaim: z.string().optional(),
+            evidenceRefs: z.array(SourceRefSchema.or(z.string())).optional(),
             durationSec: z.number().optional(),
             keywords: z.array(z.string()).optional(),
         })

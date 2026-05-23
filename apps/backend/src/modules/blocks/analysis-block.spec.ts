@@ -206,6 +206,76 @@ describe('analysisBlock', () => {
         expect(JSON.stringify(result.output['issues'])).not.toContain('금지 키워드 "폭력"');
     });
 
+    it('rejects countryball scripts that insult an entire nationality or ethnicity', async () => {
+        const normalizedScenes = Array.from({ length: 12 }, (_, index) => ({
+            sceneNumber: index + 1,
+            caption: `상황극 ${index + 1}`,
+            narration:
+                index === 2
+                    ? '일본인은 전부 열등하다는 식으로 장면을 몰아갑니다.'
+                    : `국가볼 캐릭터들이 사용자가 요청한 상황을 재연합니다 ${index + 1}`,
+            imagePrompt: 'Korea countryball and Japan countryball reenact a tense cultural situation.',
+            visual: {
+                topTitle: '도공 상황극',
+                mainCaption: `상황극 ${index + 1}`,
+            },
+            claimType: 'opinion',
+            sourceRefs: [],
+            durationSec: 5,
+        }));
+
+        const result = await analysisBlock.execute({
+            normalizedScenes,
+            metadata: {
+                title: '도공 상황극',
+                presetId: 'countryball-shorts',
+                requestTopic: '컨트리볼 쇼츠로 조선 도공 상황극 만들어줘',
+                outputContract: {
+                    contentProfileId: 'shorts.countryball.v1',
+                    narrativeMode: 'countryball-situation-reenactment',
+                    exactSubjectRequired: false,
+                },
+            },
+        });
+
+        expect(result.output['approved']).toBe(false);
+        expect(JSON.stringify(result.output['issues'])).toContain('국가/민족 전체를 비하');
+    });
+
+    it('allows user-requested fictional countryball reenactments without source refs', async () => {
+        const normalizedScenes = Array.from({ length: 12 }, (_, index) => ({
+            sceneNumber: index + 1,
+            caption: `가상 협상 ${index + 1}`,
+            narration: `한국볼과 일본볼이 가상의 협상 상황을 상황극으로 재연합니다 ${index + 1}`,
+            imagePrompt: 'Korea countryball and Japan countryball reenact a fictional negotiation scene.',
+            visual: {
+                topTitle: '가상 협상극',
+                mainCaption: `가상 협상 ${index + 1}`,
+            },
+            claimType: 'hypothetical',
+            sourceRefs: [],
+            durationSec: 5,
+        }));
+
+        const result = await analysisBlock.execute({
+            normalizedScenes,
+            metadata: {
+                title: '가상 협상극',
+                presetId: 'countryball-shorts',
+                requestTopic: '컨트리볼 쇼츠로 가상 협상 상황극 만들어줘',
+                outputContract: {
+                    contentProfileId: 'shorts.countryball.v1',
+                    narrativeMode: 'countryball-situation-reenactment',
+                    requestBasis: 'user-requested',
+                    exactSubjectRequired: false,
+                },
+            },
+        });
+
+        expect(result.output['approved']).toBe(true);
+        expect(JSON.stringify(result.output['issues'])).not.toContain('sourceRefs가 없습니다');
+    });
+
     it('repairs creative simulation pacing and verdict issues once before rejecting the workflow', async () => {
         vi.mocked(openaiAdapter.chatJson)
             .mockResolvedValueOnce({

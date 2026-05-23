@@ -103,6 +103,10 @@ export const mediaImageBlock: BlockExecutor = {
             title: metadata?.title,
             keywords: rawScenes.flatMap(scene => (Array.isArray(scene.sourceRefs) ? scene.sourceRefs : [])),
             presetId: metadata?.presetId,
+            contentProfileId: metadata?.contentProfileId ?? config?.['contentProfileId'],
+            imageStyleId: config?.['imageStyleId'] ?? metadata?.imageStyleId,
+            narrativeMode: metadata?.narrativeMode ?? config?.['narrativeMode'],
+            style: metadata?.style,
         });
         const sources = metadata?.sources;
         const sceneTopTitle = rawScenes.find(scene => scene.visual?.topTitle || scene.topTitle);

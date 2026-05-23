@@ -678,6 +678,70 @@ describe('contentBlock', () => {
         expect(request?.systemPrompt).toContain('Content profile: shorts.info.v1');
     });
 
+    it('adds countryball reenactment structure to explicit countryball Shorts requests', async () => {
+        vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
+            content: JSON.stringify({
+                title: '조선 도공 상황극',
+                hook: '끌려간 도공의 이야기를 국가볼로 재연합니다',
+                script: {
+                    hook: '끌려간 도공의 이야기를 국가볼로 재연합니다',
+                    angle: '사용자 요청 상황을 국가볼 상황극으로 구성',
+                    cta: '다음 편도 확인하세요',
+                },
+                style: { format: 'vertical-shorts' },
+                scenes: Array.from({ length: 12 }, (_, index) => ({
+                    sceneNumber: index + 1,
+                    imageSlot: `[Image #${index + 1}]`,
+                    storyBeat: index === 0 ? 'hook' : 'reenactment',
+                    topTitle: '조선 도공 상황극',
+                    caption: `상황극 ${index + 1}`,
+                    narration: `한국볼과 일본볼이 장면 ${index + 1}을 상황극으로 재연합니다.`,
+                    imagePrompt: `Korea countryball and Japan countryball reenact scene ${index + 1}.`,
+                    visualText: `상황극 ${index + 1}`,
+                    visual: { topTitle: '조선 도공 상황극', mainCaption: `상황극 ${index + 1}` },
+                    claimType: 'opinion',
+                    sourceRefs: [],
+                    durationSec: 5,
+                    characters: [
+                        { countryCode: 'KR', roleInScene: '조선 도공 역할' },
+                        { countryCode: 'JP', roleInScene: '상대역' },
+                    ],
+                    dramatizedAction: `상황극 장면 ${index + 1}`,
+                })),
+                cta: '다음 편도 확인하세요',
+                totalDurationSec: 60,
+            }),
+            model: 'gpt-test',
+            inputTokens: 1,
+            outputTokens: 1,
+            latencyMs: 1,
+        });
+
+        const result = await contentBlock.execute(
+            {
+                topic: '컨트리볼 쇼츠로 조선 도공이 일본 문화재 만드는 상황극 만들어줘',
+            },
+            {
+                contentProfileId: 'shorts.countryball.v1',
+                narrativeMode: 'countryball-situation-reenactment',
+                requestBasis: 'user-requested',
+            }
+        );
+
+        const request = vi.mocked(openaiAdapter.chatJson).mock.calls[0]?.[0];
+        expect(request?.systemPrompt).toContain('Countryball situation reenactment');
+        expect(request?.systemPrompt).toContain('factualClaim');
+        expect(request?.systemPrompt).toContain('dramatizedAction');
+        expect(result.output).toMatchObject({
+            presetId: 'countryball-shorts',
+            style: expect.objectContaining({
+                visualStyle: 'countryball-comic',
+                narrativeMode: 'countryball-situation-reenactment',
+                requestBasis: 'user-requested',
+            }),
+        });
+    });
+
     it('keeps generic text mode free of paid media and script-review instructions', async () => {
         await contentBlock.execute(
             {

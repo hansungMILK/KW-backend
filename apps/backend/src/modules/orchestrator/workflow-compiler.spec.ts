@@ -290,6 +290,24 @@ describe('compileWorkflowPlan', () => {
         expect(prefs.sceneCountOptions.map(option => option.count)).toEqual([8, 12, 16]);
     });
 
+    it('recommends countryball comic style only for explicit countryball requests', () => {
+        const countryballPrefs = buildImageGenerationPreferences({
+            userMessage: '컨트리볼 쇼츠로 조선 도공이 일본 문화재 만드는 상황극 만들어줘',
+            sceneCount: 12,
+            imageQuality: 'medium',
+        });
+        const genericPrefs = buildImageGenerationPreferences({
+            userMessage: '미중갈등 쇼츠 만들어줘',
+            sceneCount: 12,
+            imageQuality: 'medium',
+        });
+
+        expect(countryballPrefs.imageStyleId).toBe('countryball-comic');
+        expect(countryballPrefs.imageStyleLabel).toBe('컨트리볼 만화');
+        expect(countryballPrefs.styleOptions.some(option => option.id === 'countryball-comic')).toBe(true);
+        expect(genericPrefs.imageStyleId).not.toBe('countryball-comic');
+    });
+
     it('uses fixed image-count metadata for standalone image requests', () => {
         const prefs = buildImageGenerationPreferences({
             userMessage: '바나나가 춤추는 이미지 생성해줘',

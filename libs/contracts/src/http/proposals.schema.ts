@@ -22,6 +22,7 @@ export const ContentProfileIdSchema = z.enum([
     'text.explainer.v1',
     'image.single.v1',
     'shorts.info.v1',
+    'shorts.countryball.v1',
     'shorts.story.v1',
     'longform.explainer.v1',
     'longform.documentary.v1',
@@ -29,6 +30,7 @@ export const ContentProfileIdSchema = z.enum([
 export const ReviewModeSchema = z.enum(['direct-run', 'script-first']);
 export const ImageStyleIdSchema = z.enum([
     'explainer-comic',
+    'countryball-comic',
     'animation',
     'photo-real',
     'research-visual',

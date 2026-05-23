@@ -98,6 +98,26 @@ Requirements:
 Do not create a Shorts/video plan. Do not add TTS, video, SEO, or distribution steps.
 Respond with JSON only — no markdown fences, no extra text.`;
 
+function buildCountryballContentPrompt(
+    rulepackId: string,
+    config: Record<string, unknown> | undefined,
+    userRequest: string
+): string {
+    if (rulepackId !== 'countryball-shorts' && config?.['contentProfileId'] !== 'shorts.countryball.v1') return '';
+
+    return [
+        'Countryball situation reenactment addendum:',
+        `- Requested situation: ${userRequest}`,
+        '- This is user-request driven. It does not have to be a real historical event unless the user asks for one.',
+        '- Reenact the requested situation through countryball characters, actions, reactions, props, and scene background.',
+        '- Dialogue is optional support, not the whole format.',
+        '- For every scene include characters, dramatizedAction, dialogueLines, factualClaim, and evidenceRefs.',
+        '- factualClaim must be empty or omitted unless the scene states a real-world fact.',
+        '- dramatizedAction must describe the skit action and must not be presented as evidence.',
+        '- Avoid slurs, hateful stereotypes, and claims that a whole nation or ethnicity is inferior.',
+    ].join('\n');
+}
+
 const GENERIC_TEXT_SYSTEM_PROMPT = `You are a Korean content writer inside a general workflow automation engine.
 Given upstream research or user input, produce the requested text/data output without forcing a Shorts scene contract.
 
@@ -324,7 +344,12 @@ export const contentBlock: BlockExecutor = {
         const start = Date.now();
         const userMessage = buildUserMessage(input);
         const requestSpec = readRequestSpec(input) ?? readRequestSpec(config) ?? buildRequestSpec(input);
-        const rulepack = selectShortsRulepack(input);
+        const rulepack = selectShortsRulepack({
+            text: userMessage,
+            contentProfileId: config?.['contentProfileId'],
+            imageStyleId: config?.['imageStyleId'],
+            narrativeMode: config?.['narrativeMode'],
+        });
         const longformGateAMode = isLongformGateAMode(input, config);
         const reviewedOutput = parseReviewedOutput(config?.['reviewedOutput']);
         if (reviewedOutput) {
@@ -374,6 +399,11 @@ export const contentBlock: BlockExecutor = {
         const directorPrompt = `${SCRIPT_WRITER_RULES}\n\n${SCRIPT_OUTPUT_RULES}\n\n${SHORTS_DIRECTOR_RULES}\n\n${DIRECTOR_OUTPUT_RULES}`;
         const contentPreferencePrompt = buildContentPreferencePrompt(config);
         const scriptTonePrompt = buildScriptTonePrompt(config);
+        const countryballPrompt = buildCountryballContentPrompt(
+            rulepack.id,
+            config,
+            requestSpec.userRequest || userMessage
+        );
         const response = await openaiAdapter.chatJson({
             model: env.openaiModel,
             systemPrompt: longformGateAMode
@@ -388,7 +418,7 @@ export const contentBlock: BlockExecutor = {
                               : ''
                       }\n\n${buildCombinedPrompt(rulepack, 'contentPrompt')}\n\n${
                           creativeSimulationMode ? `${CREATIVE_SIMULATION_SHORTS_RULES}\n\n` : ''
-                      }${scriptTonePrompt}\n\n${directorPrompt}\n\n${rulepack.sourcePolicy}`,
+                      }${countryballPrompt}\n\n${scriptTonePrompt}\n\n${directorPrompt}\n\n${rulepack.sourcePolicy}`,
             userMessage,
             maxTokens: 4096,
         });
@@ -633,7 +663,16 @@ function normalizeContentOutput(parsed: unknown, input: unknown, presetId: strin
             ? extractRequestedSubject(input as Record<string, unknown>)
             : requestSpec.userRequest;
     const outputKind = inferOutputKind(requestSpec, obj);
-    const outputContract = buildOutputContract(requestSpec, outputKind);
+    const baseOutputContract = buildOutputContract(requestSpec, outputKind);
+    const outputContract =
+        presetId === 'countryball-shorts'
+            ? {
+                  ...baseOutputContract,
+                  contentProfileId: 'shorts.countryball.v1',
+                  narrativeMode: 'countryball-situation-reenactment',
+                  requestBasis: 'user-requested',
+              }
+            : baseOutputContract;
     const sources = normalizeSources(extractSources(input));
     const parsedSources = Array.isArray(obj['sources']) ? normalizeSources(obj['sources']) : [];
     const defaultSourceRefs = sourceIds(parsedSources.length > 0 ? parsedSources : sources);
@@ -666,7 +705,7 @@ function normalizeContentOutput(parsed: unknown, input: unknown, presetId: strin
             hook: compactSpokenLine(hook, 32),
             cta: compactSpokenLine(cta, 32),
         },
-        style: normalizeStyle(obj['style'], Array.isArray(scenes) ? scenes.length : undefined),
+        style: normalizeStyle(obj['style'], Array.isArray(scenes) ? scenes.length : undefined, presetId),
         scenes,
         cta: compactSpokenLine(cta, 32),
         sources: parsedSources.length > 0 ? parsedSources : sources,
@@ -769,13 +808,27 @@ function normalizeScene(
     };
 }
 
-function normalizeStyle(input: unknown, sceneCount?: number): Record<string, unknown> {
+function normalizeStyle(input: unknown, sceneCount?: number, presetId?: string): Record<string, unknown> {
     const style = isRecord(input) ? input : {};
+    const visualGrammar = isRecord(style['visualGrammar']) ? style['visualGrammar'] : {};
+    const isCountryball = presetId === 'countryball-shorts';
     return {
         ...style,
         format: typeof style['format'] === 'string' ? style['format'] : 'vertical-shorts',
         aspectRatio: typeof style['aspectRatio'] === 'string' ? style['aspectRatio'] : '9:16',
         sceneCount: typeof style['sceneCount'] === 'number' ? style['sceneCount'] : sceneCount,
+        ...(isCountryball
+            ? {
+                  visualStyle: 'countryball-comic',
+                  narrativeMode: 'countryball-situation-reenactment',
+                  requestBasis: 'user-requested',
+                  visualGrammar: {
+                      ...visualGrammar,
+                      reenactment: true,
+                      characterSystem: 'countryball',
+                  },
+              }
+            : {}),
     };
 }
 

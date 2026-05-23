@@ -74,6 +74,11 @@ interface RawScene {
     visual?: unknown;
     claimType?: unknown;
     sourceRefs?: unknown;
+    characters?: unknown;
+    dramatizedAction?: unknown;
+    dialogueLines?: unknown;
+    factualClaim?: unknown;
+    evidenceRefs?: unknown;
     durationSec?: unknown;
 }
 
@@ -159,8 +164,10 @@ function normalizeContent(input: unknown): BlockExecutorResult {
                     ? caption
                     : undefined;
         const explicitSourceRefs = Array.isArray(scene.sourceRefs) ? scene.sourceRefs : [];
+        const evidenceRefs = Array.isArray(scene.evidenceRefs) ? scene.evidenceRefs : [];
         const shouldBackfillSourceRefs =
             explicitSourceRefs.length === 0 &&
+            evidenceRefs.length === 0 &&
             defaultSourceRefs.length > 0 &&
             (scene.claimType === 'fact' || hasConcreteClaim(scene));
         const sourceRefs = shouldBackfillSourceRefs ? defaultSourceRefs : explicitSourceRefs;
@@ -193,6 +200,11 @@ function normalizeContent(input: unknown): BlockExecutorResult {
             visual,
             claimType,
             sourceRefs,
+            characters: Array.isArray(scene.characters) ? scene.characters : undefined,
+            dramatizedAction: typeof scene.dramatizedAction === 'string' ? scene.dramatizedAction : undefined,
+            dialogueLines: Array.isArray(scene.dialogueLines) ? scene.dialogueLines.map(String) : undefined,
+            factualClaim: typeof scene.factualClaim === 'string' ? scene.factualClaim : undefined,
+            evidenceRefs,
             durationSec,
             keywords: sceneKeywords,
         };

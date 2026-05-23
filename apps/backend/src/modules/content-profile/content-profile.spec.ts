@@ -14,6 +14,7 @@ import {
     SCRIPT_TONE_INTENSITY_OPTIONS,
     SCRIPT_TONE_OPTIONS,
     buildContentProfilePreferences,
+    isCountryballShortsRequest,
     normalizeReviewMode,
     normalizeScriptToneId,
 } from './content-profile';
@@ -31,7 +32,23 @@ describe('content profile preferences', () => {
         expect(prefs.reviewMode).toBe('direct-run');
         expect(prefs.toneOptions.map(option => option.id)).toContain('news-anchor');
         expect(prefs.reviewModeOptions.map(option => option.id)).toEqual(['direct-run', 'script-first']);
-        expect(prefs.profileOptions.map(option => option.id)).toEqual(['shorts.info.v1']);
+        expect(prefs.profileOptions.map(option => option.id)).toEqual(['shorts.info.v1', 'shorts.countryball.v1']);
+    });
+
+    it('treats explicit countryball requests as a situation reenactment Shorts profile', () => {
+        const prefs = buildContentProfilePreferences({
+            userMessage: '컨트리볼 쇼츠로 조선 도공이 일본 문화재 만드는 상황극 만들어줘',
+            outputType: 'video',
+            hasMediaVideo: true,
+        });
+
+        expect(prefs.contentProfileId).toBe('shorts.countryball.v1');
+        expect(prefs.scriptToneId).toBe('story-dialogue');
+        expect(prefs.narrativeMode).toBe('countryball-situation-reenactment');
+        expect(prefs.requestBasis).toBe('user-requested');
+        expect(prefs.profileOptions.map(option => option.id)).toEqual(['shorts.info.v1', 'shorts.countryball.v1']);
+        expect(isCountryballShortsRequest('미중갈등 쇼츠 만들어줘')).toBe(false);
+        expect(isCountryballShortsRequest('국가볼로 미중갈등 상황극 쇼츠 만들어줘')).toBe(true);
     });
 
     it('classifies natural language, URL, single-image, Shorts, and longform requests by output intent', () => {
@@ -106,7 +123,7 @@ describe('content profile preferences', () => {
         const parsed = ProposalApproveRequestSchema.safeParse({
             scriptToneId: 'news-anchor',
             scriptToneIntensity: 'high',
-            contentProfileId: 'shorts.info.v1',
+            contentProfileId: 'shorts.countryball.v1',
             reviewMode: 'script-first',
         });
 

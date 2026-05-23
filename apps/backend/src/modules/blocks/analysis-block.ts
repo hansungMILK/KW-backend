@@ -66,6 +66,11 @@ interface NormalizedScene {
     topTitle?: unknown;
     claimType?: unknown;
     sourceRefs?: unknown;
+    characters?: unknown;
+    dramatizedAction?: unknown;
+    dialogueLines?: unknown;
+    factualClaim?: unknown;
+    evidenceRefs?: unknown;
     keywords?: unknown;
     durationSec?: unknown;
 }
@@ -99,6 +104,7 @@ function runRuleChecks(
     let safetyDeductions = 0;
     let qualityDeductions = 0;
     const creativeSimulationMode = isCreativeSimulationContract(outputContract);
+    const countryballMode = presetId === 'countryball-shorts' || isCountryballContract(outputContract);
 
     // 1. Scene count check
     if (scenes.length < MIN_SCENE_COUNT || scenes.length > MAX_SCENE_COUNT) {
@@ -137,6 +143,10 @@ function runRuleChecks(
         const sourceLabel = typeof visual['sourceLabel'] === 'string' ? visual['sourceLabel'] : '';
         const claimType = typeof scene.claimType === 'string' ? scene.claimType : undefined;
         const sourceRefs = Array.isArray(scene.sourceRefs) ? scene.sourceRefs : [];
+        const evidenceRefs = Array.isArray(scene.evidenceRefs) ? scene.evidenceRefs : [];
+        const dialogueLines = Array.isArray(scene.dialogueLines) ? scene.dialogueLines.map(String) : [];
+        const factualClaim = typeof scene.factualClaim === 'string' ? scene.factualClaim : '';
+        const dramatizedAction = typeof scene.dramatizedAction === 'string' ? scene.dramatizedAction : '';
 
         if (topTitle) {
             topTitles.push({ sceneNumber: sceneNum, value: topTitle });
@@ -195,13 +205,29 @@ function runRuleChecks(
             }
         }
 
-        if (claimType === 'fact' && sourceRefs.length === 0) {
+        if (claimType === 'fact' && sourceRefs.length === 0 && evidenceRefs.length === 0) {
             issues.push({
                 severity: 'high',
                 message: 'fact 장면인데 sourceRefs가 없습니다.',
                 sceneNumber: sceneNum,
             });
             qualityDeductions += 8;
+        }
+
+        if (
+            countryballMode &&
+            hasWholeNationDemeaningClaim(
+                [caption, visualText, narration, scene.imagePrompt, factualClaim, dramatizedAction, ...dialogueLines]
+                    .filter((value): value is string => typeof value === 'string')
+                    .join(' ')
+            )
+        ) {
+            issues.push({
+                severity: 'high',
+                message: '컨트리볼 상황극에서 국가/민족 전체를 비하하는 표현이 포함되어 있습니다.',
+                sceneNumber: sceneNum,
+            });
+            safetyDeductions += 25;
         }
 
         if (presetId === 'education-admission') {
@@ -382,6 +408,25 @@ function isCreativeSimulationContract(input: unknown): boolean {
     return isRecord(requestSpec) && requestSpec['contentMode'] === 'creative-simulation';
 }
 
+function isCountryballContract(input: unknown): boolean {
+    if (!isRecord(input)) return false;
+    return (
+        input['contentProfileId'] === 'shorts.countryball.v1' ||
+        input['imageStyleId'] === 'countryball-comic' ||
+        input['visualStyle'] === 'countryball-comic' ||
+        input['narrativeMode'] === 'countryball-situation-reenactment'
+    );
+}
+
+function hasWholeNationDemeaningClaim(input: string): boolean {
+    const text = input.toLowerCase().replace(/\s+/g, ' ');
+    const group =
+        '(?:한국인|일본인|중국인|미국인|러시아인|조선인|북한인|남한인|한국볼|일본볼|중국볼|미국볼|러시아볼|국민|민족|people|nationals)';
+    const universal = '(?:전부|모두|다|항상|원래|inherently|all|always)';
+    const insult = '(?:열등|멍청|미개|더럽|악랄|범죄자|쓰레기|하등|inferior|stupid|dirty|evil|criminal)';
+    return new RegExp(`${group}.{0,18}${universal}.{0,18}${insult}`).test(text);
+}
+
 function buildAnalysisContract(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
     if (!metadata) return undefined;
     const outputContract = isRecord(metadata['outputContract']) ? metadata['outputContract'] : undefined;
@@ -441,10 +486,12 @@ async function runAIReview(scenes: NormalizedScene[], ruleIssues: Issue[], analy
     const narrationSummary = scenes
         .map(s => {
             const sourceRefs = Array.isArray(s.sourceRefs) ? s.sourceRefs.join(', ') : '';
+            const evidenceRefs = Array.isArray(s.evidenceRefs) ? s.evidenceRefs.join(', ') : '';
             return [
                 `씬 ${String(s.sceneNumber ?? '?')}`,
                 `claimType=${String(s.claimType ?? 'unknown')}`,
                 `sourceRefs=${sourceRefs || 'none'}`,
+                `evidenceRefs=${evidenceRefs || 'none'}`,
                 `narration=${String(s.narration ?? '')}`,
             ].join(' | ');
         })
@@ -456,8 +503,8 @@ async function runAIReview(scenes: NormalizedScene[], ruleIssues: Issue[], analy
             systemPrompt: `${ANALYSIS_SYSTEM_PROMPT}\n\n${analysisPrompt}`,
             userMessage: [
                 '다음 씬 나레이션을 검토해주세요.',
-                'claimType=fact이고 sourceRefs가 none이면 출처 누락으로 봅니다.',
-                'sourceRefs가 있으면 해당 씬은 출처 연결이 있는 것으로 간주하고, 출처 누락이라고 단정하지 마세요.',
+                'claimType=fact이고 sourceRefs/evidenceRefs가 모두 none이면 출처 누락으로 봅니다.',
+                'sourceRefs 또는 evidenceRefs가 있으면 해당 씬은 출처 연결이 있는 것으로 간주하고, 출처 누락이라고 단정하지 마세요.',
                 '',
                 narrationSummary,
             ].join('\n'),
@@ -536,6 +583,10 @@ export const analysisBlock: BlockExecutor = {
         }
         const rulepack = selectShortsRulepack({
             presetId: metadata?.['presetId'],
+            contentProfileId: metadata?.['contentProfileId'],
+            imageStyleId: metadata?.['imageStyleId'],
+            narrativeMode: metadata?.['narrativeMode'],
+            style: metadata?.['style'],
             title: metadata?.['title'],
             keywords: scenes.flatMap(scene => (Array.isArray(scene.keywords) ? scene.keywords : [])),
         });
