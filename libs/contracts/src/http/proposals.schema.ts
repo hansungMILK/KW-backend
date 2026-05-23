@@ -41,6 +41,23 @@ export const ImageStyleIdSchema = z.enum([
 ]);
 export const ImageQualitySchema = z.enum(['low', 'medium', 'high']);
 
+export type ContentProfileId = z.infer<typeof ContentProfileIdSchema>;
+
+export type ContentProfileOption = {
+    id: ContentProfileId;
+    label: string;
+    description: string;
+};
+
+export const SHORTS_CONTENT_PROFILE_OPTIONS: ContentProfileOption[] = [
+    { id: 'shorts.info.v1', label: '쇼츠 제작', description: 'AI가 내용 성격을 판단하는 45-60초 세로형 쇼츠' },
+    {
+        id: 'shorts.countryball.v1',
+        label: '컨트리볼 상황극',
+        description: '사용자 요청 상황을 국가볼 캐릭터로 재연하는 세로형 쇼츠',
+    },
+];
+
 // ============================================================================
 // Proposal model (stored in ProposalsTable)
 // ============================================================================

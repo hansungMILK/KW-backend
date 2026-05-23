@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { RefreshCw, Send, X } from 'lucide-react';
 
+import { SHORTS_CONTENT_PROFILE_OPTIONS } from '@flows/contracts';
 import { approveProposal, getFlowMessages, sendFlowMessage } from '@flows/flows';
 import { MarkdownViewer } from '@flows/ui-kit';
 import { extractErrorMessage } from '@flows/web-core';
@@ -93,11 +94,6 @@ type ContentProfileMetadata = {
     };
 };
 
-const SHORTS_PROFILE_OPTIONS: ContentProfileOption<ContentProfileId>[] = [
-    { id: 'shorts.info.v1', label: '쇼츠 제작', description: 'AI가 내용 성격을 판단하는 세로형 쇼츠' },
-    { id: 'shorts.countryball.v1', label: '컨트리볼 상황극', description: '국가볼 상황극 쇼츠' },
-];
-
 type AiRequestDecisionMetadata = {
     aiRequestDecision?: {
         intent?: string;
@@ -186,7 +182,7 @@ const filterProfileOptionsByFamily = (
     const familyOptions = (options ?? []).filter(option => contentProfileFamily(option.id) === selectedFamily);
     if (selectedFamily !== 'shorts') return familyOptions;
     const optionIds = new Set(familyOptions.map(option => option.id));
-    return [...familyOptions, ...SHORTS_PROFILE_OPTIONS.filter(option => !optionIds.has(option.id))];
+    return [...familyOptions, ...SHORTS_CONTENT_PROFILE_OPTIONS.filter(option => !optionIds.has(option.id))];
 };
 
 const asAiRequestDecisionMetadata = (metadata: unknown): AiRequestDecisionMetadata['aiRequestDecision'] | undefined => {

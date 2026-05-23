@@ -179,14 +179,14 @@ custom:
             - http://127.0.0.1:3001
         dev:
             - https://flow-dev.eureka.codes
-            - ${env:DEV_WEB_ORIGIN, 'https://d37nj585pnjtts.cloudfront.net'}
+            - ${env:DEV_WEB_ORIGIN, ''}
             - http://localhost:3000
             - http://localhost:3001
         prod:
             - https://flow.eureka.codes
     corsAllowedOriginsCsv:
         local: http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001
-        dev: https://flow-dev.eureka.codes,${env:DEV_WEB_ORIGIN, 'https://d37nj585pnjtts.cloudfront.net'},http://localhost:3000,http://localhost:3001
+        dev: https://flow-dev.eureka.codes,${env:DEV_WEB_ORIGIN, ''},http://localhost:3000,http://localhost:3001
         prod: https://flow.eureka.codes
     ffmpegPath:
         local: ${env:FFMPEG_PATH, '/opt/bin/ffmpeg'}

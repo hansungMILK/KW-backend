@@ -32,6 +32,9 @@
             "path": "../../libs/shared/tsconfig.lib.json"
         },
         {
+            "path": "../../libs/contracts"
+        },
+        {
             "path": "../../libs/web-core/tsconfig.lib.json"
         },
         {

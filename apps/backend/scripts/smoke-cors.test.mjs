@@ -3,8 +3,8 @@ import test from 'node:test';
 
 import { resolveApiKey, resolveWebOrigin } from './smoke-cors.mjs';
 
-test('defaults dev CORS smoke to the deployed CloudFront origin', () => {
-    assert.equal(resolveWebOrigin({ SMOKE_STAGE: 'dev' }), 'https://d37nj585pnjtts.cloudfront.net');
+test('requires deployed dev CORS smoke origin to be explicit', () => {
+    assert.throws(() => resolveWebOrigin({ SMOKE_STAGE: 'dev' }), /DEV_WEB_ORIGIN or SMOKE_WEB_ORIGIN/);
 });
 
 test('allows deploy-specific web origin override for CORS smoke', () => {
@@ -14,6 +14,16 @@ test('allows deploy-specific web origin override for CORS smoke', () => {
             DEV_WEB_ORIGIN: 'https://example.cloudfront.net/',
         }),
         'https://example.cloudfront.net'
+    );
+});
+
+test('allows smoke web origin override without stage-specific defaults', () => {
+    assert.equal(
+        resolveWebOrigin({
+            SMOKE_STAGE: 'prod',
+            SMOKE_WEB_ORIGIN: 'https://preview.example.com/',
+        }),
+        'https://preview.example.com'
     );
 });
 

@@ -1,4 +1,4 @@
-import { ContentProfileIdSchema, ScriptToneIdSchema } from '@flows/contracts';
+import { ContentProfileIdSchema, SHORTS_CONTENT_PROFILE_OPTIONS, ScriptToneIdSchema } from '@flows/contracts';
 
 import type { ReviewModeSchema, ScriptToneIntensitySchema } from '@flows/contracts';
 import type { z } from 'zod';
@@ -90,12 +90,7 @@ export const REVIEW_MODE_OPTIONS: ContentProfilePreferences['reviewModeOptions']
 export const CONTENT_PROFILE_OPTIONS: ContentProfilePreferences['profileOptions'] = [
     { id: 'text.explainer.v1', label: '텍스트 설명', description: '글 또는 요약 산출물' },
     { id: 'image.single.v1', label: '단일 이미지', description: '한 장 이미지 산출물' },
-    { id: 'shorts.info.v1', label: '쇼츠 제작', description: 'AI가 내용 성격을 판단하는 45-60초 세로형 쇼츠' },
-    {
-        id: 'shorts.countryball.v1',
-        label: '컨트리볼 상황극',
-        description: '사용자 요청 상황을 국가볼 캐릭터로 재연하는 세로형 쇼츠',
-    },
+    ...SHORTS_CONTENT_PROFILE_OPTIONS,
     { id: 'shorts.story.v1', label: '쇼츠 제작', description: '이전 워크플로우 호환용 쇼츠 프로필' },
     { id: 'longform.explainer.v1', label: '롱폼 해설', description: '3-5분 이상 해설 영상' },
     { id: 'longform.documentary.v1', label: '롱폼 다큐', description: '자료 기반 다큐형 영상' },
@@ -109,9 +104,7 @@ const contentProfileFamily = (id: ContentProfileId): string => id.split('.')[0] 
 const profileOptionsFor = (contentProfileId: ContentProfileId): ContentProfilePreferences['profileOptions'] => {
     const family = contentProfileFamily(contentProfileId);
     if (family === 'shorts') {
-        return CONTENT_PROFILE_OPTIONS.filter(
-            option => option.id === 'shorts.info.v1' || option.id === 'shorts.countryball.v1'
-        );
+        return [...SHORTS_CONTENT_PROFILE_OPTIONS];
     }
     return CONTENT_PROFILE_OPTIONS.filter(option => contentProfileFamily(option.id) === family);
 };
