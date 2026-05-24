@@ -32,6 +32,10 @@ const FFPROBE_PATH =
         : 'ffprobe');
 
 export const ttsAdapter = {
+    async canUseElevenLabs(): Promise<boolean> {
+        return Boolean(await getProviderApiKey('elevenlabs'));
+    },
+
     async synthesize(request: TtsRequest): Promise<TtsResult> {
         const elevenLabsKey = await getProviderApiKey('elevenlabs');
         if (elevenLabsKey) return synthesizeWithElevenLabs(elevenLabsKey, request);

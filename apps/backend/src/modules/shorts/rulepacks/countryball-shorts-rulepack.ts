@@ -29,10 +29,12 @@ export const COUNTRYBALL_SHORTS_RULEPACK: ShortsRulepack = {
 - Required extra scene fields:
   - characters: [{ countryCode, roleInScene, expression, pose }]
   - dramatizedAction: the skit action happening in this scene
-  - dialogueLines: [{ speaker, text, emotion, captionStyle, durationSec }]
+  - dialogueLines: [{ speaker, text, emotion, delivery, meaning, voiceRole, captionStyle, durationSec }]
+  - narratorLine: { text, voiceRole: "narrator" } to explain the skit beat after the character exchange
   - factualClaim: only when the scene states a real-world fact
   - evidenceRefs: source ids only when factualClaim is present
 - dialogueLines must be short skit lines, not exposition. Use max 2 dialogue lines per scene.
+- Use voiceRole values such as countryball.kr, countryball.jp, countryball.us, countryball.cn when the character country is recognizable.
 - speaker must identify the countryball character or role, such as "한국볼", "일본볼", "KR", or "JP"; do not use narrator as speaker.
 - Every scene still needs dramatizedAction. Dialogue cannot replace the drawable action beat.
 - Use claimType "hypothetical", "opinion", or "joke" for fictional/satirical/user-imagined situations without factual claims.

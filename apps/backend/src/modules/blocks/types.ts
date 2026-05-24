@@ -65,8 +65,20 @@ const DialogueLineSchema = z.object({
     text: z.string(),
     emotion: z.string().optional(),
     captionStyle: z.string().optional(),
+    delivery: z.string().optional(),
+    meaning: z.string().optional(),
+    interpretation: z.string().optional(),
+    voiceRole: z.string().optional(),
     durationSec: z.number().optional(),
 });
+
+const NarratorLineSchema = z.union([
+    z.string(),
+    z.object({
+        text: z.string(),
+        voiceRole: z.string().optional(),
+    }),
+]);
 
 /**
  * Common block executor interface.
@@ -181,6 +193,8 @@ export const ContentOutputSchema = z.object({
             characters: z.array(z.record(z.unknown())).optional(),
             dramatizedAction: z.string().optional(),
             dialogueLines: z.array(DialogueLineSchema.or(z.string())).optional(),
+            interpretation: z.string().optional(),
+            narratorLine: NarratorLineSchema.optional(),
             factualClaim: z.string().optional(),
             evidenceRefs: z.array(SourceRefSchema.or(z.string())).optional(),
             durationSec: z.number().optional(),
@@ -210,6 +224,8 @@ export const DataOutputSchema = z.object({
             characters: z.array(z.record(z.unknown())).optional(),
             dramatizedAction: z.string().optional(),
             dialogueLines: z.array(DialogueLineSchema.or(z.string())).optional(),
+            interpretation: z.string().optional(),
+            narratorLine: NarratorLineSchema.optional(),
             factualClaim: z.string().optional(),
             evidenceRefs: z.array(SourceRefSchema.or(z.string())).optional(),
             durationSec: z.number().optional(),

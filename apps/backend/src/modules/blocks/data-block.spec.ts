@@ -75,10 +75,18 @@ describe('dataBlock', () => {
                             speaker: 'KR',
                             text: '도장 찍기 전에 읽어.',
                             emotion: 'stern',
+                            delivery: '단호하게',
+                            meaning: '한국볼이 협상 주도권을 가져가는 장면',
+                            voiceRole: 'countryball.kr',
                             captionStyle: 'yellow-pop',
                             durationSec: 1.4,
                         },
                     ],
+                    interpretation: '한국볼이 계약 조건을 먼저 확인하라고 압박하는 상황극입니다.',
+                    narratorLine: {
+                        text: '이 장면은 한국볼이 협상 주도권을 잡는 흐름입니다.',
+                        voiceRole: 'narrator',
+                    },
                     durationSec: 5,
                 },
             ],
@@ -90,10 +98,20 @@ describe('dataBlock', () => {
                 speaker: 'KR',
                 text: '도장 찍기 전에 읽어.',
                 emotion: 'stern',
+                delivery: '단호하게',
+                meaning: '한국볼이 협상 주도권을 가져가는 장면',
+                voiceRole: 'countryball.kr',
                 captionStyle: 'yellow-pop',
                 durationSec: 1.4,
             },
         ]);
+        expect(output.normalizedScenes[0]).toMatchObject({
+            interpretation: '한국볼이 계약 조건을 먼저 확인하라고 압박하는 상황극입니다.',
+            narratorLine: {
+                text: '이 장면은 한국볼이 협상 주도권을 잡는 흐름입니다.',
+                voiceRole: 'narrator',
+            },
+        });
     });
 
     it('backfills fact scene sourceRefs from upstream source metadata', async () => {

@@ -70,6 +70,14 @@ export const env = {
     openaiTtsTimeoutMs: readIntEnv('OPENAI_TTS_TIMEOUT_MS', 120000, 1),
     openaiTtsMaxAttempts: readIntEnv('OPENAI_TTS_MAX_ATTEMPTS', 1, 1),
     elevenLabsTtsVoiceId: readEnv('ELEVENLABS_TTS_VOICE_ID', 'pNInz6obpgDQGcFmaJgB'),
+    countryballTtsVoiceNarrator: readEnv(
+        'COUNTRYBALL_TTS_VOICE_NARRATOR',
+        readEnv('ELEVENLABS_TTS_VOICE_ID', 'pNInz6obpgDQGcFmaJgB')
+    ),
+    countryballTtsVoiceKr: readEnv('COUNTRYBALL_TTS_VOICE_KR', 'TxGEqnHWrfWFTfGW9XjX'),
+    countryballTtsVoiceJp: readEnv('COUNTRYBALL_TTS_VOICE_JP', 'EXAVITQu4vr4xnSDxMaL'),
+    countryballTtsVoiceUs: readEnv('COUNTRYBALL_TTS_VOICE_US', 'VR6AewLTigWG4xSOukaG'),
+    countryballTtsVoiceCn: readEnv('COUNTRYBALL_TTS_VOICE_CN', 'ErXwobaYiN019PkySvjV'),
     elevenLabsTtsModel: readEnv('ELEVENLABS_TTS_MODEL', 'eleven_flash_v2_5'),
     elevenLabsTtsOutputFormat: readEnv('ELEVENLABS_TTS_OUTPUT_FORMAT', 'mp3_44100_128'),
     elevenLabsTtsTimeoutMs: readIntEnv('ELEVENLABS_TTS_TIMEOUT_MS', 120000, 1),

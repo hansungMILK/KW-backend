@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { mediaTtsBlock } from './media-tts-block';
 import { ttsAdapter } from '../../adapters/ai/tts-adapter';
+import { audioConcatAdapter } from '../../adapters/external/audio-concat-adapter';
 
 vi.mock('../../config/env', () => ({
     env: {
@@ -9,19 +10,33 @@ vi.mock('../../config/env', () => ({
         elevenLabsTtsModel: 'eleven_flash_v2_5',
         elevenLabsTtsTimeoutMs: 120000,
         elevenLabsTtsVoiceId: 'pNInz6obpgDQGcFmaJgB',
+        countryballTtsVoiceNarrator: 'pNInz6obpgDQGcFmaJgB',
+        countryballTtsVoiceKr: 'TxGEqnHWrfWFTfGW9XjX',
+        countryballTtsVoiceJp: 'EXAVITQu4vr4xnSDxMaL',
+        countryballTtsVoiceUs: 'VR6AewLTigWG4xSOukaG',
+        countryballTtsVoiceCn: 'ErXwobaYiN019PkySvjV',
     },
 }));
 
 vi.mock('../../adapters/ai/tts-adapter', () => ({
     ttsAdapter: {
-        synthesize: vi.fn(async () => ({
-            audioBuffer: Buffer.from('audio'),
+        canUseElevenLabs: vi.fn(async () => true),
+        synthesize: vi.fn(async ({ text, voiceId }) => ({
+            audioBuffer: Buffer.from(`audio:${voiceId ?? 'default'}:${text}`),
             contentType: 'audio/mpeg',
             estimatedDurationSec: 8,
             provider: 'elevenlabs',
             model: 'eleven_flash_v2_5',
-            voiceId: 'pNInz6obpgDQGcFmaJgB',
+            voiceId: voiceId ?? 'pNInz6obpgDQGcFmaJgB',
         })),
+    },
+}));
+
+vi.mock('../../adapters/external/audio-concat-adapter', () => ({
+    audioConcatAdapter: {
+        concatMp3: vi.fn(async segments =>
+            Buffer.concat(segments.map((segment: { audioBuffer: Buffer }) => segment.audioBuffer))
+        ),
     },
 }));
 
@@ -39,6 +54,7 @@ vi.mock('../../services/trace-service', () => ({
 describe('mediaTtsBlock', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.mocked(ttsAdapter.canUseElevenLabs).mockResolvedValue(true);
     });
 
     it('builds subtitle cues from the exact text sent to TTS and scales them to audio duration', async () => {
@@ -111,6 +127,8 @@ describe('mediaTtsBlock', () => {
     });
 
     it('uses structured countryball dialogue lines as spoken Shorts segments', async () => {
+        vi.mocked(ttsAdapter.canUseElevenLabs).mockResolvedValue(false);
+
         const result = await mediaTtsBlock.execute({
             normalizedScenes: [
                 {
@@ -141,7 +159,98 @@ describe('mediaTtsBlock', () => {
         ]);
     });
 
+    it('routes countryball dialogue and narrator lines to separate ElevenLabs voices', async () => {
+        const result = await mediaTtsBlock.execute({
+            normalizedScenes: [
+                {
+                    sceneNumber: 1,
+                    narration: '한국볼과 일본볼이 협상장에 들어옵니다.',
+                    dialogueLines: [
+                        {
+                            speaker: 'KR',
+                            text: '도장 찍기 전에 읽어.',
+                            emotion: 'stern',
+                            delivery: '단호하게',
+                            voiceRole: 'countryball.kr',
+                        },
+                        {
+                            speaker: 'JP',
+                            text: '잠깐, 조건이 이상한데?',
+                            emotion: 'nervous',
+                            delivery: '당황한 말투',
+                            voiceRole: 'countryball.jp',
+                        },
+                    ],
+                    narratorLine: {
+                        text: '이 장면은 한국볼이 협상 주도권을 가져가는 상황극입니다.',
+                        voiceRole: 'narrator',
+                    },
+                },
+            ],
+            metadata: {
+                presetId: 'countryball-shorts',
+            },
+        });
+
+        expect(ttsAdapter.synthesize).toHaveBeenCalledTimes(3);
+        expect(ttsAdapter.synthesize).toHaveBeenNthCalledWith(
+            1,
+            expect.objectContaining({
+                text: '도장 찍기 전에 읽어.',
+                voiceId: 'TxGEqnHWrfWFTfGW9XjX',
+            })
+        );
+        expect(ttsAdapter.synthesize).toHaveBeenNthCalledWith(
+            2,
+            expect.objectContaining({
+                text: '잠깐, 조건이 이상한데?',
+                voiceId: 'EXAVITQu4vr4xnSDxMaL',
+            })
+        );
+        expect(ttsAdapter.synthesize).toHaveBeenNthCalledWith(
+            3,
+            expect.objectContaining({
+                text: '이 장면은 한국볼이 협상 주도권을 가져가는 상황극입니다.',
+                voiceId: 'pNInz6obpgDQGcFmaJgB',
+            })
+        );
+        expect(audioConcatAdapter.concatMp3).toHaveBeenCalledTimes(1);
+        expect(result.output).toMatchObject({
+            audio: {
+                provider: 'elevenlabs',
+                voiceId: 'pNInz6obpgDQGcFmaJgB',
+                voiceMode: 'countryball-multi-voice',
+            },
+            narrationText:
+                '도장 찍기 전에 읽어. 잠깐, 조건이 이상한데? 이 장면은 한국볼이 협상 주도권을 가져가는 상황극입니다.',
+            subtitleCues: [
+                {
+                    sceneNumber: 1,
+                    text: '도장 찍기 전에 읽어.',
+                    role: 'scene',
+                    startSec: 0,
+                    endSec: 8,
+                },
+                {
+                    sceneNumber: 1,
+                    text: '잠깐, 조건이 이상한데?',
+                    role: 'scene',
+                    startSec: 8,
+                    endSec: 16,
+                },
+                {
+                    sceneNumber: 1,
+                    text: '이 장면은 한국볼이 협상 주도권을 가져가는 상황극입니다.',
+                    role: 'scene',
+                    startSec: 16,
+                    endSec: 24,
+                },
+            ],
+        });
+    });
+
     it('preserves the TTS provider selected by the adapter', async () => {
+        vi.mocked(ttsAdapter.canUseElevenLabs).mockResolvedValue(false);
         vi.mocked(ttsAdapter.synthesize).mockResolvedValueOnce({
             audioBuffer: Buffer.from('openai-audio'),
             contentType: 'audio/mpeg',

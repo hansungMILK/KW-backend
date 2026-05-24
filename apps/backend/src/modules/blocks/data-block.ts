@@ -77,6 +77,8 @@ interface RawScene {
     characters?: unknown;
     dramatizedAction?: unknown;
     dialogueLines?: unknown;
+    interpretation?: unknown;
+    narratorLine?: unknown;
     factualClaim?: unknown;
     evidenceRefs?: unknown;
     durationSec?: unknown;
@@ -87,8 +89,19 @@ interface DialogueLine {
     text: string;
     emotion?: string;
     captionStyle?: string;
+    delivery?: string;
+    meaning?: string;
+    interpretation?: string;
+    voiceRole?: string;
     durationSec?: number;
 }
+
+type NarratorLine =
+    | string
+    | {
+          text: string;
+          voiceRole?: string;
+      };
 
 /**
  * Extract the upstream keywords list from a search-block output embedded
@@ -211,6 +224,8 @@ function normalizeContent(input: unknown): BlockExecutorResult {
             characters: Array.isArray(scene.characters) ? scene.characters : undefined,
             dramatizedAction: typeof scene.dramatizedAction === 'string' ? scene.dramatizedAction : undefined,
             dialogueLines: normalizeDialogueLines(scene.dialogueLines),
+            interpretation: typeof scene.interpretation === 'string' ? scene.interpretation : undefined,
+            narratorLine: normalizeNarratorLine(scene.narratorLine),
             factualClaim: typeof scene.factualClaim === 'string' ? scene.factualClaim : undefined,
             evidenceRefs,
             durationSec,
@@ -303,6 +318,18 @@ function normalizeDialogueLines(input: unknown): DialogueLine[] | undefined {
                 ...(typeof item['captionStyle'] === 'string' && item['captionStyle'].trim()
                     ? { captionStyle: item['captionStyle'].trim() }
                     : {}),
+                ...(typeof item['delivery'] === 'string' && item['delivery'].trim()
+                    ? { delivery: item['delivery'].trim() }
+                    : {}),
+                ...(typeof item['meaning'] === 'string' && item['meaning'].trim()
+                    ? { meaning: item['meaning'].trim() }
+                    : {}),
+                ...(typeof item['interpretation'] === 'string' && item['interpretation'].trim()
+                    ? { interpretation: item['interpretation'].trim() }
+                    : {}),
+                ...(typeof item['voiceRole'] === 'string' && item['voiceRole'].trim()
+                    ? { voiceRole: item['voiceRole'].trim() }
+                    : {}),
                 ...(typeof item['durationSec'] === 'number' && Number.isFinite(item['durationSec'])
                     ? { durationSec: item['durationSec'] }
                     : {}),
@@ -310,6 +337,23 @@ function normalizeDialogueLines(input: unknown): DialogueLine[] | undefined {
         })
         .filter((line): line is DialogueLine => Boolean(line));
     return lines.length > 0 ? lines : undefined;
+}
+
+function normalizeNarratorLine(input: unknown): NarratorLine | undefined {
+    if (typeof input === 'string') {
+        const text = input.trim();
+        return text ? text : undefined;
+    }
+    if (!isRecord(input) || typeof input['text'] !== 'string') return undefined;
+
+    const text = input['text'].trim();
+    if (!text) return undefined;
+    return {
+        text,
+        ...(typeof input['voiceRole'] === 'string' && input['voiceRole'].trim()
+            ? { voiceRole: input['voiceRole'].trim() }
+            : {}),
+    };
 }
 
 function extractRequestTopic(input: Record<string, unknown>): string | undefined {
