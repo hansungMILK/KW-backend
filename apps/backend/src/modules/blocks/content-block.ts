@@ -98,6 +98,85 @@ Requirements:
 Do not create a Shorts/video plan. Do not add TTS, video, SEO, or distribution steps.
 Respond with JSON only — no markdown fences, no extra text.`;
 
+const COUNTRYBALL_SYSTEM_PROMPT = `You are a Korean countryball Shorts skit writer.
+Generate a complete 10-15 scene, one-minute vertical countryball situation reenactment in Korean.
+
+Countryball dialogue-writing contract:
+- The product is not a narrator explainer. It is a situation skit acted out by countryball characters.
+- The user request is the creative source of truth. It may be factual, fictional, hypothetical, satirical, or metaphorical.
+- Do not default to source-attribution prose such as "공식 지표에 따르면", "보도에 따르면", or "연구에 따르면" unless the user explicitly asks for sourced reporting.
+- Do not write scenes like a documentary paragraph split into 12 narrations.
+- Every scene should feel like a frame from a comic skit: visible character action, reaction, props, and short dialogue.
+- Default scene rhythm: action beat -> character dialogue -> narratorLine.
+- Most scenes must include at least one countryball dialogue line.
+- dialogueLines are short character lines, not exposition.
+- narratorLine is only a brief meaning bridge after the skit beat, not the main content.
+- Keep the user's concrete nouns and situation labels visible in captions, dialogue, dramatizedAction, and imagePrompt.
+- Use visible actions: panicking, bragging, running, pointing, carrying props, getting shocked, lining up, throwing objects, ordering food, hiding, bargaining, laughing, crying, or reacting.
+- Use safe countryball satire. Avoid slurs, hateful stereotypes, or claims that a whole country, people, ethnicity, or nationality is inherently inferior.
+
+Scene contract:
+- sceneNumber
+- imageSlot: "[Image #1]" through "[Image #12]" or "[Image #15]"
+- storyBeat: hook|setup|tension|action|reaction|twist|payoff|cta
+- topTitle: the same persistent Korean top title for every scene
+- caption: short bold Korean on-screen caption, 6-18 Korean characters
+- narration: short Korean spoken line that can be used by the narrator TTS, 12-42 Korean characters
+- imagePrompt: English visual brief for the reenacted countryball action. Describe characters, setting, props, expression, and action.
+- visualText: same or shorter than caption
+- visual: { topTitle, mainCaption, sourceLabel? }
+- claimType: hypothetical|opinion|joke|fact
+- sourceRefs: [] unless the user explicitly gave source-backed reporting material
+- durationSec: 4-6
+- characters: [{ countryCode, roleInScene, expression, pose }]
+- dramatizedAction: concrete visible skit action, not a summary
+- dialogueLines: [{ speaker, text, emotion, delivery, meaning, voiceRole, captionStyle, durationSec }]
+- narratorLine: { text, voiceRole: "narrator" }
+- factualClaim: empty string unless the scene states a real-world fact
+- evidenceRefs: [] unless factualClaim is source-backed
+
+Output shape:
+{
+  "title": "...",
+  "hook": "...",
+  "script": { "hook": "...", "angle": "...", "cta": "..." },
+  "style": {
+    "format": "vertical-shorts",
+    "aspectRatio": "9:16",
+    "sceneCount": 12,
+    "visualStyle": "countryball-comic",
+    "narrativeMode": "countryball-situation-reenactment",
+    "visualGrammar": { "reenactment": true, "characterSystem": "countryball" }
+  },
+  "scenes": [
+    {
+      "sceneNumber": 1,
+      "imageSlot": "[Image #1]",
+      "storyBeat": "hook",
+      "topTitle": "...",
+      "caption": "...",
+      "narration": "...",
+      "imagePrompt": "...",
+      "visualText": "...",
+      "visual": { "topTitle": "...", "mainCaption": "..." },
+      "claimType": "hypothetical",
+      "sourceRefs": [],
+      "durationSec": 5,
+      "characters": [{ "countryCode": "KR", "roleInScene": "...", "expression": "...", "pose": "..." }],
+      "dramatizedAction": "...",
+      "dialogueLines": [{ "speaker": "한국볼", "text": "...", "emotion": "...", "delivery": "...", "meaning": "...", "voiceRole": "countryball.kr", "captionStyle": "bold", "durationSec": 1.2 }],
+      "narratorLine": { "text": "...", "voiceRole": "narrator" },
+      "factualClaim": "",
+      "evidenceRefs": []
+    }
+  ],
+  "cta": "...",
+  "totalDurationSec": 60,
+  "sources": []
+}
+
+Respond with JSON only — no markdown fences, no extra text.`;
+
 function buildCountryballContentPrompt(
     rulepackId: string,
     config: Record<string, unknown> | undefined,
@@ -128,6 +207,19 @@ function buildCountryballContentPrompt(
         '- Do not rely on dialogue alone. Every scene still needs a drawable dramatizedAction.',
         '- Avoid slurs, hateful stereotypes, and claims that a whole nation or ethnicity is inferior.',
     ].join('\n');
+}
+
+function buildCountryballSystemPrompt(input: {
+    requestedShortsSceneCount?: number;
+    countryballPrompt: string;
+    rulepackSourcePolicy: string;
+}): string {
+    const sceneCountInstruction = input.requestedShortsSceneCount
+        ? `HARD SCENE COUNT: produce exactly ${input.requestedShortsSceneCount} scenes.`
+        : 'SCENE COUNT: produce 10-15 scenes, preferably 12 scenes.';
+    return [COUNTRYBALL_SYSTEM_PROMPT, sceneCountInstruction, input.countryballPrompt, input.rulepackSourcePolicy].join(
+        '\n\n'
+    );
 }
 
 const GENERIC_TEXT_SYSTEM_PROMPT = `You are a Korean content writer inside a general workflow automation engine.
@@ -416,23 +508,30 @@ export const contentBlock: BlockExecutor = {
             config,
             requestSpec.userRequest || userMessage
         );
+        const countryballMode = rulepack.id === 'countryball-shorts';
         const systemPrompt = longformGateAMode
             ? `${LONGFORM_GATE_A_SYSTEM_PROMPT}\n\n${contentPreferencePrompt}\n\n${scriptTonePrompt}`
             : singleImageMode
               ? SINGLE_IMAGE_SYSTEM_PROMPT
               : genericTextMode
                 ? `${GENERIC_TEXT_SYSTEM_PROMPT}\n\n${contentPreferencePrompt}`
-                : `${buildShortsSystemPrompt(requestedShortsSceneCount)}\n\n${
-                      requestedShortsSceneCount
-                          ? `HARD SCENE COUNT: produce exactly ${requestedShortsSceneCount} scenes. Ignore any generic 10-15 scene defaults from reusable rulepacks.`
-                          : ''
-                  }\n\n${buildCombinedPrompt(rulepack, 'contentPrompt')}\n\n${
-                      creativeSimulationMode ? `${CREATIVE_SIMULATION_SHORTS_RULES}\n\n` : ''
-                  }${countryballPrompt}\n\n${scriptTonePrompt}\n\n${directorPrompt}\n\n${rulepack.sourcePolicy}`;
+                : countryballMode
+                  ? buildCountryballSystemPrompt({
+                        requestedShortsSceneCount,
+                        countryballPrompt,
+                        rulepackSourcePolicy: rulepack.sourcePolicy,
+                    })
+                  : `${buildShortsSystemPrompt(requestedShortsSceneCount)}\n\n${
+                        requestedShortsSceneCount
+                            ? `HARD SCENE COUNT: produce exactly ${requestedShortsSceneCount} scenes. Ignore any generic 10-15 scene defaults from reusable rulepacks.`
+                            : ''
+                    }\n\n${buildCombinedPrompt(rulepack, 'contentPrompt')}\n\n${
+                        creativeSimulationMode ? `${CREATIVE_SIMULATION_SHORTS_RULES}\n\n` : ''
+                    }${countryballPrompt}\n\n${scriptTonePrompt}\n\n${directorPrompt}\n\n${rulepack.sourcePolicy}`;
 
         const initialMaxTokens = resolveContentMaxTokens({
             longformGateAMode,
-            countryballMode: rulepack.id === 'countryball-shorts',
+            countryballMode,
         });
         const response = await openaiAdapter.chatJson({
             model: env.openaiModel,

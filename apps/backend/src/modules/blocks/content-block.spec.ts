@@ -733,6 +733,8 @@ describe('contentBlock', () => {
         );
 
         const request = vi.mocked(openaiAdapter.chatJson).mock.calls[0]?.[0];
+        expect(request?.systemPrompt).toContain('You are a Korean countryball Shorts skit writer');
+        expect(request?.systemPrompt).toContain('Countryball dialogue-writing contract');
         expect(request?.systemPrompt).toContain('Countryball situation reenactment');
         expect(request?.systemPrompt).toContain('factualClaim');
         expect(request?.systemPrompt).toContain('dramatizedAction');
@@ -743,6 +745,9 @@ describe('contentBlock', () => {
         expect(request?.systemPrompt).toContain('action beat -> character dialogue -> narratorLine');
         expect(request?.systemPrompt).toContain('Do not default to source-attribution prose');
         expect(request?.systemPrompt).toContain('Put the user requested concrete nouns');
+        expect(request?.systemPrompt).not.toContain('You are a Korean YouTube Shorts scriptwriter and scene planner');
+        expect(request?.systemPrompt).not.toContain('Korean documentary Shorts');
+        expect(request?.systemPrompt).not.toContain('Script Tone Rulepack: informative-reframe');
         expect(result.output).toMatchObject({
             presetId: 'countryball-shorts',
             style: expect.objectContaining({
