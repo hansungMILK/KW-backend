@@ -7,6 +7,10 @@ vi.mock('../../config/env', () => ({
     env: {
         orchestratorMode: 'openai',
         openaiModel: 'gpt-test',
+        openaiContentMaxTokens: 4096,
+        openaiCountryballContentMaxTokens: 8192,
+        openaiLongformGateAMaxTokens: 8192,
+        openaiContentRetryMaxTokens: 12288,
     },
 }));
 
@@ -742,6 +746,129 @@ describe('contentBlock', () => {
                 narrativeMode: 'countryball-situation-reenactment',
                 requestBasis: 'user-requested',
             }),
+        });
+    });
+
+    it('parses a JSON object wrapped in non-JSON markdown text', async () => {
+        const payload = {
+            title: '마크다운 응답',
+            hook: 'JSON만 추출합니다',
+            script: {
+                hook: 'JSON만 추출합니다',
+                angle: '모델이 붙인 여분 텍스트를 제거',
+                cta: '계속 진행합니다',
+            },
+            scenes: Array.from({ length: 10 }, (_, index) => ({
+                sceneNumber: index + 1,
+                imageSlot: `[Image #${index + 1}]`,
+                storyBeat: index === 0 ? 'hook' : 'setup',
+                topTitle: '마크다운 응답',
+                caption: `장면 ${index + 1}`,
+                narration: `마크다운으로 감싼 JSON 응답의 ${index + 1}번째 장면입니다.`,
+                imagePrompt: `shorts scene ${index + 1}`,
+                visualText: `장면 ${index + 1}`,
+                visual: { topTitle: '마크다운 응답', mainCaption: `장면 ${index + 1}` },
+                claimType: 'opinion',
+                sourceRefs: [],
+                durationSec: 5,
+            })),
+            cta: '계속 진행합니다',
+            totalDurationSec: 50,
+            sources: [],
+        };
+        vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
+            content: `좋습니다.\n\n\`\`\`json\n${JSON.stringify(payload)}\n\`\`\`\n\n끝입니다.`,
+            model: 'gpt-test',
+            inputTokens: 1,
+            outputTokens: 1,
+            latencyMs: 1,
+        });
+
+        const result = await contentBlock.execute({ topic: '쇼츠 만들어줘' }, { scenes: 10 });
+
+        expect(result.output).toMatchObject({
+            title: '마크다운 응답',
+            scenes: expect.arrayContaining([expect.objectContaining({ sceneNumber: 1 })]),
+        });
+    });
+
+    it('retries countryball script generation once with a larger JSON budget when the first response is invalid JSON', async () => {
+        const validPayload = {
+            title: '컨트리볼 재시도',
+            hook: '상황극 다시 생성',
+            script: {
+                hook: '상황극 다시 생성',
+                angle: '잘린 JSON을 재시도',
+                cta: '다음 장면도 보세요',
+            },
+            scenes: Array.from({ length: 12 }, (_, index) => ({
+                sceneNumber: index + 1,
+                imageSlot: `[Image #${index + 1}]`,
+                storyBeat: index === 0 ? 'hook' : 'reenactment',
+                topTitle: '컨트리볼 재시도',
+                caption: `상황극 ${index + 1}`,
+                narration: `컨트리볼 상황극의 ${index + 1}번째 장면입니다.`,
+                imagePrompt: `Korea countryball and Japan countryball reenact scene ${index + 1}.`,
+                visualText: `상황극 ${index + 1}`,
+                visual: { topTitle: '컨트리볼 재시도', mainCaption: `상황극 ${index + 1}` },
+                claimType: 'joke',
+                sourceRefs: [],
+                durationSec: 5,
+                characters: [
+                    { countryCode: 'KR', roleInScene: '주도권을 잡는 역할' },
+                    { countryCode: 'JP', roleInScene: '당황하는 역할' },
+                ],
+                dramatizedAction: `컨트리볼들이 상황극 ${index + 1}을 재연합니다.`,
+                dialogueLines: [
+                    {
+                        speaker: 'KR',
+                        text: '내 차례야.',
+                        voiceRole: 'countryball.kr',
+                        durationSec: 1.2,
+                    },
+                ],
+                narratorLine: {
+                    text: '이 장면은 상황의 주도권이 바뀌는 흐름입니다.',
+                    voiceRole: 'narrator',
+                },
+            })),
+            cta: '다음 장면도 보세요',
+            totalDurationSec: 60,
+            sources: [],
+        };
+
+        vi.mocked(openaiAdapter.chatJson)
+            .mockResolvedValueOnce({
+                content: '{"title":"컨트리볼 재시도","scenes":[',
+                model: 'gpt-test',
+                inputTokens: 1,
+                outputTokens: 4096,
+                latencyMs: 1,
+            })
+            .mockResolvedValueOnce({
+                content: JSON.stringify(validPayload),
+                model: 'gpt-test',
+                inputTokens: 1,
+                outputTokens: 1,
+                latencyMs: 1,
+            });
+
+        const result = await contentBlock.execute(
+            {
+                topic: '컨트리볼 쇼츠로 한국볼과 일본볼 상황극 만들어줘',
+            },
+            {
+                contentProfileId: 'shorts.countryball.v1',
+                narrativeMode: 'countryball-situation-reenactment',
+            }
+        );
+
+        expect(openaiAdapter.chatJson).toHaveBeenCalledTimes(2);
+        expect(vi.mocked(openaiAdapter.chatJson).mock.calls[0]?.[0]?.maxTokens).toBe(8192);
+        expect(vi.mocked(openaiAdapter.chatJson).mock.calls[1]?.[0]?.maxTokens).toBe(12288);
+        expect(result.output).toMatchObject({
+            title: '컨트리볼 재시도',
+            scenes: expect.arrayContaining([expect.objectContaining({ sceneNumber: 12 })]),
         });
     });
 

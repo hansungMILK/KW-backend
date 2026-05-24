@@ -410,30 +410,52 @@ export const contentBlock: BlockExecutor = {
             config,
             requestSpec.userRequest || userMessage
         );
+        const systemPrompt = longformGateAMode
+            ? `${LONGFORM_GATE_A_SYSTEM_PROMPT}\n\n${contentPreferencePrompt}\n\n${scriptTonePrompt}`
+            : singleImageMode
+              ? SINGLE_IMAGE_SYSTEM_PROMPT
+              : genericTextMode
+                ? `${GENERIC_TEXT_SYSTEM_PROMPT}\n\n${contentPreferencePrompt}`
+                : `${buildShortsSystemPrompt(requestedShortsSceneCount)}\n\n${
+                      requestedShortsSceneCount
+                          ? `HARD SCENE COUNT: produce exactly ${requestedShortsSceneCount} scenes. Ignore any generic 10-15 scene defaults from reusable rulepacks.`
+                          : ''
+                  }\n\n${buildCombinedPrompt(rulepack, 'contentPrompt')}\n\n${
+                      creativeSimulationMode ? `${CREATIVE_SIMULATION_SHORTS_RULES}\n\n` : ''
+                  }${countryballPrompt}\n\n${scriptTonePrompt}\n\n${directorPrompt}\n\n${rulepack.sourcePolicy}`;
+
+        const initialMaxTokens = resolveContentMaxTokens({
+            longformGateAMode,
+            countryballMode: rulepack.id === 'countryball-shorts',
+        });
         const response = await openaiAdapter.chatJson({
             model: env.openaiModel,
-            systemPrompt: longformGateAMode
-                ? `${LONGFORM_GATE_A_SYSTEM_PROMPT}\n\n${contentPreferencePrompt}\n\n${scriptTonePrompt}`
-                : singleImageMode
-                  ? SINGLE_IMAGE_SYSTEM_PROMPT
-                  : genericTextMode
-                    ? `${GENERIC_TEXT_SYSTEM_PROMPT}\n\n${contentPreferencePrompt}`
-                    : `${buildShortsSystemPrompt(requestedShortsSceneCount)}\n\n${
-                          requestedShortsSceneCount
-                              ? `HARD SCENE COUNT: produce exactly ${requestedShortsSceneCount} scenes. Ignore any generic 10-15 scene defaults from reusable rulepacks.`
-                              : ''
-                      }\n\n${buildCombinedPrompt(rulepack, 'contentPrompt')}\n\n${
-                          creativeSimulationMode ? `${CREATIVE_SIMULATION_SHORTS_RULES}\n\n` : ''
-                      }${countryballPrompt}\n\n${scriptTonePrompt}\n\n${directorPrompt}\n\n${rulepack.sourcePolicy}`,
+            systemPrompt,
             userMessage,
-            maxTokens: 4096,
+            maxTokens: initialMaxTokens,
         });
 
-        let parsed: unknown;
-        try {
-            parsed = JSON.parse(response.content);
-        } catch {
-            throw new Error(`[content-block] OpenAI returned non-JSON response (length=${response.content.length})`);
+        let parsed = parseJsonLikeModelResponse(response.content);
+        if (!parsed) {
+            log.warn('[content-block] OpenAI returned invalid JSON; retrying once with stricter prompt', {
+                contentLength: response.content.length,
+                presetId: rulepack.id,
+                maxTokens: initialMaxTokens,
+                retryMaxTokens: env.openaiContentRetryMaxTokens,
+            });
+            const retryResponse = await openaiAdapter.chatJson({
+                model: env.openaiModel,
+                systemPrompt: `${systemPrompt}\n\nSTRICT RETRY: Return one complete valid JSON object only. Do not include markdown, explanations, comments, or text outside the JSON object. Close every array and object.`,
+                userMessage,
+                maxTokens: Math.max(env.openaiContentRetryMaxTokens, initialMaxTokens),
+                maxAttempts: 1,
+            });
+            parsed = parseJsonLikeModelResponse(retryResponse.content);
+            if (!parsed) {
+                throw new Error(
+                    `[content-block] OpenAI returned non-JSON response after retry (length=${retryResponse.content.length})`
+                );
+            }
         }
 
         if (longformGateAMode) {
@@ -503,6 +525,75 @@ function parseReviewedOutput(input: unknown): unknown | null {
     } catch {
         throw new Error('[content-block] reviewedOutput must be valid JSON');
     }
+}
+
+function resolveContentMaxTokens(input: { longformGateAMode: boolean; countryballMode: boolean }): number {
+    if (input.longformGateAMode) return env.openaiLongformGateAMaxTokens;
+    if (input.countryballMode) return env.openaiCountryballContentMaxTokens;
+    return env.openaiContentMaxTokens;
+}
+
+function parseJsonLikeModelResponse(content: string): unknown | null {
+    const direct = tryParseJson(content);
+    if (direct != null) return direct;
+
+    const fenced = content.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
+    if (fenced) {
+        const parsed = tryParseJson(fenced);
+        if (parsed != null) return parsed;
+    }
+
+    const extracted = extractFirstJsonValue(content);
+    return extracted ? tryParseJson(extracted) : null;
+}
+
+function tryParseJson(content: string): unknown | null {
+    try {
+        return JSON.parse(content.trim());
+    } catch {
+        return null;
+    }
+}
+
+function extractFirstJsonValue(content: string): string | null {
+    const start = findFirstJsonStart(content);
+    if (start < 0) return null;
+
+    const opening = content[start];
+    const closing = opening === '{' ? '}' : ']';
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let index = start; index < content.length; index += 1) {
+        const char = content[index];
+        if (inString) {
+            if (escaped) {
+                escaped = false;
+            } else if (char === '\\') {
+                escaped = true;
+            } else if (char === '"') {
+                inString = false;
+            }
+            continue;
+        }
+
+        if (char === '"') {
+            inString = true;
+            continue;
+        }
+        if (char === opening) depth += 1;
+        if (char === closing) depth -= 1;
+        if (depth === 0) return content.slice(start, index + 1);
+    }
+
+    return null;
+}
+
+function findFirstJsonStart(content: string): number {
+    const objectStart = content.indexOf('{');
+    const arrayStart = content.indexOf('[');
+    return objectStart >= 0 ? objectStart : arrayStart;
 }
 
 function isSingleImageMode(input: unknown, config?: Record<string, unknown>): boolean {
