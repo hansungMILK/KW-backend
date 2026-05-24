@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { analysisBlock } from './analysis-block';
 import { contentBlock } from './content-block';
 import { openaiAdapter } from '../../adapters/ai/openai-adapter';
 
@@ -756,6 +757,84 @@ describe('contentBlock', () => {
                 requestBasis: 'user-requested',
             }),
         });
+    });
+
+    it('normalizes weak countryball model output into action-first skit scenes before analysis', async () => {
+        vi.mocked(openaiAdapter.chatJson)
+            .mockResolvedValueOnce({
+                content: JSON.stringify({
+                    title: '밤거리 치안 컨트리볼',
+                    hook: '밤거리 치안을 국가볼로 보여줍니다',
+                    script: {
+                        hook: '밤거리 치안을 국가볼로 보여줍니다',
+                        angle: '설명형으로 떨어진 모델 출력을 상황극으로 보정',
+                        cta: '다음 편도 확인하세요',
+                    },
+                    style: { format: 'vertical-shorts' },
+                    scenes: Array.from({ length: 12 }, (_, index) => ({
+                        sceneNumber: index + 1,
+                        imageSlot: `[Image #${index + 1}]`,
+                        storyBeat: index === 0 ? 'hook' : 'setup',
+                        topTitle: '밤거리 치안 컨트리볼',
+                        caption: `설명 장면 ${index + 1}`,
+                        narration: `한국 밤거리 치한 문제를 설명하는 ${index + 1}번째 장면입니다.`,
+                        imagePrompt: `Generic countryball explainer scene ${index + 1}.`,
+                        visualText: `설명 장면 ${index + 1}`,
+                        visual: { topTitle: '밤거리 치안 컨트리볼', mainCaption: `설명 장면 ${index + 1}` },
+                        claimType: 'opinion',
+                        sourceRefs: [],
+                        durationSec: 5,
+                        characters: [{ countryCode: 'KR', roleInScene: '밤거리 주인공' }],
+                        dramatizedAction: `컨트리볼 상황극을 재연하는 설명 장면 ${index + 1}입니다.`,
+                    })),
+                    cta: '다음 편도 확인하세요',
+                    totalDurationSec: 60,
+                    sources: [],
+                }),
+                model: 'gpt-test',
+                inputTokens: 1,
+                outputTokens: 1,
+                latencyMs: 1,
+            })
+            .mockResolvedValueOnce({
+                content: JSON.stringify({ suggestedIssues: [] }),
+                model: 'gpt-test',
+                inputTokens: 1,
+                outputTokens: 1,
+                latencyMs: 1,
+            });
+
+        const result = await contentBlock.execute(
+            {
+                topic: '한국 밤거리 치한 컨트리볼 상황극 쇼츠 만들어줘',
+            },
+            {
+                contentProfileId: 'shorts.countryball.v1',
+                narrativeMode: 'countryball-situation-reenactment',
+                requestBasis: 'user-requested',
+            }
+        );
+        const metadata = result.output as Record<string, unknown>;
+        const scenes = metadata['scenes'] as Array<Record<string, unknown>>;
+
+        expect(scenes[0]).toMatchObject({
+            dramatizedAction: expect.stringMatching(/한국|한국볼|KR|골목|스마트폰|가리키|당황|놀라|걷/),
+            dialogueLines: [expect.objectContaining({ speaker: expect.any(String), text: expect.any(String) })],
+        });
+        expect(JSON.stringify(scenes)).toContain('밤거리');
+        expect(JSON.stringify(scenes)).toContain('치한');
+        expect(JSON.stringify(scenes)).not.toContain('상황극을 재연하는 설명 장면');
+
+        const analysis = await analysisBlock.execute({
+            normalizedScenes: scenes,
+            metadata,
+        });
+        const analysisText = JSON.stringify(analysis.output['issues']);
+
+        expect(analysis.output['approved']).toBe(true);
+        expect(analysisText).not.toContain('상황을 행동으로 보여주는');
+        expect(analysisText).not.toContain('국가볼 캐릭터 대사');
+        expect(analysisText).not.toContain('핵심 주제');
     });
 
     it('parses a JSON object wrapped in non-JSON markdown text', async () => {

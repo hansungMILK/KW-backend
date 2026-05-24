@@ -111,6 +111,14 @@ describe('request contract helpers', () => {
         expect(extractFocusTerms('쇼츠생성해줘. 무한도전 yes or no 편 설명')).toEqual(['무한도전', 'yes', 'no']);
     });
 
+    it('treats countryball as a style hint, not required subject coverage', () => {
+        const requestSpec = buildRequestSpec('한국 밤거리 치한 컨트리볼 상황극 쇼츠 만들어줘');
+
+        expect(requestSpec.focusTerms).toEqual(['한국', '밤거리', '치한']);
+        expect(requestSpec.understanding.styleHints).toEqual(expect.arrayContaining(['컨트리볼', '상황극']));
+        expect(requestSpec.focusTerms).not.toEqual(expect.arrayContaining(['컨트리볼', '상황극', '쇼츠']));
+    });
+
     it('does not treat matchup connector words as required subject coverage terms', () => {
         expect(extractFocusTerms('고죠사토루 vs 나루토 싸우면 어떻게 되는지 쇼츠로 만들어줘')).toEqual([
             '고죠사토루',

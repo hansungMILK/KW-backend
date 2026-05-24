@@ -58,6 +58,11 @@ const COMMAND_STOPWORDS = new Set([
     '만들어',
     '주제',
     '설명',
+    '상황극',
+    '재연',
+    '컨트리볼',
+    '국가볼',
+    '폴란드볼',
     '편',
     '영상',
     '가상',
@@ -95,6 +100,9 @@ const COMMAND_STOPWORDS = new Set([
     '링크',
     'short',
     'shorts',
+    'countryball',
+    'countryballs',
+    'polandball',
     'video',
     'draw',
     'paint',
@@ -332,7 +340,7 @@ function extractGenericFocusTerms(text: string): string[] {
 function extractStyleHints(normalized: string): string[] {
     return uniqueTerms(
         [
-            /실사풍|사진풍|아이폰|iphone|애니메이션|애니풍|만화풍|블루프린트|신문|레트로|로고|아이콘|포스터|시네마틱|cinematic/gi,
+            /실사풍|사진풍|아이폰|iphone|애니메이션|애니풍|만화풍|블루프린트|신문|레트로|로고|아이콘|포스터|시네마틱|cinematic|컨트리볼|국가볼|폴란드볼|countryballs?|polandball|상황극|재연/gi,
         ].flatMap(pattern => normalized.match(pattern) ?? [])
     ).slice(0, 8);
 }
