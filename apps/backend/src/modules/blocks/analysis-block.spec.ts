@@ -278,6 +278,103 @@ describe('analysisBlock', () => {
         expect(JSON.stringify(result.output['issues'])).not.toContain('sourceRefs가 없습니다');
     });
 
+    it('does not block countryball skits with source-attribution wording cautions', async () => {
+        vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
+            content: JSON.stringify({
+                suggestedIssues: [
+                    {
+                        severity: 'high',
+                        sceneNumber: 4,
+                        message:
+                            "사실 진술처럼 보이는 문장은 '공식 지표에 따르면' 또는 '보도에 따르면'처럼 출처를 드러내는 표현으로 완화하는 것이 좋습니다.",
+                    },
+                ],
+            }),
+        });
+
+        const normalizedScenes = Array.from({ length: 12 }, (_, index) => ({
+            sceneNumber: index + 1,
+            caption: index === 0 ? '밤길 비교' : `상황극 ${index + 1}`,
+            narration:
+                index === 0
+                    ? '한국볼은 새벽 세시에 이어폰을 끼고 배달앱을 켭니다.'
+                    : `한국볼과 외국볼이 밤거리 상황을 짧게 재연합니다 ${index + 1}`,
+            imagePrompt: 'Korea countryball calmly walking at night with a smartphone while France ball looks nervous.',
+            visual: {
+                topTitle: '밤거리 상황극',
+                mainCaption: index === 0 ? '밤길 비교' : `상황극 ${index + 1}`,
+            },
+            claimType: 'fact',
+            sourceRefs: [],
+            dramatizedAction:
+                index === 0
+                    ? '프랑스볼이 어두운 골목에서 떨고, 한국볼은 새벽 3시에 이어폰을 끼고 한강을 걷는다.'
+                    : `한국볼이 스마트폰으로 배달을 누르고 외국볼이 주변을 두리번거리는 장면 ${index + 1}`,
+            dialogueLines: [
+                { speaker: '프랑스볼', text: '이 시간에 나간다고?', emotion: 'nervous' },
+                { speaker: '한국볼', text: '치킨 오고 있어.', emotion: 'smug' },
+            ],
+            durationSec: 5,
+        }));
+
+        const result = await analysisBlock.execute({
+            normalizedScenes,
+            metadata: {
+                title: '밤거리 상황극',
+                presetId: 'countryball-shorts',
+                requestTopic: '한국 밤거리 치안 컨트리볼 쇼츠 만들어줘',
+                outputContract: {
+                    contentProfileId: 'shorts.countryball.v1',
+                    narrativeMode: 'countryball-situation-reenactment',
+                    requestBasis: 'user-requested',
+                    requiredCoverageTerms: ['한국', '밤거리', '치한', '컨트리볼'],
+                    exactSubjectRequired: false,
+                },
+            },
+        });
+
+        expect(result.output['approved']).toBe(true);
+        expect(JSON.stringify(result.output['issues'])).not.toContain('공식 지표');
+        expect(JSON.stringify(result.output['autoRemediations'] ?? [])).not.toContain('공식 발표 기준으로');
+    });
+
+    it('rejects countryball scripts that only explain instead of staging character skit beats', async () => {
+        const normalizedScenes = Array.from({ length: 12 }, (_, index) => ({
+            sceneNumber: index + 1,
+            caption: `설명 ${index + 1}`,
+            narration: `새벽배송과 밤거리 안전의 균형을 설명하는 문장입니다 ${index + 1}`,
+            imagePrompt: 'A generic countryball explainer image.',
+            visual: {
+                topTitle: '밤거리 상황극',
+                mainCaption: `설명 ${index + 1}`,
+            },
+            claimType: 'opinion',
+            sourceRefs: [],
+            dramatizedAction: `컨트리볼 상황극을 재연하는 설명 장면 ${index + 1}입니다.`,
+            dialogueLines: [],
+            durationSec: 5,
+        }));
+
+        const result = await analysisBlock.execute({
+            normalizedScenes,
+            metadata: {
+                title: '밤거리 상황극',
+                presetId: 'countryball-shorts',
+                requestTopic: '한국 밤거리 치한 컨트리볼 쇼츠 만들어줘',
+                outputContract: {
+                    contentProfileId: 'shorts.countryball.v1',
+                    narrativeMode: 'countryball-situation-reenactment',
+                    requestBasis: 'user-requested',
+                    exactSubjectRequired: false,
+                },
+            },
+        });
+
+        expect(result.output['approved']).toBe(false);
+        expect(JSON.stringify(result.output['issues'])).toContain('상황을 행동으로 보여주는');
+        expect(JSON.stringify(result.output['issues'])).toContain('국가볼 캐릭터 대사');
+    });
+
     it('rejects countryball scenes whose dialogue is not structured by speaker', async () => {
         const normalizedScenes = Array.from({ length: 12 }, (_, index) => ({
             sceneNumber: index + 1,

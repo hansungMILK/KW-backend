@@ -25,6 +25,10 @@ export const COUNTRYBALL_SHORTS_RULEPACK: ShortsRulepack = {
 - This mode is not just dialogue. It is a short situation skit where countryball characters reenact the user's requested situation.
 - Preserve the user's requested situation even when it is fictional or hypothetical.
 - Structure each scene as a reenactment beat: setup, tension, action, reaction, twist, consequence, or takeaway.
+- Do not write narrator-only explainer scenes. The default scene shape is: action beat -> character dialogue -> narratorLine.
+- Do not default to source-attribution prose such as "공식 지표에 따르면", "보도에 따르면", or "연구에 따르면". Countryball mode should show the requested idea through skit action unless the user explicitly asks for sourced reporting.
+- Put the user's concrete requested nouns and situation labels into captions, dialogue, dramatizedAction, and imagePrompt so the skit does not drift into generic explanation.
+- The fun comes from what countryballs do on screen: panicking, bragging, running, pointing, carrying props, getting shocked, lining up, throwing objects, ordering food, hiding, bargaining, or reacting.
 - Use countryball characters as roles in the skit. Dialogue is allowed, but every line must serve the situation being reenacted.
 - Required extra scene fields:
   - characters: [{ countryCode, roleInScene, expression, pose }]
@@ -34,6 +38,7 @@ export const COUNTRYBALL_SHORTS_RULEPACK: ShortsRulepack = {
   - factualClaim: only when the scene states a real-world fact
   - evidenceRefs: source ids only when factualClaim is present
 - dialogueLines must be short skit lines, not exposition. Use max 2 dialogue lines per scene.
+- Most scenes should include at least one countryball dialogue line. Avoid pure narrator explanation unless the scene is a very short transition.
 - Use voiceRole values such as countryball.kr, countryball.jp, countryball.us, countryball.cn when the character country is recognizable.
 - speaker must identify the countryball character or role, such as "한국볼", "일본볼", "KR", or "JP"; do not use narrator as speaker.
 - Every scene still needs dramatizedAction. Dialogue cannot replace the drawable action beat.
@@ -48,9 +53,12 @@ export const COUNTRYBALL_SHORTS_RULEPACK: ShortsRulepack = {
     analysisPrompt: `Countryball quality rules:
 - Check that each scene reenacts the requested situation through countryball characters.
 - Check that factualClaim/evidenceRefs are separated from dramatizedAction/dialogueLines.
+- Do not request "공식 지표에 따르면", "보도에 따르면", citations, or source-attribution softening for user-requested countryball skits.
+- Check that user-requested concrete nouns and situation labels appear in the skit action/dialogue/captions, not only in metadata.
 - Check that dialogueLines use speaker/text objects, stay under 2 lines per scene, and remain short enough for Shorts pacing.
 - Reject scenes that are only dialogue without a concrete dramatizedAction.
+- Reject scripts that are mostly narrator-only explanation instead of action beats and countryball character dialogue.
 - Reject slurs, dehumanizing language, and claims that a whole country, people, ethnicity, or nationality is inherently inferior, dirty, stupid, criminal, or evil.
 - Do not reject fictional/hypothetical countryball skits just because sourceRefs are empty.
-- Reject unsupported factual claims only when the scene actually claims a real-world fact.`,
+- Do not block countryball skits only because sourceRefs/evidenceRefs are empty.`,
 };

@@ -118,6 +118,8 @@ function runRuleChecks(
     let qualityDeductions = 0;
     const creativeSimulationMode = isCreativeSimulationContract(outputContract);
     const countryballMode = presetId === 'countryball-shorts' || isCountryballContract(outputContract);
+    let countryballDialogueSceneCount = 0;
+    let countryballSpecificActionSceneCount = 0;
 
     // 1. Scene count check
     if (scenes.length < MIN_SCENE_COUNT || scenes.length > MAX_SCENE_COUNT) {
@@ -225,7 +227,7 @@ function runRuleChecks(
             }
         }
 
-        if (claimType === 'fact' && sourceRefs.length === 0 && evidenceRefs.length === 0) {
+        if (!countryballMode && claimType === 'fact' && sourceRefs.length === 0 && evidenceRefs.length === 0) {
             issues.push({
                 severity: 'high',
                 message: 'fact 장면인데 sourceRefs가 없습니다.',
@@ -251,6 +253,13 @@ function runRuleChecks(
         }
 
         if (countryballMode) {
+            if (dialogueLines.length > 0) {
+                countryballDialogueSceneCount += 1;
+            }
+            if (hasSpecificCountryballAction(dramatizedAction)) {
+                countryballSpecificActionSceneCount += 1;
+            }
+
             if (dramatizedAction.trim().length < MIN_COUNTRYBALL_DRAMATIZED_ACTION_CHARS) {
                 issues.push({
                     severity: 'high',
@@ -369,6 +378,26 @@ function runRuleChecks(
                 sceneNumber: sceneNum,
             });
             qualityDeductions += 4;
+        }
+    }
+
+    if (countryballMode && scenes.length > 0) {
+        const minDialogueScenes = Math.ceil(scenes.length * 0.6);
+        if (countryballDialogueSceneCount < minDialogueScenes) {
+            issues.push({
+                severity: 'high',
+                message: `컨트리볼 상황극은 국가볼 캐릭터 대사가 중심이어야 합니다. 최소 ${minDialogueScenes}개 씬에 speaker/text 대사가 필요합니다.`,
+            });
+            qualityDeductions += 20;
+        }
+
+        const minActionScenes = Math.ceil(scenes.length * 0.7);
+        if (countryballSpecificActionSceneCount < minActionScenes) {
+            issues.push({
+                severity: 'high',
+                message: `컨트리볼 상황극은 설명이 아니라 상황을 행동으로 보여주는 장면이어야 합니다. 최소 ${minActionScenes}개 씬에 구체적인 dramatizedAction이 필요합니다.`,
+            });
+            qualityDeductions += 20;
         }
     }
 
@@ -514,6 +543,22 @@ function hasWholeNationDemeaningClaim(input: string): boolean {
     const universal = '(?:전부|모두|다|항상|원래|inherently|all|always)';
     const insult = '(?:열등|멍청|미개|더럽|악랄|범죄자|쓰레기|하등|inferior|stupid|dirty|evil|criminal)';
     return new RegExp(`${group}.{0,18}${universal}.{0,18}${insult}`).test(text);
+}
+
+function hasSpecificCountryballAction(input: string): boolean {
+    const text = input.trim();
+    if (text.length < MIN_COUNTRYBALL_DRAMATIZED_ACTION_CHARS) return false;
+    if (/설명|해설|나레이션|상황극\s*장면|재연하는\s*설명/.test(text)) return false;
+
+    const hasCountryballActor =
+        /[가-힣A-Za-z]+볼|[가-힣A-Za-z]+공|\b(?:KR|JP|US|CN|UK|FR|DE)\b|한국|일본|미국|중국|영국|프랑스|독일/.test(
+            text
+        );
+    if (!hasCountryballActor) return false;
+
+    return /걷|뛰|도망|떨|숨|가리키|던지|내밀|끄덕|열|찢|잡|들고|들어|줄을|쌓|주문|먹|마시|웃|울|당황|놀라|비웃|빼|꺼내|올라|브이|서류|스마트폰|배달|골목|한강|팝콘|차트|금|반지|문서|경례|박수|흔들|쓰러|올려/.test(
+        text
+    );
 }
 
 function buildAnalysisContract(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
@@ -726,6 +771,7 @@ export const analysisBlock: BlockExecutor = {
 
         // Rule-based checks (always run)
         const analysisContract = buildAnalysisContract(metadata);
+        const countryballMode = rulepack.id === 'countryball-shorts' || isCountryballContract(analysisContract);
         let {
             safetyScore,
             qualityScore,
@@ -738,8 +784,13 @@ export const analysisBlock: BlockExecutor = {
         );
 
         // AI enhancement in real provider mode; non-fatal if it fails.
-        const allIssues = await runAIReview(scenes, ruleIssues, rulepack.analysisPrompt);
-        let remediated = autoRemediateSourceBackedFactualCautions(scenes, allIssues);
+        const reviewedIssues = await runAIReview(scenes, ruleIssues, rulepack.analysisPrompt);
+        const allIssues = countryballMode
+            ? reviewedIssues.filter(issue => !isCountryballAttributionOnlyIssue(issue))
+            : reviewedIssues;
+        let remediated = countryballMode
+            ? { scenes, issues: allIssues, autoRemediations: [] as AutoRemediation[] }
+            : autoRemediateSourceBackedFactualCautions(scenes, allIssues);
         const creativeRepair = await maybeRepairCreativeSimulationScenes({
             analysisContract,
             scenes: remediated.scenes,
@@ -1082,6 +1133,15 @@ function isRemediableSourceBackedFactualCaution(issue: Issue): boolean {
         return false;
     }
     return /공식\s*발표|보도|시점|최신|재확인|단정형|단정|확인일|사실관계|기준|표현/.test(message);
+}
+
+function isCountryballAttributionOnlyIssue(issue: Issue): boolean {
+    if (issue.severity !== 'high' && issue.severity !== 'critical') return false;
+    const message = issue.message;
+    if (/혐오|비하|슬러|열등|inferior|dehuman|sourceRefs?\s*가\s*없|출처\s*누락/.test(message)) return false;
+    return /공식\s*지표|공식\s*발표|보도에\s*따르면|출처를\s*드러내|근거|단정|사실\s*진술|표현으로\s*완화/.test(
+        message
+    );
 }
 
 function softenFactualNarration(narration: string): string {

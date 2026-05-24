@@ -739,6 +739,10 @@ describe('contentBlock', () => {
         expect(request?.systemPrompt).toContain('speaker');
         expect(request?.systemPrompt).toContain('durationSec');
         expect(request?.systemPrompt).toContain('2 dialogue lines');
+        expect(request?.systemPrompt).toContain('Do not write narrator-only explainer scenes');
+        expect(request?.systemPrompt).toContain('action beat -> character dialogue -> narratorLine');
+        expect(request?.systemPrompt).toContain('Do not default to source-attribution prose');
+        expect(request?.systemPrompt).toContain('Put the user requested concrete nouns');
         expect(result.output).toMatchObject({
             presetId: 'countryball-shorts',
             style: expect.objectContaining({
