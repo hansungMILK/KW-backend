@@ -68,6 +68,47 @@ describe('FlowAgentPanel proposal content profile controls', () => {
         cleanup();
     });
 
+    it('keeps the original Shorts tone controls when the user does not choose countryball', async () => {
+        render(
+            <FlowAgentPanel
+                open
+                onClose={() => undefined}
+                flowId="flow-1"
+                externalProposal={{
+                    type: 'proposal.created',
+                    id: 'proposal-created-plain-shorts',
+                    proposalId: proposal.id,
+                    flowId: 'flow-1',
+                    blocks: proposal.blocks,
+                    estimatedCost: proposal.estimatedCost,
+                    metadata: proposal.metadata,
+                    description: '제안 설명',
+                    timestamp: Date.now(),
+                }}
+            />
+        );
+
+        expect(await screen.findByText('대본/콘텐츠 설정')).toBeTruthy();
+        expect(screen.getByText('대본 톤')).toBeTruthy();
+        expect(screen.getByRole('button', { name: '정보전달형' })).toBeTruthy();
+        expect(screen.queryByText('컨트리볼 상황극 대본')).toBeNull();
+
+        fireEvent.click(screen.getByRole('button', { name: '뉴스앵커형' }));
+        fireEvent.click(screen.getByRole('button', { name: '강하게' }));
+        fireEvent.click(screen.getByRole('button', { name: '승인' }));
+
+        await waitFor(() => {
+            expect(approveProposal).toHaveBeenCalledWith(
+                'proposal-1',
+                expect.objectContaining({
+                    contentProfileId: 'shorts.info.v1',
+                    scriptToneId: 'news-anchor',
+                    scriptToneIntensity: 'high',
+                })
+            );
+        });
+    });
+
     it('lets the user choose script tone, intensity, review mode, and explicit shorts subtype', async () => {
         render(
             <FlowAgentPanel
@@ -97,19 +138,24 @@ describe('FlowAgentPanel proposal content profile controls', () => {
         fireEvent.click(screen.getByRole('button', { name: '대본 검수 후 실행' }));
         fireEvent.click(screen.getByRole('button', { name: '컨트리볼 상황극' }));
         expect(screen.queryByRole('button', { name: '롱폼 해설' })).toBeNull();
+        expect(screen.getByText('대본 형식')).toBeTruthy();
+        expect(screen.getByText('컨트리볼 상황극 대본')).toBeTruthy();
+        expect(screen.getByText(/장면 행동 \+ 국가볼 대사 \+ 짧은 해설/)).toBeTruthy();
+        expect(screen.queryByRole('button', { name: '뉴스앵커형' })).toBeNull();
         fireEvent.click(screen.getByRole('button', { name: '승인' }));
 
         await waitFor(() => {
             expect(approveProposal).toHaveBeenCalledWith(
                 'proposal-1',
                 expect.objectContaining({
-                    scriptToneId: 'news-anchor',
-                    scriptToneIntensity: 'high',
                     reviewMode: 'script-first',
                     contentProfileId: 'shorts.countryball.v1',
                 })
             );
         });
+        const approvalOptions = vi.mocked(approveProposal).mock.calls[0]?.[1] as Record<string, unknown>;
+        expect(approvalOptions['scriptToneId']).toBeUndefined();
+        expect(approvalOptions['scriptToneIntensity']).toBeUndefined();
     });
 
     it('shows the countryball option for shorts proposals even when profile options are missing', async () => {

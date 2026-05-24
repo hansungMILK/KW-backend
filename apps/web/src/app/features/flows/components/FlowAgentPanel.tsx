@@ -414,19 +414,23 @@ export const FlowAgentPanel = ({
             const imageGeneration = asImageGenerationMetadata(proposal.metadata);
             const contentProfile = asContentProfileMetadata(proposal.metadata);
             const selectedContentProfileId = proposalContentProfiles[proposal.id] ?? contentProfile?.contentProfileId;
+            const selectedIsCountryball = isCountryballContentProfileId(selectedContentProfileId);
             const isImageProposal = isSingleImageGeneration(imageGeneration, selectedContentProfileId);
             const selectedImageStyleId =
                 proposalImageStyles[proposal.id] ??
-                (isCountryballContentProfileId(selectedContentProfileId)
-                    ? 'countryball-comic'
-                    : imageGeneration?.imageStyleId);
+                (selectedIsCountryball ? 'countryball-comic' : imageGeneration?.imageStyleId);
             const approvalOptions = {
                 contentProfileId: selectedContentProfileId,
                 ...(!isImageProposal
                     ? {
-                          scriptToneId: proposalScriptTones[proposal.id] ?? contentProfile?.scriptToneId,
-                          scriptToneIntensity:
-                              proposalScriptToneIntensities[proposal.id] ?? contentProfile?.scriptToneIntensity,
+                          ...(!selectedIsCountryball
+                              ? {
+                                    scriptToneId: proposalScriptTones[proposal.id] ?? contentProfile?.scriptToneId,
+                                    scriptToneIntensity:
+                                        proposalScriptToneIntensities[proposal.id] ??
+                                        contentProfile?.scriptToneIntensity,
+                                }
+                              : {}),
                           reviewMode: proposalReviewModes[proposal.id] ?? contentProfile?.reviewMode,
                       }
                     : {}),
@@ -618,6 +622,7 @@ export const FlowAgentPanel = ({
                             proposalContentProfiles[proposal.id] ??
                             contentProfile?.contentProfileId ??
                             'shorts.info.v1';
+                        const selectedIsCountryball = isCountryballContentProfileId(selectedContentProfileId);
                         const visibleProfileOptions = filterProfileOptionsByFamily(
                             contentProfile?.profileOptions,
                             selectedContentProfileId
@@ -626,9 +631,7 @@ export const FlowAgentPanel = ({
                         const isImageProposal = isSingleImageGeneration(imageGeneration, selectedContentProfileId);
                         const selectedStyleId =
                             proposalImageStyles[proposal.id] ??
-                            (isCountryballContentProfileId(selectedContentProfileId)
-                                ? 'countryball-comic'
-                                : undefined) ??
+                            (selectedIsCountryball ? 'countryball-comic' : undefined) ??
                             imageGeneration?.imageStyleId ??
                             imageGeneration?.recommendedStyleId;
                         const selectedQuality =
@@ -726,7 +729,21 @@ export const FlowAgentPanel = ({
                                                     </div>
                                                 </div>
                                             ) : null}
-                                            {contentProfile.toneOptions?.length ? (
+                                            {selectedIsCountryball ? (
+                                                <div className="space-y-1">
+                                                    <div className="text-[10px] font-medium text-muted-foreground">
+                                                        대본 형식
+                                                    </div>
+                                                    <div className="rounded-md border border-primary/50 bg-primary/10 px-2 py-1.5">
+                                                        <div className="text-[11px] font-semibold text-primary">
+                                                            컨트리볼 상황극 대본
+                                                        </div>
+                                                        <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
+                                                            장면 행동 + 국가볼 대사 + 짧은 해설로 구성합니다.
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ) : contentProfile.toneOptions?.length ? (
                                                 <div className="space-y-1">
                                                     <div className="text-[10px] font-medium text-muted-foreground">
                                                         대본 톤
@@ -756,7 +773,7 @@ export const FlowAgentPanel = ({
                                                     </div>
                                                 </div>
                                             ) : null}
-                                            {contentProfile.intensityOptions?.length ? (
+                                            {!selectedIsCountryball && contentProfile.intensityOptions?.length ? (
                                                 <div className="space-y-1">
                                                     <div className="text-[10px] font-medium text-muted-foreground">
                                                         톤 강도
