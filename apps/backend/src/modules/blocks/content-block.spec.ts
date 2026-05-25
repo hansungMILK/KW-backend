@@ -746,6 +746,10 @@ describe('contentBlock', () => {
         expect(request?.systemPrompt).toContain('action beat -> character dialogue -> narratorLine');
         expect(request?.systemPrompt).toContain('Do not default to source-attribution prose');
         expect(request?.systemPrompt).toContain('Put the user requested concrete nouns');
+        expect(request?.systemPrompt).toContain('top black title band');
+        expect(request?.systemPrompt).toContain('middle information/evidence comic panel');
+        expect(request?.systemPrompt).toContain('lower large countryball reaction stage');
+        expect(request?.systemPrompt).toContain('bold yellow Korean text with black outline');
         expect(request?.systemPrompt).not.toContain('You are a Korean YouTube Shorts scriptwriter and scene planner');
         expect(request?.systemPrompt).not.toContain('Korean documentary Shorts');
         expect(request?.systemPrompt).not.toContain('Script Tone Rulepack: informative-reframe');
@@ -755,6 +759,12 @@ describe('contentBlock', () => {
                 visualStyle: 'countryball-comic',
                 narrativeMode: 'countryball-situation-reenactment',
                 requestBasis: 'user-requested',
+                visualGrammar: expect.objectContaining({
+                    referenceLayout: 'countryball-infographic-skit',
+                    topTitleBand: 'black-yellow-white',
+                    panelStructure: 'middle-evidence-panel-lower-reaction-stage',
+                    captionTreatment: 'bold-yellow-black-outline',
+                }),
             }),
         });
     });
@@ -816,11 +826,34 @@ describe('contentBlock', () => {
         );
         const metadata = result.output as Record<string, unknown>;
         const scenes = metadata['scenes'] as Array<Record<string, unknown>>;
+        const style = metadata['style'] as Record<string, unknown>;
 
         expect(scenes[0]).toMatchObject({
             dramatizedAction: expect.stringMatching(/한국|한국볼|KR|골목|스마트폰|가리키|당황|놀라|걷/),
             dialogueLines: [expect.objectContaining({ speaker: expect.any(String), text: expect.any(String) })],
+            visual: expect.objectContaining({
+                layout: 'countryball-infographic-skit',
+                topTitleBand: 'black-yellow-white',
+                captionTreatment: 'bold-yellow-black-outline',
+                panelArchetype: 'headline-evidence-open',
+            }),
         });
+        expect(style['visualGrammar']).toMatchObject({
+            referenceLayout: 'countryball-infographic-skit',
+            topTitleBand: 'black-yellow-white',
+            panelStructure: 'middle-evidence-panel-lower-reaction-stage',
+            captionTreatment: 'bold-yellow-black-outline',
+        });
+        expect(String(scenes[0]?.['imagePrompt'])).toContain('Final compositor will add the black top title band');
+        expect(String(scenes[0]?.['imagePrompt'])).toContain('do not render final-video title bands');
+        expect(String(scenes[0]?.['imagePrompt'])).toContain('Upper/middle evidence/infographic comic panel');
+        expect(String(scenes[0]?.['imagePrompt'])).toContain('Lower foreground reaction stage');
+        expect(String(scenes[0]?.['imagePrompt'])).toContain(
+            'bold yellow Korean dialogue/reaction caption with black outline'
+        );
+        expect(String(scenes[0]?.['imagePrompt'])).toContain('newspaper cards');
+        expect(String(scenes[1]?.['imagePrompt'])).toContain('motion-blur transition panel');
+        expect(String(scenes[2]?.['imagePrompt'])).toContain('red falling chart panel');
         expect(JSON.stringify(scenes)).toContain('밤거리');
         expect(JSON.stringify(scenes)).toContain('치한');
         expect(JSON.stringify(scenes)).not.toContain('상황극을 재연하는 설명 장면');

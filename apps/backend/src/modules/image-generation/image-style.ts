@@ -62,7 +62,7 @@ export const IMAGE_STYLE_PRESETS: ImageStylePreset[] = [
         label: '컨트리볼 만화',
         description: '국가볼 캐릭터가 사용자 요청 상황을 재연하는 밈/만화 컷',
         promptPrefix:
-            'countryball comic reenactment style, round flag-faced countryball characters, expressive eyes, simple arms, meme documentary composition, bold outlines, clean mobile frame, no hateful stereotypes',
+            'viral countryball infographic skit central artwork, upper evidence panel with charts documents arrows maps reports or props, lower foreground countryball reaction stage, round flag-faced countryball characters, expressive eyes, simple arms, clean vertical mobile-safe frame with room for compositor title and caption overlays, no hateful stereotypes',
     },
     {
         id: 'animation',

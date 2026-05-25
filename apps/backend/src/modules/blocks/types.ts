@@ -56,6 +56,10 @@ const VisualSchema = z.object({
     topTitle: z.string().optional(),
     mainCaption: z.string().optional(),
     sourceLabel: z.string().optional(),
+    layout: z.string().optional(),
+    panelArchetype: z.string().optional(),
+    topTitleBand: z.string().optional(),
+    captionTreatment: z.string().optional(),
 });
 
 const ClaimTypeSchema = z.enum(['fact', 'hypothetical', 'opinion', 'joke']);

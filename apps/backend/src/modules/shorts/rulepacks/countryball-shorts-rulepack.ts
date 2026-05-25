@@ -30,6 +30,11 @@ export const COUNTRYBALL_SHORTS_RULEPACK: ShortsRulepack = {
 - Put the user's concrete requested nouns and situation labels into captions, dialogue, dramatizedAction, and imagePrompt so the skit does not drift into generic explanation.
 - The fun comes from what countryballs do on screen: panicking, bragging, running, pointing, carrying props, getting shocked, lining up, throwing objects, ordering food, hiding, bargaining, or reacting.
 - Use countryball characters as roles in the skit. Dialogue is allowed, but every line must serve the situation being reenacted.
+- Follow the reference countryball Shorts final-frame grammar: persistent black top title band, middle information/evidence comic panel, and lower large countryball reaction stage.
+- The video compositor owns the final title/subtitle overlays. Do not ask the image model to bake final-video title bands or lower subtitle bands into the artwork.
+- The middle panel should carry the situation with documents, newspaper cards, charts, arrows, maps, factories, money bags, timelines, warning boards, reports, or scene-specific props.
+- The lower stage should carry the fun with exaggerated countryball eyes, sweat, tears, smirk, panic, pointing, holding papers, or arguing.
+- Include one short punchy Korean dialogue/reaction caption per scene when useful; it should feel like bold yellow text with black outline.
 - Required extra scene fields:
   - characters: [{ countryCode, roleInScene, expression, pose }]
   - dramatizedAction: the skit action happening in this scene
@@ -47,6 +52,10 @@ export const COUNTRYBALL_SHORTS_RULEPACK: ShortsRulepack = {
     imagePrompt: `Countryball visual rules:
 - Render round flag-faced countryball characters with expressive eyes, simple arms, and clear emotional poses.
 - The image should show the reenacted situation, not only two balls talking.
+- Match the reference central artwork layout: upper/middle information/evidence panel and lower foreground countryball reaction stage.
+- Leave final black/yellow top title and yellow caption overlays to the compositor.
+- Use dense visual proof props: documents, newspaper cards, charts, arrows, maps, factories, money bags, timelines, warning boards, reports, or scene-specific objects.
+- Keep visual space for one short bold yellow Korean dialogue/reaction caption with black outline near the countryballs when the scene needs a punchline.
 - Use props, maps, documents, uniforms, tables, artifacts, or scene backgrounds that make the requested situation readable.
 - Avoid hateful stereotypes, ethnic caricatures, slurs, or making an entire nationality look subhuman or inferior.
 - Keep text overlays short; final title and subtitles still belong to the compositor.`,

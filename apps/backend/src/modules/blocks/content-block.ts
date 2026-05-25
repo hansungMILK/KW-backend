@@ -115,6 +115,16 @@ Countryball dialogue-writing contract:
 - Use visible actions: panicking, bragging, running, pointing, carrying props, getting shocked, lining up, throwing objects, ordering food, hiding, bargaining, laughing, crying, or reacting.
 - Use safe countryball satire. Avoid slurs, hateful stereotypes, or claims that a whole country, people, ethnicity, or nationality is inherently inferior.
 
+Reference visual grammar contract:
+- Match the viral countryball infographic-skit frame structure, not a plain character scene.
+- Every final video frame should read as: top black title band -> middle information/evidence comic panel -> lower large countryball reaction stage.
+- The video compositor owns the final title/subtitle overlays. Do not ask the image model to render final-video title bands or lower subtitles.
+- The persistent topTitle should feel like a two-line Korean Shorts headline: key phrase in bright yellow, remaining text in white, on black.
+- The middle panel must contain readable situation props: documents, newspaper cards, charts, arrows, maps, factories, money bags, timelines, warning boards, reports, or scene-specific evidence objects.
+- The lower stage must show large foreground countryballs with exaggerated eyes, sweat, tears, smirk, shock, pointing, holding papers, or arguing.
+- Put one short in-scene dialogue/reaction caption in bold yellow Korean text with black outline when the frame needs a punchline.
+- Do not output generic "Korea countryball and Japan countryball talk" prompts.
+
 Scene contract:
 - sceneNumber
 - imageSlot: "[Image #1]" through "[Image #12]" or "[Image #15]"
@@ -122,7 +132,7 @@ Scene contract:
 - topTitle: the same persistent Korean top title for every scene
 - caption: short bold Korean on-screen caption, 6-18 Korean characters
 - narration: short Korean spoken line that can be used by the narrator TTS, 12-42 Korean characters
-- imagePrompt: English visual brief for the reenacted countryball action. Describe characters, setting, props, expression, and action.
+- imagePrompt: English central artwork brief for the reference countryball infographic-skit layout. Describe middle evidence panel, lower foreground countryball reaction stage, characters, props, expression, and action. Leave title/subtitle overlays to the compositor.
 - visualText: same or shorter than caption
 - visual: { topTitle, mainCaption, sourceLabel? }
 - claimType: hypothetical|opinion|joke|fact
@@ -146,7 +156,14 @@ Output shape:
     "sceneCount": 12,
     "visualStyle": "countryball-comic",
     "narrativeMode": "countryball-situation-reenactment",
-    "visualGrammar": { "reenactment": true, "characterSystem": "countryball" }
+    "visualGrammar": {
+      "reenactment": true,
+      "characterSystem": "countryball",
+      "referenceLayout": "countryball-infographic-skit",
+      "topTitleBand": "black-yellow-white",
+      "panelStructure": "middle-evidence-panel-lower-reaction-stage",
+      "captionTreatment": "bold-yellow-black-outline"
+    }
   },
   "scenes": [
     {
@@ -205,6 +222,11 @@ function buildCountryballContentPrompt(
         '- factualClaim must be empty or omitted unless the scene states a real-world fact.',
         '- dramatizedAction must describe the skit action and must not be presented as evidence.',
         '- Do not rely on dialogue alone. Every scene still needs a drawable dramatizedAction.',
+        '- Use the reference final-frame grammar: top black title band, middle evidence/infographic panel, lower large countryball reaction stage.',
+        '- imagePrompt must describe central artwork with an evidence/infographic panel and large foreground countryball reactions.',
+        '- The video compositor adds the final black/yellow title and yellow dialogue caption overlays; do not ask GPT-image to render final-video title/subtitle bands.',
+        '- Build visual panels with documents, newspaper cards, charts, arrows, maps, factories, money bags, timelines, reports, or scene-specific props.',
+        '- Do not produce plain empty-background countryball talking scenes.',
         '- Avoid slurs, hateful stereotypes, and claims that a whole nation or ethnicity is inferior.',
     ].join('\n');
 }
@@ -259,6 +281,49 @@ const COUNTRYBALL_ACTION_TEMPLATES = [
     (a: string, b: string, topic: string) => `${b}이 팝콘을 먹다 멈추고 ${a}이 ${topic} 지도를 가리키며 웃는다.`,
     (a: string, b: string, topic: string) => `${a}이 경례하고 ${b}이 ${topic} 알림창을 들고 당황한다.`,
     (a: string, b: string, topic: string) => `${a}이 무대 위로 올라 ${topic} 카드를 던지고 ${b}이 박수친다.`,
+];
+
+const COUNTRYBALL_PANEL_ARCHETYPES = [
+    {
+        id: 'headline-evidence-open',
+        prompt: 'opening headline panel with newspaper cards, stacked reports, warning arrows, and a dramatic first reveal',
+    },
+    {
+        id: 'claim-transition',
+        prompt: 'motion-blur transition panel where one countryball makes a bold claim and the other reacts in shock',
+    },
+    {
+        id: 'panic-chart',
+        prompt: 'red falling chart panel, warning board, numeric callouts, and panic reaction props',
+    },
+    {
+        id: 'mechanism-map',
+        prompt: 'mechanism panel with documents, maps, money bags, factory icons, price arrows, and policy props',
+    },
+    {
+        id: 'scale-funnel',
+        prompt: 'scale panel with timeline, survival funnel, many small countryballs, queue, and crowd reaction',
+    },
+    {
+        id: 'comparison-report',
+        prompt: 'split-screen comparison report panel with tables, profit bars, folders, and scoreboard-like labels',
+    },
+    {
+        id: 'confrontation',
+        prompt: 'foreground confrontation panel where large countryballs argue over a report, paper, or prop',
+    },
+    {
+        id: 'twist-reveal',
+        prompt: 'twist reveal panel with a giant symbolic object, spotlight, arrows, and startled countryballs',
+    },
+    {
+        id: 'reaction-closeup',
+        prompt: 'reaction close-up panel with sweat drops, tears, smirk, question marks, and exaggerated eyes',
+    },
+    {
+        id: 'payoff-punchline',
+        prompt: 'payoff panel with the winning countryball on top of documents or props, V sign, torn paper, and punchline energy',
+    },
 ];
 
 const LONGFORM_GATE_A_SYSTEM_PROMPT = `You are a Korean longform YouTube production planner inside a general workflow automation engine.
@@ -1067,11 +1132,18 @@ function normalizeCountryballScenes(
                 : compactPromptText(countryballCaptionForScene(index, focusTerms), 18);
         const visual = isRecord(scene['visual']) ? scene['visual'] : {};
         const characters = normalizeCountryballCharacters(scene['characters'], cast);
+        const topTitle =
+            optionalString(scene['topTitle']) ?? optionalString(visual['topTitle']) ?? compactPromptText(title, 18);
+        const mainCaption =
+            optionalString(visual['mainCaption']) && !isGenericCountryballCaption(String(visual['mainCaption']))
+                ? compactPromptText(stripMarkdown(String(visual['mainCaption'])), 18)
+                : caption;
+        const panelArchetype = countryballPanelArchetypeForIndex(index);
 
         return {
             ...scene,
             storyBeat: optionalString(scene['storyBeat']) ?? countryballBeatForIndex(index),
-            topTitle: optionalString(scene['topTitle']) ?? compactPromptText(title, 18),
+            topTitle,
             caption,
             narration: narratorText,
             visualText:
@@ -1080,15 +1152,13 @@ function normalizeCountryballScenes(
                     : caption,
             visual: {
                 ...visual,
-                topTitle:
-                    optionalString(visual['topTitle']) ??
-                    optionalString(scene['topTitle']) ??
-                    compactPromptText(title, 18),
-                mainCaption:
-                    optionalString(visual['mainCaption']) && !isGenericCountryballCaption(String(visual['mainCaption']))
-                        ? compactPromptText(stripMarkdown(String(visual['mainCaption'])), 18)
-                        : caption,
+                topTitle,
+                mainCaption,
                 sourceLabel: optionalString(visual['sourceLabel']),
+                layout: 'countryball-infographic-skit',
+                panelArchetype: panelArchetype.id,
+                topTitleBand: 'black-yellow-white',
+                captionTreatment: 'bold-yellow-black-outline',
             },
             claimType: scene['claimType'] === 'fact' && sourceRefs.length === 0 ? 'opinion' : scene['claimType'],
             sourceRefs,
@@ -1098,7 +1168,14 @@ function normalizeCountryballScenes(
             narratorLine: { text: narratorText, voiceRole: 'narrator' },
             factualClaim: optionalString(scene['factualClaim']) ?? '',
             evidenceRefs: Array.isArray(scene['evidenceRefs']) ? scene['evidenceRefs'] : [],
-            imagePrompt: normalizeCountryballImagePrompt(scene, dramatizedAction, characters),
+            imagePrompt: normalizeCountryballImagePrompt(scene, {
+                index,
+                topTitle,
+                mainCaption,
+                dramatizedAction,
+                characters,
+                dialogueLines,
+            }),
         };
     });
 
@@ -1288,17 +1365,45 @@ function normalizeCountryballCharacters(input: unknown, cast: CountryballCastMem
 
 function normalizeCountryballImagePrompt(
     scene: Record<string, unknown>,
-    dramatizedAction: string,
-    characters: Array<Record<string, unknown>>
+    input: {
+        index: number;
+        topTitle: string;
+        mainCaption: string;
+        dramatizedAction: string;
+        characters: Array<Record<string, unknown>>;
+        dialogueLines: Array<Record<string, unknown>>;
+    }
 ): string {
     const existing = optionalString(scene['imagePrompt']);
-    const castLabel = characters
+    const panelArchetype = countryballPanelArchetypeForIndex(input.index);
+    const castLabel = input.characters
         .map(character => optionalString(character['countryCode']))
         .filter(Boolean)
         .join(', ');
-    const skitPrompt = `Countryball comic skit, cast ${castLabel || 'countryballs'}, visible action: ${dramatizedAction}, expressive reactions, props, vertical 9:16.`;
+    const dialogueCaption = countryballDialogueCaption(input.dialogueLines, input.mainCaption);
+    const skitPrompt = [
+        'Countryball comic infographic skit central artwork for a vertical 9:16 Shorts frame.',
+        'Final compositor will add the black top title band and yellow/white title text; do not render final-video title bands inside the image.',
+        `Persistent topic title meaning for composition: "${input.topTitle}".`,
+        `Upper/middle evidence/infographic comic panel: ${panelArchetype.prompt}.`,
+        'Use dense readable situation props such as documents, newspaper cards, charts, red arrows, maps, factories, money bags, timelines, warning boards, reports, or props matching this specific scene.',
+        'Lower foreground reaction stage with large round flag-faced countryballs, exaggerated eyes, sweat, tears, smirk, shock, pointing arms, holding reports, or arguing.',
+        `Final compositor will overlay a bold yellow Korean dialogue/reaction caption with black outline, caption meaning: "${dialogueCaption}". Keep visual space for it but do not bake the final subtitle band into the image.`,
+        `Cast: ${castLabel || 'countryballs'}.`,
+        `Visible action: ${input.dramatizedAction}.`,
+        'Do not make a plain narrator explainer or two countryballs talking on an empty background.',
+    ].join(' ');
     if (!existing || /generic|explainer/i.test(existing)) return skitPrompt;
     return `${existing} ${skitPrompt}`;
+}
+
+function countryballPanelArchetypeForIndex(index: number): { id: string; prompt: string } {
+    return COUNTRYBALL_PANEL_ARCHETYPES[index % COUNTRYBALL_PANEL_ARCHETYPES.length] ?? COUNTRYBALL_PANEL_ARCHETYPES[0];
+}
+
+function countryballDialogueCaption(dialogueLines: Array<Record<string, unknown>>, fallback: string): string {
+    const firstText = dialogueLines.map(line => optionalString(line['text'])).find(Boolean);
+    return compactPromptText(firstText ?? fallback, 18);
 }
 
 function ensureCountryballTopicCoverage(
@@ -1389,6 +1494,10 @@ function normalizeStyle(input: unknown, sceneCount?: number, presetId?: string):
                       ...visualGrammar,
                       reenactment: true,
                       characterSystem: 'countryball',
+                      referenceLayout: 'countryball-infographic-skit',
+                      topTitleBand: 'black-yellow-white',
+                      panelStructure: 'middle-evidence-panel-lower-reaction-stage',
+                      captionTreatment: 'bold-yellow-black-outline',
                   },
               }
             : {}),
