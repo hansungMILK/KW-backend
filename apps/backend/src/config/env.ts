@@ -82,6 +82,34 @@ export const env = {
     countryballTtsVoiceJp: readEnv('COUNTRYBALL_TTS_VOICE_JP', 'EXAVITQu4vr4xnSDxMaL'),
     countryballTtsVoiceUs: readEnv('COUNTRYBALL_TTS_VOICE_US', 'VR6AewLTigWG4xSOukaG'),
     countryballTtsVoiceCn: readEnv('COUNTRYBALL_TTS_VOICE_CN', 'ErXwobaYiN019PkySvjV'),
+    countryballTtsVoiceMainTired: readEnv(
+        'COUNTRYBALL_TTS_VOICE_MAIN_TIRED',
+        readEnv('COUNTRYBALL_TTS_VOICE_KR', 'TxGEqnHWrfWFTfGW9XjX')
+    ),
+    countryballTtsVoiceMainConfident: readEnv(
+        'COUNTRYBALL_TTS_VOICE_MAIN_CONFIDENT',
+        readEnv('COUNTRYBALL_TTS_VOICE_KR', 'TxGEqnHWrfWFTfGW9XjX')
+    ),
+    countryballTtsVoiceRivalSmug: readEnv(
+        'COUNTRYBALL_TTS_VOICE_RIVAL_SMUG',
+        readEnv('COUNTRYBALL_TTS_VOICE_US', 'VR6AewLTigWG4xSOukaG')
+    ),
+    countryballTtsVoiceRivalAngry: readEnv(
+        'COUNTRYBALL_TTS_VOICE_RIVAL_ANGRY',
+        readEnv('COUNTRYBALL_TTS_VOICE_JP', 'EXAVITQu4vr4xnSDxMaL')
+    ),
+    countryballTtsVoiceNeutralSerious: readEnv(
+        'COUNTRYBALL_TTS_VOICE_NEUTRAL_SERIOUS',
+        readEnv('COUNTRYBALL_TTS_VOICE_US', 'VR6AewLTigWG4xSOukaG')
+    ),
+    countryballTtsVoicePanicHigh: readEnv(
+        'COUNTRYBALL_TTS_VOICE_PANIC_HIGH',
+        readEnv('COUNTRYBALL_TTS_VOICE_CN', 'ErXwobaYiN019PkySvjV')
+    ),
+    countryballTtsVoiceOldTeacher: readEnv(
+        'COUNTRYBALL_TTS_VOICE_OLD_TEACHER',
+        readEnv('COUNTRYBALL_TTS_VOICE_NARRATOR', readEnv('ELEVENLABS_TTS_VOICE_ID', 'pNInz6obpgDQGcFmaJgB'))
+    ),
     elevenLabsTtsModel: readEnv('ELEVENLABS_TTS_MODEL', 'eleven_flash_v2_5'),
     elevenLabsTtsOutputFormat: readEnv('ELEVENLABS_TTS_OUTPUT_FORMAT', 'mp3_44100_128'),
     elevenLabsTtsTimeoutMs: readIntEnv('ELEVENLABS_TTS_TIMEOUT_MS', 120000, 1),

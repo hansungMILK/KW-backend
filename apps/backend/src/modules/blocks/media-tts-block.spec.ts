@@ -15,6 +15,13 @@ vi.mock('../../config/env', () => ({
         countryballTtsVoiceJp: 'EXAVITQu4vr4xnSDxMaL',
         countryballTtsVoiceUs: 'VR6AewLTigWG4xSOukaG',
         countryballTtsVoiceCn: 'ErXwobaYiN019PkySvjV',
+        countryballTtsVoiceMainTired: 'TxGEqnHWrfWFTfGW9XjX',
+        countryballTtsVoiceMainConfident: 'TxGEqnHWrfWFTfGW9XjX',
+        countryballTtsVoiceRivalSmug: 'VR6AewLTigWG4xSOukaG',
+        countryballTtsVoiceRivalAngry: 'EXAVITQu4vr4xnSDxMaL',
+        countryballTtsVoiceNeutralSerious: 'VR6AewLTigWG4xSOukaG',
+        countryballTtsVoicePanicHigh: 'ErXwobaYiN019PkySvjV',
+        countryballTtsVoiceOldTeacher: 'pNInz6obpgDQGcFmaJgB',
     },
 }));
 
@@ -159,7 +166,7 @@ describe('mediaTtsBlock', () => {
         ]);
     });
 
-    it('routes countryball dialogue and narrator lines to separate ElevenLabs voices', async () => {
+    it('routes countryball dialogue through role voices and ignores explanatory narrator lines', async () => {
         const result = await mediaTtsBlock.execute({
             normalizedScenes: [
                 {
@@ -167,18 +174,24 @@ describe('mediaTtsBlock', () => {
                     narration: '한국볼과 일본볼이 협상장에 들어옵니다.',
                     dialogueLines: [
                         {
+                            country: '한국',
+                            line: '도장 찍기 전에 읽어.',
                             speaker: 'KR',
                             text: '도장 찍기 전에 읽어.',
                             emotion: 'stern',
+                            tone: '단호하게',
                             delivery: '단호하게',
-                            voiceRole: 'countryball.kr',
+                            voiceRole: 'main_confident',
                         },
                         {
+                            country: '일본',
+                            line: '잠깐, 조건이 이상한데?',
                             speaker: 'JP',
                             text: '잠깐, 조건이 이상한데?',
                             emotion: 'nervous',
+                            tone: '당황한 말투',
                             delivery: '당황한 말투',
-                            voiceRole: 'countryball.jp',
+                            voiceRole: 'panic_high',
                         },
                     ],
                     narratorLine: {
@@ -192,7 +205,7 @@ describe('mediaTtsBlock', () => {
             },
         });
 
-        expect(ttsAdapter.synthesize).toHaveBeenCalledTimes(3);
+        expect(ttsAdapter.synthesize).toHaveBeenCalledTimes(2);
         expect(ttsAdapter.synthesize).toHaveBeenNthCalledWith(
             1,
             expect.objectContaining({
@@ -204,14 +217,7 @@ describe('mediaTtsBlock', () => {
             2,
             expect.objectContaining({
                 text: '잠깐, 조건이 이상한데?',
-                voiceId: 'EXAVITQu4vr4xnSDxMaL',
-            })
-        );
-        expect(ttsAdapter.synthesize).toHaveBeenNthCalledWith(
-            3,
-            expect.objectContaining({
-                text: '이 장면은 한국볼이 협상 주도권을 가져가는 상황극입니다.',
-                voiceId: 'pNInz6obpgDQGcFmaJgB',
+                voiceId: 'ErXwobaYiN019PkySvjV',
             })
         );
         expect(audioConcatAdapter.concatMp3).toHaveBeenCalledTimes(1);
@@ -221,8 +227,7 @@ describe('mediaTtsBlock', () => {
                 voiceId: 'pNInz6obpgDQGcFmaJgB',
                 voiceMode: 'countryball-multi-voice',
             },
-            narrationText:
-                '도장 찍기 전에 읽어. 잠깐, 조건이 이상한데? 이 장면은 한국볼이 협상 주도권을 가져가는 상황극입니다.',
+            narrationText: '도장 찍기 전에 읽어. 잠깐, 조건이 이상한데?',
             subtitleCues: [
                 {
                     sceneNumber: 1,
@@ -237,13 +242,6 @@ describe('mediaTtsBlock', () => {
                     role: 'scene',
                     startSec: 8,
                     endSec: 16,
-                },
-                {
-                    sceneNumber: 1,
-                    text: '이 장면은 한국볼이 협상 주도권을 가져가는 상황극입니다.',
-                    role: 'scene',
-                    startSec: 16,
-                    endSec: 24,
                 },
             ],
         });

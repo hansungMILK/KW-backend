@@ -466,6 +466,8 @@ describe('analysisBlock', () => {
                           { speaker: 'KR', text: '이건 우리 조건이야.' },
                           { speaker: 'JP', text: '잠깐, 너무 빠르잖아.' },
                           { speaker: 'US', text: '둘 다 조용히 해.' },
+                          { speaker: 'CN', text: '나도 끼어야지.' },
+                          { speaker: 'FR', text: '회의 터졌네.' },
                       ]
                     : [{ speaker: 'KR', text: '짧게 치고 빠진다.' }],
             durationSec: 5,
@@ -487,7 +489,7 @@ describe('analysisBlock', () => {
         });
 
         expect(result.output['approved']).toBe(false);
-        expect(JSON.stringify(result.output['issues'])).toContain('2줄 이하');
+        expect(JSON.stringify(result.output['issues'])).toContain('4줄 이하');
     });
 
     it('repairs creative simulation pacing and verdict issues once before rejecting the workflow', async () => {

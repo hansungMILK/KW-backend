@@ -107,10 +107,11 @@ Countryball dialogue-writing contract:
 - Do not default to source-attribution prose such as "공식 지표에 따르면", "보도에 따르면", or "연구에 따르면" unless the user explicitly asks for sourced reporting.
 - Do not write scenes like a documentary paragraph split into 12 narrations.
 - Every scene should feel like a frame from a comic skit: visible character action, reaction, props, and short dialogue.
-- Default scene rhythm: action beat -> character dialogue -> narratorLine.
-- Most scenes must include at least one countryball dialogue line.
-- dialogueLines are short character lines, not exposition.
-- narratorLine is only a brief meaning bridge after the skit beat, not the main content.
+- Do not force a fixed plot pattern such as crisis -> reversal -> foreign shock. Choose the best cast, location, tension, and ending for the user's topic.
+- Most active scenes should include fast countryball back-and-forth dialogue. A final/static/reaction cut may have one line or no line if the screenAction carries the joke.
+- dialogueLines are short character lines, not exposition. One character must not explain the whole topic alone.
+- narratorLine defaults to null. Use narrator only for a title-like opening card, a time-jump card, or a very short ending meta caption.
+- Use role-based voiceRole values, not fixed country voices: main_tired, main_confident, rival_smug, rival_angry, neutral_serious, panic_high, old_teacher, narrator_short.
 - Keep the user's concrete nouns and situation labels visible in captions, dialogue, dramatizedAction, and imagePrompt.
 - Use visible actions: panicking, bragging, running, pointing, carrying props, getting shocked, lining up, throwing objects, ordering food, hiding, bargaining, laughing, crying, or reacting.
 - Use safe countryball satire. Avoid slurs, hateful stereotypes, or claims that a whole country, people, ethnicity, or nationality is inherently inferior.
@@ -129,9 +130,12 @@ Scene contract:
 - sceneNumber
 - imageSlot: "[Image #1]" through "[Image #12]" or "[Image #15]"
 - storyBeat: hook|setup|tension|action|reaction|twist|payoff|cta
+- scenePurpose: why this scene exists in the skit
+- location: the skit location for this beat
+- visualTone: comedy|serious|panic|awkward|satirical|historical|news-like|chaotic|calm
 - topTitle: the same persistent Korean top title for every scene
 - caption: short bold Korean on-screen caption, 6-18 Korean characters
-- narration: short Korean spoken line that can be used by the narrator TTS, 12-42 Korean characters
+- narration: backward-compatible subtitle string made from dialogue, such as "한국볼: ... 미국볼: ..."; do not use narrator explanation here
 - imagePrompt: English central artwork brief for the reference countryball infographic-skit layout. Describe middle evidence panel, lower foreground countryball reaction stage, characters, props, expression, and action. Leave title/subtitle overlays to the compositor.
 - visualText: same or shorter than caption
 - visual: { topTitle, mainCaption, sourceLabel? }
@@ -139,9 +143,13 @@ Scene contract:
 - sourceRefs: [] unless the user explicitly gave source-backed reporting material
 - durationSec: 4-6
 - characters: [{ countryCode, roleInScene, expression, pose }]
-- dramatizedAction: concrete visible skit action, not a summary
-- dialogueLines: [{ speaker, text, emotion, delivery, meaning, voiceRole, captionStyle, durationSec }]
-- narratorLine: { text, voiceRole: "narrator" }
+- screenAction: concrete visible skit action, not a summary
+- dramatizedAction: same meaning as screenAction for backward compatibility
+- dialogueLines: [{ country, line, tone, voiceRole, captionEmphasis?, pauseAfterMs?, speaker, text, emotion, delivery, captionStyle, durationSec }]
+- expressionChanges: short list of eye/face changes
+- sfx: short list of sound effects
+- editBeat: cut/zoom/silence/BGM instruction
+- narratorLine: null by default, or { text, voiceRole: "narrator_short" } only for title/time-jump/ending meta
 - factualClaim: empty string unless the scene states a real-world fact
 - evidenceRefs: [] unless factualClaim is source-backed
 
@@ -170,6 +178,9 @@ Output shape:
       "sceneNumber": 1,
       "imageSlot": "[Image #1]",
       "storyBeat": "hook",
+      "scenePurpose": "...",
+      "location": "...",
+      "visualTone": "panic",
       "topTitle": "...",
       "caption": "...",
       "narration": "...",
@@ -180,9 +191,13 @@ Output shape:
       "sourceRefs": [],
       "durationSec": 5,
       "characters": [{ "countryCode": "KR", "roleInScene": "...", "expression": "...", "pose": "..." }],
+      "screenAction": "...",
       "dramatizedAction": "...",
-      "dialogueLines": [{ "speaker": "한국볼", "text": "...", "emotion": "...", "delivery": "...", "meaning": "...", "voiceRole": "countryball.kr", "captionStyle": "bold", "durationSec": 1.2 }],
-      "narratorLine": { "text": "...", "voiceRole": "narrator" },
+      "dialogueLines": [{ "country": "한국", "line": "...", "tone": "...", "voiceRole": "main_confident", "captionEmphasis": ["..."], "pauseAfterMs": 0, "speaker": "한국볼", "text": "...", "emotion": "...", "delivery": "...", "meaning": "...", "captionStyle": "bold", "durationSec": 1.2 }],
+      "expressionChanges": ["..."],
+      "sfx": ["..."],
+      "editBeat": "...",
+      "narratorLine": null,
       "factualClaim": "",
       "evidenceRefs": []
     }
@@ -207,18 +222,18 @@ function buildCountryballContentPrompt(
         '- This is user-request driven. It does not have to be a real historical event unless the user asks for one.',
         '- Reenact the requested situation through countryball characters, actions, reactions, props, and scene background.',
         '- Do not write narrator-only explainer scenes.',
-        '- Default scene rhythm: action beat -> character dialogue -> narratorLine.',
+        '- Do not force a fixed plot pattern. Internally choose the best location, countries, tension, comedy/serious tone, and final beat for the topic.',
         '- Do not default to source-attribution prose such as "공식 지표에 따르면", "보도에 따르면", or "연구에 따르면". Use skit action unless the user explicitly asks for sourced reporting.',
         '- Put the user requested concrete nouns and situation labels into captions, dialogue, dramatizedAction, and imagePrompt.',
         '- Use visible actions like panicking, bragging, running, pointing, carrying props, getting shocked, lining up, throwing objects, ordering food, hiding, bargaining, or reacting.',
-        '- Dialogue is support for the skit, but countryball Shorts should feel like characters acting inside the situation, not narrator explanation.',
-        '- For every scene include characters, dramatizedAction, dialogueLines, narratorLine, factualClaim, and evidenceRefs.',
-        '- dialogueLines must be objects: [{ speaker, text, emotion, delivery, meaning, voiceRole, captionStyle, durationSec }].',
-        '- Most scenes should include at least one countryball dialogue line. Avoid pure narrator explanation unless the scene is a very short transition.',
-        '- voiceRole should be one of narrator, countryball.kr, countryball.jp, countryball.us, countryball.cn when the country is recognizable.',
-        '- narratorLine briefly explains the meaning of the skit beat after the character action, using voiceRole "narrator".',
+        '- Dialogue is the main script surface: countryballs should talk, react, interrupt, panic, brag, misunderstand, or call each other out.',
+        '- For every scene include scenePurpose, location, visualTone, characters, screenAction, dramatizedAction, dialogueLines, expressionChanges, sfx, editBeat, narratorLine, factualClaim, and evidenceRefs.',
+        '- dialogueLines must be objects: [{ country, line, tone, voiceRole, captionEmphasis?, pauseAfterMs?, speaker, text, emotion, delivery, meaning, captionStyle, durationSec }].',
+        '- Most active scenes should include 2-4 short dialogue lines. Final/static/reaction cuts may use one line if the action carries the beat.',
+        '- Use role-based voiceRole values: main_tired, main_confident, rival_smug, rival_angry, neutral_serious, panic_high, old_teacher, narrator_short.',
+        '- narratorLine must be null by default. Use narrator_short only for a title-like first line, time jump, or ending meta caption.',
         '- speaker must identify the countryball character or role, such as "한국볼", "일본볼", "KR", or "JP"; do not use narrator as speaker.',
-        '- Use max 2 dialogue lines per scene and keep each text short enough for a 1-2 second Shorts beat.',
+        '- Keep each dialogue line short enough for a 1-2 second Shorts beat.',
         '- factualClaim must be empty or omitted unless the scene states a real-world fact.',
         '- dramatizedAction must describe the skit action and must not be presented as evidence.',
         '- Do not rely on dialogue alone. Every scene still needs a drawable dramatizedAction.',
@@ -282,6 +297,18 @@ const COUNTRYBALL_ACTION_TEMPLATES = [
     (a: string, b: string, topic: string) => `${a}이 경례하고 ${b}이 ${topic} 알림창을 들고 당황한다.`,
     (a: string, b: string, topic: string) => `${a}이 무대 위로 올라 ${topic} 카드를 던지고 ${b}이 박수친다.`,
 ];
+
+const COUNTRYBALL_VISUAL_TONES = [
+    'comedy',
+    'serious',
+    'panic',
+    'awkward',
+    'satirical',
+    'historical',
+    'news-like',
+    'chaotic',
+    'calm',
+] as const;
 
 const COUNTRYBALL_PANEL_ARCHETYPES = [
     {
@@ -1123,8 +1150,16 @@ function normalizeCountryballScenes(
         const primary = cast[index % cast.length] ?? cast[0] ?? defaultCountryballCast()[0];
         const secondary = cast[(index + 1) % cast.length] ?? cast[1] ?? defaultCountryballCast()[1];
         const dramatizedAction = normalizeCountryballAction(scene, index, primary, secondary, focusTerms);
+        const scenePurpose = normalizeCountryballScenePurpose(scene, index, focusTerms);
+        const location = normalizeCountryballLocation(scene, index);
+        const visualTone = normalizeCountryballVisualTone(scene, index);
+        const screenAction = optionalString(scene['screenAction']) ?? dramatizedAction;
         const dialogueLines = normalizeCountryballDialogueLines(scene, index, primary, secondary, focusTerms);
-        const narratorText = normalizeCountryballNarratorText(scene, primary, focusTerms);
+        const narratorLine = normalizeCountryballNarratorLine(scene, index);
+        const narration = formatCountryballNarration(dialogueLines, scene);
+        const expressionChanges = normalizeCountryballExpressionChanges(scene, index, primary, secondary);
+        const sfx = normalizeCountryballSfx(scene, index);
+        const editBeat = normalizeCountryballEditBeat(scene, index);
         const sourceRefs = Array.isArray(scene['sourceRefs']) ? scene['sourceRefs'] : [];
         const caption =
             optionalString(scene['caption']) && !isGenericCountryballCaption(String(scene['caption']))
@@ -1145,7 +1180,7 @@ function normalizeCountryballScenes(
             storyBeat: optionalString(scene['storyBeat']) ?? countryballBeatForIndex(index),
             topTitle,
             caption,
-            narration: narratorText,
+            narration,
             visualText:
                 optionalString(scene['visualText']) && !isGenericCountryballCaption(String(scene['visualText']))
                     ? compactPromptText(stripMarkdown(String(scene['visualText'])), 18)
@@ -1159,22 +1194,35 @@ function normalizeCountryballScenes(
                 panelArchetype: panelArchetype.id,
                 topTitleBand: 'black-yellow-white',
                 captionTreatment: 'bold-yellow-black-outline',
+                visualTone,
             },
             claimType: scene['claimType'] === 'fact' && sourceRefs.length === 0 ? 'opinion' : scene['claimType'],
             sourceRefs,
+            scenePurpose,
+            location,
+            visualTone,
+            screenAction,
             characters,
             dramatizedAction,
             dialogueLines,
-            narratorLine: { text: narratorText, voiceRole: 'narrator' },
+            narratorLine: narratorLine ?? undefined,
+            expressionChanges,
+            sfx,
+            editBeat,
+            audioEvents: sfx.map(label => ({ type: 'sfx', label })),
             factualClaim: optionalString(scene['factualClaim']) ?? '',
             evidenceRefs: Array.isArray(scene['evidenceRefs']) ? scene['evidenceRefs'] : [],
             imagePrompt: normalizeCountryballImagePrompt(scene, {
                 index,
                 topTitle,
                 mainCaption,
+                location,
+                visualTone,
                 dramatizedAction,
+                screenAction,
                 characters,
                 dialogueLines,
+                expressionChanges,
             }),
         };
     });
@@ -1205,16 +1253,21 @@ function inferCountryballCast(userRequest: string, scenes: Record<string, unknow
         .join(' ')
         .toLowerCase();
     const candidates: Array<[RegExp, CountryballCastMember]> = [
-        [/한국|대한민국|\bkr\b|k-/, { countryCode: 'KR', speaker: '한국볼', voiceRole: 'countryball.kr' }],
-        [/일본|\bjp\b|japan/, { countryCode: 'JP', speaker: '일본볼', voiceRole: 'countryball.jp' }],
-        [/미국|\bus\b|usa|america/, { countryCode: 'US', speaker: '미국볼', voiceRole: 'countryball.us' }],
-        [/중국|\bcn\b|china/, { countryCode: 'CN', speaker: '중국볼', voiceRole: 'countryball.cn' }],
-        [/영국|\buk\b|britain/, { countryCode: 'UK', speaker: '영국볼', voiceRole: 'countryball.uk' }],
-        [/프랑스|\bfr\b|france/, { countryCode: 'FR', speaker: '프랑스볼', voiceRole: 'countryball.fr' }],
-        [/독일|\bde\b|germany/, { countryCode: 'DE', speaker: '독일볼', voiceRole: 'countryball.de' }],
-        [/러시아|\bru\b|russia/, { countryCode: 'RU', speaker: '러시아볼', voiceRole: 'countryball.ru' }],
+        [/한국|대한민국|\bkr\b|k-/, { countryCode: 'KR', speaker: '한국볼', voiceRole: 'main_confident' }],
+        [/일본|\bjp\b|japan/, { countryCode: 'JP', speaker: '일본볼', voiceRole: 'rival_smug' }],
+        [/미국|\bus\b|usa|america/, { countryCode: 'US', speaker: '미국볼', voiceRole: 'rival_smug' }],
+        [/중국|\bcn\b|china/, { countryCode: 'CN', speaker: '중국볼', voiceRole: 'rival_angry' }],
+        [/영국|\buk\b|britain/, { countryCode: 'UK', speaker: '영국볼', voiceRole: 'neutral_serious' }],
+        [/프랑스|\bfr\b|france/, { countryCode: 'FR', speaker: '프랑스볼', voiceRole: 'panic_high' }],
+        [/독일|\bde\b|germany/, { countryCode: 'DE', speaker: '독일볼', voiceRole: 'old_teacher' }],
+        [/러시아|\bru\b|russia/, { countryCode: 'RU', speaker: '러시아볼', voiceRole: 'rival_angry' }],
     ];
-    const cast = candidates.filter(([pattern]) => pattern.test(text)).map(([, member]) => member);
+    const cast = candidates
+        .filter(([pattern]) => pattern.test(text))
+        .map(([, member], index) => ({
+            ...member,
+            voiceRole: member.voiceRole || countryballRoleVoiceForIndex(index),
+        }));
     const fallback = defaultCountryballCast();
     if (cast.length === 0) return fallback;
     if (cast.length === 1) return [cast[0] ?? fallback[0], fallback[1]];
@@ -1223,9 +1276,14 @@ function inferCountryballCast(userRequest: string, scenes: Record<string, unknow
 
 function defaultCountryballCast(): CountryballCastMember[] {
     return [
-        { countryCode: 'KR', speaker: '한국볼', voiceRole: 'countryball.kr' },
-        { countryCode: 'GLOBAL', speaker: '외국볼', voiceRole: 'countryball.extra' },
+        { countryCode: 'KR', speaker: '한국볼', voiceRole: 'main_confident' },
+        { countryCode: 'GLOBAL', speaker: '외국볼', voiceRole: 'rival_smug' },
     ];
+}
+
+function countryballRoleVoiceForIndex(index: number): string {
+    const roles = ['main_confident', 'rival_smug', 'panic_high', 'neutral_serious', 'rival_angry', 'main_tired'];
+    return roles[index % roles.length] ?? 'neutral_serious';
 }
 
 function normalizeCountryballAction(
@@ -1241,6 +1299,55 @@ function normalizeCountryballAction(
     const template =
         COUNTRYBALL_ACTION_TEMPLATES[index % COUNTRYBALL_ACTION_TEMPLATES.length] ?? COUNTRYBALL_ACTION_TEMPLATES[0];
     return template(primary.speaker, secondary.speaker, topic);
+}
+
+function normalizeCountryballScenePurpose(scene: Record<string, unknown>, index: number, focusTerms: string[]): string {
+    const current = optionalString(scene['scenePurpose']);
+    if (current) return compactPromptText(stripMarkdown(current), 80);
+    const topic = focusTerms.length > 0 ? focusTerms.slice(0, 3).join(' ') : '요청 상황';
+    const purposes = [
+        `${topic}의 첫 충돌을 바로 보여준다`,
+        `${topic}에서 서로 다른 반응을 대사로 드러낸다`,
+        `${topic}의 핵심 긴장을 행동으로 키운다`,
+        `${topic}의 오해나 반전을 짧게 터뜨린다`,
+        `${topic}의 결말 감정을 한 줄로 남긴다`,
+    ];
+    return purposes[index % purposes.length] ?? `${topic} 상황극을 진행한다`;
+}
+
+function normalizeCountryballLocation(scene: Record<string, unknown>, index: number): string {
+    const current = optionalString(scene['location']);
+    if (current) return compactPromptText(stripMarkdown(current), 60);
+    const locations = [
+        '긴장감 있는 회의실',
+        '현장감 있는 거리',
+        '뉴스 인터뷰 세트',
+        '지도와 서류가 놓인 작전실',
+        '사람들이 몰린 광장',
+        '소품이 쌓인 작업장',
+    ];
+    return locations[index % locations.length] ?? '상황극 무대';
+}
+
+function normalizeCountryballVisualTone(scene: Record<string, unknown>, index: number): string {
+    const current = optionalString(scene['visualTone']);
+    if (current && COUNTRYBALL_VISUAL_TONES.includes(current as (typeof COUNTRYBALL_VISUAL_TONES)[number])) {
+        return current;
+    }
+    const text = [
+        scene['caption'],
+        scene['narration'],
+        scene['dramatizedAction'],
+        scene['screenAction'],
+        scene['imagePrompt'],
+    ]
+        .filter((value): value is string => typeof value === 'string')
+        .join(' ');
+    if (/패닉|위기|도망|떨|당황|무서|panic|crisis/i.test(text)) return 'panic';
+    if (/역사|전쟁|조선|중립|왕|군|histor/i.test(text)) return 'historical';
+    if (/뉴스|보도|인터뷰|기자|news/i.test(text)) return 'news-like';
+    if (/회의|협상|서류|계약|무역/.test(text)) return 'satirical';
+    return COUNTRYBALL_VISUAL_TONES[index % COUNTRYBALL_VISUAL_TONES.length] ?? 'comedy';
 }
 
 function hasConcreteCountryballAction(input: string): boolean {
@@ -1270,21 +1377,41 @@ function normalizeCountryballDialogueLines(
     const normalized = rawLines
         .map((line, lineIndex) => normalizeCountryballDialogueLine(line, lineIndex === 0 ? primary : secondary))
         .filter((line): line is Record<string, unknown> => Boolean(line))
-        .slice(0, 2);
-    if (normalized.length > 0) return normalized;
+        .slice(0, 4);
+    if (normalized.length >= 2 || index >= 10) return normalized;
 
     const topic = focusTerms.length > 0 ? focusTerms.slice(0, 2).join(' ') : '이 상황';
-    const text = index % 3 === 0 ? `${topic}? 못 지나가지!` : index % 3 === 1 ? `잠깐, 이거 뭐야?!` : `바로 움직인다!`;
+    const firstText = normalized[0] ?? {
+        country: countryNameFromCast(primary),
+        line: compactSpokenLine(index % 3 === 0 ? `${topic}? 못 지나가지!` : `바로 움직인다!`, 18),
+        tone: index % 2 === 0 ? '자신 있게' : '다급하게',
+        speaker: primary.speaker,
+        text: compactSpokenLine(index % 3 === 0 ? `${topic}? 못 지나가지!` : `바로 움직인다!`, 18),
+        emotion: index % 2 === 0 ? 'confident' : 'shocked',
+        delivery: 'short skit line',
+        meaning: '장면의 행동을 짧게 터뜨리는 대사',
+        voiceRole: primary.voiceRole,
+        captionStyle: 'bold',
+        durationSec: 1.2,
+        pauseAfterMs: 120,
+    };
+    const secondText =
+        index % 3 === 1 ? `잠깐, 이거 뭐야?!` : index % 3 === 2 ? `너 또 시작이야?` : `왜 이렇게 빠른데?`;
     return [
+        firstText,
         {
-            speaker: primary.speaker,
-            text: compactSpokenLine(text, 18),
-            emotion: index % 2 === 0 ? 'confident' : 'shocked',
-            delivery: 'short skit line',
-            meaning: '장면의 행동을 짧게 터뜨리는 대사',
-            voiceRole: primary.voiceRole,
+            country: countryNameFromCast(secondary),
+            line: compactSpokenLine(secondText, 18),
+            tone: '당황한 반응',
+            speaker: secondary.speaker,
+            text: compactSpokenLine(secondText, 18),
+            emotion: 'shocked',
+            delivery: 'quick reaction line',
+            meaning: '상대 국가볼이 상황에 즉시 반응한다',
+            voiceRole: secondary.voiceRole,
             captionStyle: 'bold',
             durationSec: 1.2,
+            pauseAfterMs: 0,
         },
     ];
 }
@@ -1297,6 +1424,9 @@ function normalizeCountryballDialogueLine(
         const text = compactSpokenLine(stripMarkdown(line), 18);
         if (!text) return undefined;
         return {
+            country: countryNameFromCast(fallbackSpeaker),
+            line: text,
+            tone: '즉각 반응',
             speaker: fallbackSpeaker.speaker,
             text,
             emotion: 'reactive',
@@ -1307,26 +1437,35 @@ function normalizeCountryballDialogueLine(
         };
     }
     if (!isRecord(line)) return undefined;
-    const text = optionalString(line['text']);
+    const text = optionalString(line['line']) ?? optionalString(line['text']);
     if (!text) return undefined;
     const speaker = optionalString(line['speaker']) ?? fallbackSpeaker.speaker;
+    const compactText = compactSpokenLine(stripMarkdown(text), 18);
+    const country =
+        optionalString(line['country']) ?? countryNameFromSpeaker(speaker) ?? countryNameFromCast(fallbackSpeaker);
     return {
         ...line,
+        country,
+        line: compactText,
+        tone: optionalString(line['tone']) ?? optionalString(line['delivery']) ?? '짧은 상황극 톤',
         speaker,
-        text: compactSpokenLine(stripMarkdown(text), 18),
+        text: compactText,
         emotion: optionalString(line['emotion']) ?? 'reactive',
         delivery: optionalString(line['delivery']) ?? 'short skit line',
         voiceRole: optionalString(line['voiceRole']) ?? fallbackSpeaker.voiceRole,
         captionStyle: optionalString(line['captionStyle']) ?? 'bold',
+        captionEmphasis: Array.isArray(line['captionEmphasis'])
+            ? line['captionEmphasis'].map(String).filter(Boolean).slice(0, 2)
+            : [],
         durationSec: typeof line['durationSec'] === 'number' ? Math.min(line['durationSec'], 1.8) : 1.2,
+        pauseAfterMs: typeof line['pauseAfterMs'] === 'number' ? Math.max(0, Math.min(line['pauseAfterMs'], 1200)) : 0,
     };
 }
 
-function normalizeCountryballNarratorText(
+function normalizeCountryballNarratorLine(
     scene: Record<string, unknown>,
-    primary: CountryballCastMember,
-    focusTerms: string[]
-): string {
+    index: number
+): Record<string, unknown> | undefined {
     const narratorLine = scene['narratorLine'];
     const narratorText =
         typeof narratorLine === 'string'
@@ -1335,11 +1474,111 @@ function normalizeCountryballNarratorText(
               ? optionalString(narratorLine['text'])
               : undefined;
     const current = narratorText ?? optionalString(scene['narration']);
-    if (current && !/공식 지표|보도에 따르면|연구에 따르면|설명하는|나레이션/.test(current)) {
-        return compactSpokenLine(stripMarkdown(current), 36);
+    if (!current) return undefined;
+    if (!isAllowedCountryballNarratorText(current, index)) return undefined;
+    return { text: compactSpokenLine(stripMarkdown(current), 28), voiceRole: 'narrator_short' };
+}
+
+function isAllowedCountryballNarratorText(input: string, index: number): boolean {
+    const text = stripMarkdown(input).trim();
+    if (!text || text.length > 32) return false;
+    if (/공식 지표|보도에 따르면|연구에 따르면|설명|해설|나레이션|보여줍니다|입니다/.test(text)) return false;
+    if (index === 0 || index >= 10) return true;
+    return /\d{4}년|\d+년\s*뒤|잠시\s*후|그때|며칠\s*후|엔딩/.test(text);
+}
+
+function formatCountryballNarration(
+    dialogueLines: Array<Record<string, unknown>>,
+    scene: Record<string, unknown>
+): string {
+    const dialogueText = dialogueLines
+        .map(line => {
+            const speaker = optionalString(line['speaker']) ?? optionalString(line['country']);
+            const text = optionalString(line['text']) ?? optionalString(line['line']);
+            if (!speaker || !text) return text ?? '';
+            return `${speaker}: ${text}`;
+        })
+        .filter(Boolean)
+        .join(' ');
+    if (dialogueText) return compactSpokenLine(dialogueText, 120);
+
+    const fallback =
+        optionalString(scene['caption']) ?? optionalString(scene['visualText']) ?? '국가볼들이 서로 눈치를 봅니다.';
+    return compactSpokenLine(`국가볼: ${fallback}`, 60);
+}
+
+function countryNameFromCast(member: CountryballCastMember): string {
+    return countryNameFromSpeaker(member.speaker) ?? member.countryCode;
+}
+
+function countryNameFromSpeaker(speaker: string): string | undefined {
+    const normalized = speaker.trim().toUpperCase();
+    const map: Record<string, string> = {
+        KR: '한국',
+        KOR: '한국',
+        한국볼: '한국',
+        JP: '일본',
+        JPN: '일본',
+        일본볼: '일본',
+        US: '미국',
+        USA: '미국',
+        미국볼: '미국',
+        CN: '중국',
+        CHN: '중국',
+        중국볼: '중국',
+        UK: '영국',
+        GB: '영국',
+        영국볼: '영국',
+        FR: '프랑스',
+        프랑스볼: '프랑스',
+        DE: '독일',
+        독일볼: '독일',
+        RU: '러시아',
+        러시아볼: '러시아',
+        외국볼: '외국',
+    };
+    return map[normalized] ?? map[speaker.trim()];
+}
+
+function normalizeCountryballExpressionChanges(
+    scene: Record<string, unknown>,
+    index: number,
+    primary: CountryballCastMember,
+    secondary: CountryballCastMember
+): string[] {
+    if (Array.isArray(scene['expressionChanges'])) {
+        const values = scene['expressionChanges'].map(String).map(stripMarkdown).filter(Boolean).slice(0, 4);
+        if (values.length > 0) return values;
     }
-    const topic = focusTerms.length > 0 ? focusTerms.slice(0, 2).join(' ') : '이 장면';
-    return compactSpokenLine(`${primary.speaker}이 ${topic}을 몸으로 보여줍니다.`, 36);
+    const templates = [
+        `${primary.speaker} 눈썹이 확 올라간다`,
+        `${secondary.speaker} 눈이 동그래진다`,
+        `${primary.speaker}가 씩 웃는다`,
+        `${secondary.speaker}가 식은땀을 흘린다`,
+    ];
+    return [templates[index % templates.length] ?? `${primary.speaker} 표정이 바뀐다`];
+}
+
+function normalizeCountryballSfx(scene: Record<string, unknown>, index: number): string[] {
+    if (Array.isArray(scene['sfx'])) {
+        const values = scene['sfx'].map(String).map(stripMarkdown).filter(Boolean).slice(0, 4);
+        if (values.length > 0) return values;
+    }
+    const sfx = ['빰!', '띵!', '끼익!', '웅성웅성', '쾅!', '삐비빅', '휙!', '정적'];
+    return [sfx[index % sfx.length] ?? '팍!'];
+}
+
+function normalizeCountryballEditBeat(scene: Record<string, unknown>, index: number): string {
+    const current = optionalString(scene['editBeat']);
+    if (current) return compactPromptText(stripMarkdown(current), 80);
+    const beats = [
+        '첫 대사에 빠른 줌인',
+        '상대 반응으로 즉시 컷',
+        '소품 클로즈업 후 표정 리액션',
+        '짧은 정적 뒤 효과음 컷',
+        'BGM을 반 박자 올리고 다음 장면 전환',
+    ];
+    return beats[index % beats.length] ?? '빠른 컷 전환';
 }
 
 function normalizeCountryballCharacters(input: unknown, cast: CountryballCastMember[]): Array<Record<string, unknown>> {
@@ -1369,9 +1608,13 @@ function normalizeCountryballImagePrompt(
         index: number;
         topTitle: string;
         mainCaption: string;
+        location: string;
+        visualTone: string;
         dramatizedAction: string;
+        screenAction: string;
         characters: Array<Record<string, unknown>>;
         dialogueLines: Array<Record<string, unknown>>;
+        expressionChanges: string[];
     }
 ): string {
     const existing = optionalString(scene['imagePrompt']);
@@ -1386,11 +1629,14 @@ function normalizeCountryballImagePrompt(
         'Final compositor will add the black top title band and yellow/white title text; do not render final-video title bands inside the image.',
         `Persistent topic title meaning for composition: "${input.topTitle}".`,
         `Upper/middle evidence/infographic comic panel: ${panelArchetype.prompt}.`,
+        `Location: ${input.location}.`,
+        `Visual tone: ${input.visualTone}.`,
         'Use dense readable situation props such as documents, newspaper cards, charts, red arrows, maps, factories, money bags, timelines, warning boards, reports, or props matching this specific scene.',
         'Lower foreground reaction stage with large round flag-faced countryballs, exaggerated eyes, sweat, tears, smirk, shock, pointing arms, holding reports, or arguing.',
         `Final compositor will overlay a bold yellow Korean dialogue/reaction caption with black outline, caption meaning: "${dialogueCaption}". Keep visual space for it but do not bake the final subtitle band into the image.`,
         `Cast: ${castLabel || 'countryballs'}.`,
-        `Visible action: ${input.dramatizedAction}.`,
+        `Visible action: ${input.screenAction || input.dramatizedAction}.`,
+        `Expression changes: ${input.expressionChanges.join(', ')}.`,
         'Do not make a plain narrator explainer or two countryballs talking on an empty background.',
     ].join(' ');
     if (!existing || /generic|explainer/i.test(existing)) return skitPrompt;
@@ -1402,7 +1648,9 @@ function countryballPanelArchetypeForIndex(index: number): { id: string; prompt:
 }
 
 function countryballDialogueCaption(dialogueLines: Array<Record<string, unknown>>, fallback: string): string {
-    const firstText = dialogueLines.map(line => optionalString(line['text'])).find(Boolean);
+    const firstText = dialogueLines
+        .map(line => optionalString(line['line']) ?? optionalString(line['text']))
+        .find(Boolean);
     return compactPromptText(firstText ?? fallback, 18);
 }
 
@@ -1439,7 +1687,7 @@ function ensureCountryballTopicCoverage(
             ...first,
             caption,
             visualText: caption,
-            narration: compactSpokenLine(`${coveragePhrase}, 바로 상황이 터집니다.`, 36),
+            narration: compactSpokenLine(`한국볼: ${coveragePhrase}? 바로 간다!`, 60),
             visual: {
                 ...visual,
                 mainCaption: caption,
@@ -1447,13 +1695,16 @@ function ensureCountryballTopicCoverage(
             dialogueLines: [
                 {
                     ...firstDialogue,
+                    country: optionalString(firstDialogue['country']) ?? '한국',
+                    line: compactSpokenLine(`${coveragePhrase}? 바로 간다!`, 18),
+                    tone: optionalString(firstDialogue['tone']) ?? '자신 있게',
                     speaker: optionalString(firstDialogue['speaker']) ?? '한국볼',
                     text: compactSpokenLine(`${coveragePhrase}? 바로 간다!`, 18),
-                    voiceRole: optionalString(firstDialogue['voiceRole']) ?? 'countryball.kr',
+                    voiceRole: optionalString(firstDialogue['voiceRole']) ?? 'main_confident',
                     captionStyle: optionalString(firstDialogue['captionStyle']) ?? 'bold',
                     durationSec: typeof firstDialogue['durationSec'] === 'number' ? firstDialogue['durationSec'] : 1.2,
                 },
-                ...dialogueLines.slice(1, 2),
+                ...dialogueLines.slice(1, 3),
             ],
         },
         ...scenes.slice(1),

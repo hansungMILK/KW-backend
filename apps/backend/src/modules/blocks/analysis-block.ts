@@ -19,7 +19,7 @@ const MAX_SCENE_COUNT = 15;
 const SAFETY_THRESHOLD = 70;
 const ADMISSION_SAFE_VIOLENCE_TERMS = ['학교폭력', '학폭', '폭력 조치사항'];
 const MIN_COUNTRYBALL_DRAMATIZED_ACTION_CHARS = 8;
-const MAX_COUNTRYBALL_DIALOGUE_LINES_PER_SCENE = 2;
+const MAX_COUNTRYBALL_DIALOGUE_LINES_PER_SCENE = 4;
 const MAX_COUNTRYBALL_DIALOGUE_TEXT_CHARS = 28;
 const MAX_COUNTRYBALL_DIALOGUE_DURATION_SEC = 2.8;
 
@@ -70,9 +70,17 @@ interface NormalizedScene {
     topTitle?: unknown;
     claimType?: unknown;
     sourceRefs?: unknown;
+    scenePurpose?: unknown;
+    location?: unknown;
+    visualTone?: unknown;
+    screenAction?: unknown;
     characters?: unknown;
     dramatizedAction?: unknown;
     dialogueLines?: unknown;
+    expressionChanges?: unknown;
+    sfx?: unknown;
+    editBeat?: unknown;
+    narratorLine?: unknown;
     factualClaim?: unknown;
     evidenceRefs?: unknown;
     keywords?: unknown;
@@ -80,8 +88,11 @@ interface NormalizedScene {
 }
 
 interface DialogueLine {
+    country?: string;
+    line?: string;
     speaker: string;
     text: string;
+    tone?: string;
     emotion?: string;
     captionStyle?: string;
     durationSec?: number;
@@ -165,6 +176,13 @@ function runRuleChecks(
         );
         const factualClaim = typeof scene.factualClaim === 'string' ? scene.factualClaim : '';
         const dramatizedAction = typeof scene.dramatizedAction === 'string' ? scene.dramatizedAction : '';
+        const scenePurpose = typeof scene.scenePurpose === 'string' ? scene.scenePurpose : '';
+        const screenAction = typeof scene.screenAction === 'string' ? scene.screenAction : dramatizedAction;
+        const visualTone = typeof scene.visualTone === 'string' ? scene.visualTone : '';
+        const expressionChanges = Array.isArray(scene.expressionChanges) ? scene.expressionChanges : [];
+        const sfx = Array.isArray(scene.sfx) ? scene.sfx : [];
+        const editBeat = typeof scene.editBeat === 'string' ? scene.editBeat : '';
+        const narratorLineText = readNarratorLineText(scene.narratorLine);
 
         if (topTitle) {
             topTitles.push({ sceneNumber: sceneNum, value: topTitle });
@@ -260,6 +278,51 @@ function runRuleChecks(
                 countryballSpecificActionSceneCount += 1;
             }
 
+            if (!scenePurpose.trim()) {
+                issues.push({
+                    severity: 'medium',
+                    message: '컨트리볼 장면에는 scenePurpose가 필요합니다.',
+                    sceneNumber: sceneNum,
+                });
+                qualityDeductions += 4;
+            }
+
+            if (!visualTone.trim()) {
+                issues.push({
+                    severity: 'medium',
+                    message: '컨트리볼 장면에는 visualTone이 필요합니다.',
+                    sceneNumber: sceneNum,
+                });
+                qualityDeductions += 4;
+            }
+
+            if (!screenAction.trim()) {
+                issues.push({
+                    severity: 'high',
+                    message: '컨트리볼 장면에는 실제 화면 행동(screenAction)이 필요합니다.',
+                    sceneNumber: sceneNum,
+                });
+                qualityDeductions += 10;
+            }
+
+            if (expressionChanges.length === 0 || sfx.length === 0 || !editBeat.trim()) {
+                issues.push({
+                    severity: 'medium',
+                    message: '컨트리볼 장면에는 표정 변화, SFX, 편집 지시가 필요합니다.',
+                    sceneNumber: sceneNum,
+                });
+                qualityDeductions += 4;
+            }
+
+            if (narratorLineText && isExplanatoryCountryballNarratorLine(narratorLineText)) {
+                issues.push({
+                    severity: 'high',
+                    message: '컨트리볼 narratorLine은 제목/시간점프/엔딩 메타만 허용되며 설명문을 대신하면 안 됩니다.',
+                    sceneNumber: sceneNum,
+                });
+                qualityDeductions += 10;
+            }
+
             if (dramatizedAction.trim().length < MIN_COUNTRYBALL_DRAMATIZED_ACTION_CHARS) {
                 issues.push({
                     severity: 'high',
@@ -272,7 +335,7 @@ function runRuleChecks(
             if (dialogueLines.length > MAX_COUNTRYBALL_DIALOGUE_LINES_PER_SCENE) {
                 issues.push({
                     severity: 'high',
-                    message: '컨트리볼 상황극 대사는 장면당 2줄 이하로 제한해야 합니다.',
+                    message: '컨트리볼 상황극 대사는 장면당 4줄 이하로 제한해야 합니다.',
                     sceneNumber: sceneNum,
                 });
                 qualityDeductions += 10;
@@ -282,7 +345,7 @@ function runRuleChecks(
                 if (!line.structured || !line.speaker.trim() || !line.text.trim()) {
                     issues.push({
                         severity: 'high',
-                        message: '컨트리볼 대사는 dialogueLines의 speaker/text 구조로 작성해야 합니다.',
+                        message: '컨트리볼 대사는 dialogueLines의 country/line 및 speaker/text 구조로 작성해야 합니다.',
                         sceneNumber: sceneNum,
                     });
                     qualityDeductions += 10;
@@ -632,9 +695,26 @@ function normalizeDialogueLines(input: unknown): DialogueLine[] {
                     structured: false,
                 };
             }
+            const text =
+                typeof item['line'] === 'string'
+                    ? item['line'].trim()
+                    : typeof item['text'] === 'string'
+                      ? item['text'].trim()
+                      : '';
+            const speaker =
+                typeof item['speaker'] === 'string'
+                    ? item['speaker'].trim()
+                    : typeof item['country'] === 'string'
+                      ? item['country'].trim()
+                      : '';
             return {
-                speaker: typeof item['speaker'] === 'string' ? item['speaker'].trim() : '',
-                text: typeof item['text'] === 'string' ? item['text'].trim() : '',
+                ...(typeof item['country'] === 'string' && item['country'].trim()
+                    ? { country: item['country'].trim() }
+                    : {}),
+                ...(typeof item['line'] === 'string' && item['line'].trim() ? { line: item['line'].trim() } : {}),
+                speaker,
+                text,
+                ...(typeof item['tone'] === 'string' && item['tone'].trim() ? { tone: item['tone'].trim() } : {}),
                 ...(typeof item['emotion'] === 'string' && item['emotion'].trim()
                     ? { emotion: item['emotion'].trim() }
                     : {}),
@@ -652,6 +732,19 @@ function normalizeDialogueLines(input: unknown): DialogueLine[] {
 
 function isNarratorSpeaker(input: string): boolean {
     return /^(narrator|voiceover|voice-over|해설|나레이터|내레이션|화자)$/i.test(input.trim());
+}
+
+function readNarratorLineText(input: unknown): string {
+    if (typeof input === 'string') return input.trim();
+    if (!isRecord(input)) return '';
+    return typeof input['text'] === 'string' ? input['text'].trim() : '';
+}
+
+function isExplanatoryCountryballNarratorLine(input: string): boolean {
+    if (input.length > 32) return true;
+    return /이\s*장면|상황극|흐름|설명|해설|나레이션|보여줍니다|입니다|공식\s*지표|보도에\s*따르면|연구에\s*따르면/.test(
+        input
+    );
 }
 
 // ── AI enhancement ────────────────────────────────────────────────────────────

@@ -356,9 +356,7 @@ function buildCountryballVoiceSegments(
 
         if (dialogueSegments.length > 0) {
             segments.push(...dialogueSegments);
-            const narratorSegment =
-                buildCountryballNarratorSegment(scene.narratorLine, sceneNumber) ??
-                buildCountryballNarratorSegment(scene.narration, sceneNumber);
+            const narratorSegment = buildCountryballNarratorSegment(scene.narratorLine, sceneNumber);
             if (narratorSegment) segments.push(narratorSegment);
             return;
         }
@@ -408,13 +406,20 @@ function buildCountryballDialogueSegments(input: unknown, sceneNumber: number): 
         if (line == null || typeof line !== 'object' || Array.isArray(line)) continue;
 
         const item = line as Record<string, unknown>;
-        const text = normalizeSubtitleText(item['text']);
+        const text = normalizeSubtitleText(typeof item['line'] === 'string' ? item['line'] : item['text']);
         if (!text) continue;
 
-        const speaker = typeof item['speaker'] === 'string' ? formatDialogueSpeaker(item['speaker']) : undefined;
+        const speaker =
+            typeof item['speaker'] === 'string'
+                ? formatDialogueSpeaker(item['speaker'])
+                : typeof item['country'] === 'string'
+                  ? formatDialogueSpeaker(item['country'])
+                  : undefined;
         const voiceRole =
             normalizeVoiceRole(item['voiceRole']) ||
-            inferCountryballVoiceRole(typeof item['speaker'] === 'string' ? item['speaker'] : '');
+            inferCountryballVoiceRole(
+                typeof item['speaker'] === 'string' ? item['speaker'] : String(item['country'] ?? '')
+            );
 
         segments.push({
             sceneNumber,
@@ -431,6 +436,7 @@ function buildCountryballDialogueSegments(input: unknown, sceneNumber: number): 
 function buildCountryballNarratorSegment(input: unknown, sceneNumber: number): NarrationSegment | undefined {
     if (typeof input === 'string') {
         const text = normalizeSubtitleText(input);
+        if (!isAllowedCountryballNarratorTts(text)) return undefined;
         return text
             ? {
                   sceneNumber,
@@ -446,6 +452,7 @@ function buildCountryballNarratorSegment(input: unknown, sceneNumber: number): N
     const item = input as Record<string, unknown>;
     const text = normalizeSubtitleText(item['text']);
     if (!text) return undefined;
+    if (!isAllowedCountryballNarratorTts(text)) return undefined;
     const voiceRole = normalizeVoiceRole(item['voiceRole']) || 'narrator';
     return {
         sceneNumber,
@@ -454,6 +461,11 @@ function buildCountryballNarratorSegment(input: unknown, sceneNumber: number): N
         voiceRole,
         voiceId: voiceIdForCountryballRole(voiceRole),
     };
+}
+
+function isAllowedCountryballNarratorTts(text: string): boolean {
+    if (!text || text.length > 32) return false;
+    return !/이\s*장면|상황극|흐름|설명|해설|나레이션|보여줍니다|입니다/.test(text);
 }
 
 function isCountryballMetadata(metadata: Record<string, unknown> | undefined): boolean {
@@ -481,9 +493,19 @@ function formatDialogueLines(input: unknown): string {
             if (typeof line === 'string') return line.trim();
             if (line == null || typeof line !== 'object' || Array.isArray(line)) return '';
             const item = line as Record<string, unknown>;
-            const text = typeof item['text'] === 'string' ? item['text'].trim() : '';
+            const text =
+                typeof item['line'] === 'string'
+                    ? item['line'].trim()
+                    : typeof item['text'] === 'string'
+                      ? item['text'].trim()
+                      : '';
             if (!text) return '';
-            const speaker = typeof item['speaker'] === 'string' ? formatDialogueSpeaker(item['speaker']) : '';
+            const speaker =
+                typeof item['speaker'] === 'string'
+                    ? formatDialogueSpeaker(item['speaker'])
+                    : typeof item['country'] === 'string'
+                      ? formatDialogueSpeaker(item['country'])
+                      : '';
             return speaker ? `${speaker}: ${text}` : text;
         })
         .filter(Boolean)
@@ -518,6 +540,15 @@ function normalizeVoiceRole(input: unknown): string | undefined {
 
     const map: Record<string, string> = {
         narrator: 'narrator',
+        narrator_short: 'narrator',
+        'narrator-short': 'narrator',
+        main_tired: 'main_tired',
+        main_confident: 'main_confident',
+        rival_smug: 'rival_smug',
+        rival_angry: 'rival_angry',
+        neutral_serious: 'neutral_serious',
+        panic_high: 'panic_high',
+        old_teacher: 'old_teacher',
         'countryball.kr': 'countryball.kr',
         'countryball.kor': 'countryball.kr',
         'countryball.jp': 'countryball.jp',
@@ -556,6 +587,20 @@ function inferCountryballVoiceRole(speaker: string): string {
 
 function voiceIdForCountryballRole(role: string | undefined): string {
     switch (role) {
+        case 'main_tired':
+            return env.countryballTtsVoiceMainTired;
+        case 'main_confident':
+            return env.countryballTtsVoiceMainConfident;
+        case 'rival_smug':
+            return env.countryballTtsVoiceRivalSmug;
+        case 'rival_angry':
+            return env.countryballTtsVoiceRivalAngry;
+        case 'neutral_serious':
+            return env.countryballTtsVoiceNeutralSerious;
+        case 'panic_high':
+            return env.countryballTtsVoicePanicHigh;
+        case 'old_teacher':
+            return env.countryballTtsVoiceOldTeacher;
         case 'countryball.kr':
             return env.countryballTtsVoiceKr;
         case 'countryball.jp':

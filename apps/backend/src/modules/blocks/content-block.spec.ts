@@ -739,11 +739,16 @@ describe('contentBlock', () => {
         expect(request?.systemPrompt).toContain('Countryball situation reenactment');
         expect(request?.systemPrompt).toContain('factualClaim');
         expect(request?.systemPrompt).toContain('dramatizedAction');
-        expect(request?.systemPrompt).toContain('speaker');
-        expect(request?.systemPrompt).toContain('durationSec');
-        expect(request?.systemPrompt).toContain('2 dialogue lines');
+        expect(request?.systemPrompt).toContain('scenePurpose');
+        expect(request?.systemPrompt).toContain('visualTone');
+        expect(request?.systemPrompt).toContain('country');
+        expect(request?.systemPrompt).toContain('line');
+        expect(request?.systemPrompt).toContain('captionEmphasis');
+        expect(request?.systemPrompt).toContain('pauseAfterMs');
+        expect(request?.systemPrompt).toContain('role-based voiceRole');
+        expect(request?.systemPrompt).toContain('Do not force a fixed plot pattern');
         expect(request?.systemPrompt).toContain('Do not write narrator-only explainer scenes');
-        expect(request?.systemPrompt).toContain('action beat -> character dialogue -> narratorLine');
+        expect(request?.systemPrompt).not.toContain('action beat -> character dialogue -> narratorLine');
         expect(request?.systemPrompt).toContain('Do not default to source-attribution prose');
         expect(request?.systemPrompt).toContain('Put the user requested concrete nouns');
         expect(request?.systemPrompt).toContain('top black title band');
@@ -829,8 +834,27 @@ describe('contentBlock', () => {
         const style = metadata['style'] as Record<string, unknown>;
 
         expect(scenes[0]).toMatchObject({
+            scenePurpose: expect.any(String),
+            screenAction: expect.stringMatching(/한국|한국볼|KR|골목|스마트폰|가리키|당황|놀라|걷/),
+            visualTone: expect.stringMatching(
+                /comedy|serious|panic|awkward|satirical|historical|news-like|chaotic|calm/
+            ),
             dramatizedAction: expect.stringMatching(/한국|한국볼|KR|골목|스마트폰|가리키|당황|놀라|걷/),
-            dialogueLines: [expect.objectContaining({ speaker: expect.any(String), text: expect.any(String) })],
+            dialogueLines: expect.arrayContaining([
+                expect.objectContaining({
+                    country: expect.any(String),
+                    line: expect.any(String),
+                    speaker: expect.any(String),
+                    text: expect.any(String),
+                    tone: expect.any(String),
+                    voiceRole: expect.stringMatching(
+                        /main_tired|main_confident|rival_smug|rival_angry|neutral_serious|panic_high|old_teacher/
+                    ),
+                }),
+            ]),
+            expressionChanges: expect.arrayContaining([expect.any(String)]),
+            sfx: expect.arrayContaining([expect.any(String)]),
+            editBeat: expect.any(String),
             visual: expect.objectContaining({
                 layout: 'countryball-infographic-skit',
                 topTitleBand: 'black-yellow-white',
@@ -848,6 +872,8 @@ describe('contentBlock', () => {
         expect(String(scenes[0]?.['imagePrompt'])).toContain('do not render final-video title bands');
         expect(String(scenes[0]?.['imagePrompt'])).toContain('Upper/middle evidence/infographic comic panel');
         expect(String(scenes[0]?.['imagePrompt'])).toContain('Lower foreground reaction stage');
+        expect(String(scenes[0]?.['imagePrompt'])).toContain('Visual tone:');
+        expect(String(scenes[0]?.['imagePrompt'])).toContain('Expression changes:');
         expect(String(scenes[0]?.['imagePrompt'])).toContain(
             'bold yellow Korean dialogue/reaction caption with black outline'
         );
@@ -857,6 +883,8 @@ describe('contentBlock', () => {
         expect(JSON.stringify(scenes)).toContain('밤거리');
         expect(JSON.stringify(scenes)).toContain('치한');
         expect(JSON.stringify(scenes)).not.toContain('상황극을 재연하는 설명 장면');
+        expect(scenes.filter(scene => scene['narratorLine']).length).toBeLessThanOrEqual(2);
+        expect(String(scenes[0]?.['narration'])).toContain(':');
 
         const analysis = await analysisBlock.execute({
             normalizedScenes: scenes,
