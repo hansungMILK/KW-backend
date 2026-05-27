@@ -31,6 +31,13 @@ const COST_ESTIMATES: Record<AllowedBlockType, number> = {
     'buffer-delay': 0,
     'text-transform': 0,
     search: 0.01,
+    'countryball-brief': 0.03,
+    'countryball-script': 0.16,
+    'countryball-data': 0.01,
+    'countryball-analysis': 0.04,
+    'countryball-image': 0,
+    'countryball-tts': 0.1,
+    'countryball-video': 0.2,
     content: 0.03,
     data: 0.01,
     analysis: 0.01,
@@ -384,6 +391,15 @@ function buildAiSelectedGenericWorkflow(
     };
 
     if (decision.recipeId === 'shorts.info.v1') {
+        const contentProfile = buildContentProfilePreferences({
+            userMessage,
+            outputType: 'video',
+            hasMediaVideo: true,
+            hasMediaImage: true,
+        });
+        if (contentProfile.contentProfileId === 'shorts.countryball.v1') {
+            return buildCountryballShortsWorkflow(userMessage, decision, baseConfig, requestSpec);
+        }
         return buildWorkflowFromRecipe(decision.recipeId, userMessage, {
             summary: buildAiRecipeSummary(
                 decision,
@@ -436,6 +452,97 @@ function buildAiSelectedGenericWorkflow(
     }
 
     return null;
+}
+
+function buildCountryballShortsWorkflow(
+    userMessage: string,
+    decision: GenericRequestDecision,
+    baseConfig: Record<string, unknown>,
+    requestSpec: RequestSpec
+): ClaudeProposalOutput {
+    const summary = buildAiRecipeSummary(
+        decision,
+        '컨트리볼 요청을 자료 수집, 전용 기획 브리프, 상황극 대본, 장면 구성, 이미지와 TTS 병렬 생성, 영상 합성까지 이어지는 워크플로우로 처리합니다.'
+    );
+    const countryballRecipe = DEFAULT_WORKFLOW_PACK_REGISTRY.getRecipe('countryball.shorts.v1');
+    return {
+        plan: {
+            goal: `${userMessage.trim() || '컨트리볼 쇼츠'} 요청을 컨트리볼 상황극 쇼츠로 처리한다`,
+            outputType: 'video',
+            planType: 'pipeline',
+            requiredCapabilities: [
+                'source.collect',
+                'countryball.brief',
+                'countryball.script',
+                'countryball.data',
+                'countryball.analysis',
+                'countryball.image',
+                'countryball.tts',
+                'countryball.video',
+                'metadata.generate',
+            ],
+            selectedBlocks: [
+                { blockType: 'search', reason: '요청 소재와 선택 가능한 근거를 수집한다' },
+                {
+                    blockType: 'countryball-brief',
+                    reason: '컨트리볼 상황극의 소재, 갈등, 등장 국가, 장면 흐름을 정리한다',
+                },
+                { blockType: 'countryball-script', reason: '브리프를 바탕으로 국가볼 대화 상황극 대본을 작성한다' },
+                { blockType: 'countryball-data', reason: '컨트리볼 장면 계약을 구조화한다' },
+                { blockType: 'countryball-analysis', reason: '컨트리볼 대화 중심성과 형식을 검수한다' },
+                { blockType: 'countryball-image', reason: '컨트리볼 장면 이미지를 생성한다' },
+                { blockType: 'countryball-tts', reason: '국가볼 대사 음성을 생성한다' },
+                { blockType: 'countryball-video', reason: '이미지와 음성을 최종 쇼츠 영상으로 합성한다' },
+                { blockType: 'integration', reason: '제목/설명/태그를 생성한다' },
+            ],
+            rejectedBlocks: countryballRecipe ? buildGenericRejectedBlocks(countryballRecipe) : [],
+            assumptions: ['사용자가 컨트리볼/국가볼 형식을 명시했으므로 전용 브리프를 추가한다'],
+        },
+        blocks: [
+            { type: 'search', label: '자료 수집', config: { query: userMessage.trim(), requestSpec } },
+            {
+                type: 'countryball-brief',
+                label: '컨트리볼 기획 브리프',
+                config: { topic: userMessage.trim(), userRequest: userMessage.trim(), requestSpec },
+            },
+            { type: 'countryball-script', label: '컨트리볼 대본 생성', config: baseConfig },
+            {
+                type: 'countryball-data',
+                label: '컨트리볼 데이터 정규화',
+                config: { requestUnderstanding: decision.understanding },
+            },
+            {
+                type: 'countryball-analysis',
+                label: '컨트리볼 품질 검수',
+                config: { requestUnderstanding: decision.understanding },
+            },
+            {
+                type: 'countryball-image',
+                label: '컨트리볼 이미지 생성',
+                config: { requestUnderstanding: decision.understanding },
+            },
+            { type: 'countryball-tts', label: '컨트리볼 음성 생성', config: { lang: 'ko' } },
+            {
+                type: 'countryball-video',
+                label: '컨트리볼 영상 합성',
+                config: { format: '9:16', backgroundMusic: true },
+            },
+            { type: 'integration', label: '메타데이터 생성', config: {} },
+        ],
+        edges: [
+            { from: 0, to: 1 },
+            { from: 1, to: 2 },
+            { from: 2, to: 3 },
+            { from: 3, to: 4 },
+            { from: 4, to: 5 },
+            { from: 4, to: 6 },
+            { from: 5, to: 7 },
+            { from: 6, to: 7 },
+            { from: 7, to: 8 },
+        ],
+        estimatedCostUsd: 0.93,
+        summary,
+    };
 }
 
 function buildAiRecipeSummary(decision: GenericRequestDecision, fallback: string): string {
@@ -686,8 +793,11 @@ function buildProposalResult(
     contentProfile: ContentProfilePreferences,
     extraMetadata: Record<string, unknown> = {}
 ): ProposalResult {
-    const mediaImageBlock = data.blocks.find(block => block.type === 'media-image');
-    const sceneCount = resolveProposalSceneCount(userMessage, data);
+    const mediaImageBlock = data.blocks.find(
+        block => block.type === 'media-image' || block.type === 'countryball-image'
+    );
+    const sceneCountInfo = resolveProposalSceneCount(userMessage, data);
+    const sceneCount = sceneCountInfo.count;
     const textAndOtherEstimatedCostUsd = estimateNonImageCostUsd(data.blocks);
     const imageGeneration = mediaImageBlock
         ? buildImageGenerationPreferences({
@@ -697,6 +807,7 @@ function buildProposalResult(
               imageStyleId: mediaImageBlock.config?.['imageStyleId'] ?? mediaImageBlock.config?.['style'],
               format: resolveImageGenerationFormat(contentProfile, mediaImageBlock.config),
               textAndOtherEstimatedCostUsd,
+              sceneCountSelectionMode: sceneCountInfo.mode,
           })
         : undefined;
 
@@ -704,7 +815,15 @@ function buildProposalResult(
         const config =
             block.type === 'media-image' && imageGeneration
                 ? enrichImageNodeConfig(block.config, imageGeneration)
-                : block.config;
+                : block.type === 'countryball-image' && imageGeneration
+                  ? {
+                        ...block.config,
+                        imageModel: 'gpt-image-2',
+                        imageQuality: imageGeneration.imageQuality,
+                        imageStyleId: imageGeneration.imageStyleId,
+                        imageStyleLabel: imageGeneration.imageStyleLabel,
+                    }
+                  : block.config;
         return {
             id: generateNumericId(),
             blockId: `blk-${block.type}`,
@@ -730,7 +849,7 @@ function buildProposalResult(
     const breakdown = data.blocks.map(b => ({
         blockType: b.type,
         amount:
-            b.type === 'media-image'
+            b.type === 'media-image' || b.type === 'countryball-image'
                 ? estimateGptImage2CostUsd(sceneCount, imageGeneration?.imageQuality)
                 : (COST_ESTIMATES[b.type] ?? 0.01),
     }));
@@ -806,14 +925,27 @@ function readNestedStringArray(record: Record<string, unknown>, path: string[]):
 function resolveProposalSceneCount(
     userMessage: string,
     data: { plan: { outputType: string }; blocks: Array<{ type: string; config?: Record<string, unknown> }> }
-): number {
+): { count: number; mode: 'ai-recommended' | 'user-selected' | 'fixed' } {
     const explicit = detectRequestedSceneCount(userMessage);
-    if (explicit) return explicit;
-    if (data.plan.outputType === 'video' || data.blocks.some(block => block.type === 'media-video')) {
-        return DEFAULT_SHORTS_SCENE_COUNT;
+    if (explicit) return { count: explicit, mode: 'user-selected' };
+    const countryballScriptBlock = data.blocks.find(block => block.type === 'countryball-script');
+    const countryballScriptCount = readConfiguredSceneCount(countryballScriptBlock?.config);
+    if (countryballScriptCount) {
+        return { count: countryballScriptCount, mode: 'ai-recommended' };
     }
-    const mediaImageBlock = data.blocks.find(block => block.type === 'media-image');
-    return getMediaImageSceneCount(mediaImageBlock?.config);
+    if (data.blocks.some(block => block.type === 'countryball-script' || block.type === 'countryball-image')) {
+        return { count: DEFAULT_SHORTS_SCENE_COUNT, mode: 'ai-recommended' };
+    }
+    if (
+        data.plan.outputType === 'video' ||
+        data.blocks.some(block => block.type === 'media-video' || block.type === 'countryball-video')
+    ) {
+        return { count: DEFAULT_SHORTS_SCENE_COUNT, mode: 'fixed' };
+    }
+    const mediaImageBlock = data.blocks.find(
+        block => block.type === 'media-image' || block.type === 'countryball-image'
+    );
+    return { count: getMediaImageSceneCount(mediaImageBlock?.config), mode: 'fixed' };
 }
 
 function detectRequestedSceneCount(userMessage: string): number | undefined {
@@ -824,8 +956,12 @@ function detectRequestedSceneCount(userMessage: string): number | undefined {
 }
 
 function getMediaImageSceneCount(config: Record<string, unknown> | undefined): number {
+    return readConfiguredSceneCount(config) ?? DEFAULT_SHORTS_SCENE_COUNT;
+}
+
+function readConfiguredSceneCount(config: Record<string, unknown> | undefined): number | undefined {
     const count = Number(config?.['count'] ?? config?.['scenes'] ?? config?.['sceneCount'] ?? config?.['frameCount']);
-    return Number.isFinite(count) && count > 0 ? Math.floor(count) : DEFAULT_SHORTS_SCENE_COUNT;
+    return Number.isFinite(count) && count > 0 ? Math.floor(count) : undefined;
 }
 
 function resolveImageGenerationFormat(

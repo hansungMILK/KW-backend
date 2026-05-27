@@ -57,10 +57,12 @@ describe('workflow pack registry', () => {
             'text',
             'media',
             'shorts',
+            'countryball-shorts',
             'longform',
         ]);
         expect(registry.getPack('media')?.kind).toBe('capability');
         expect(registry.getPack('shorts')?.kind).toBe('recipe');
+        expect(registry.getPack('countryball-shorts')?.kind).toBe('recipe');
         expect(registry.getPack('longform')?.kind).toBe('recipe');
 
         expect(registry.getBlock('media-image')?.orchestrator.capabilities).toContain('image.generate');
@@ -94,6 +96,26 @@ describe('workflow pack registry', () => {
             'media-video',
             'integration',
         ]);
+    });
+
+    it('registers Countryball Shorts as an isolated recipe pack', () => {
+        const registry = createDefaultWorkflowPackRegistry();
+        const recipe = registry.getRecipe('countryball.shorts.v1');
+
+        expect(recipe?.defaultBlocks.map(item => item.blockType)).toEqual([
+            'search',
+            'countryball-brief',
+            'countryball-script',
+            'countryball-data',
+            'countryball-analysis',
+            'countryball-image',
+            'countryball-tts',
+            'countryball-video',
+            'integration',
+        ]);
+        expect(recipe?.defaultBlocks.map(item => item.blockType)).not.toContain('content');
+        expect(recipe?.defaultBlocks.map(item => item.blockType)).not.toContain('media-tts');
+        expect(recipe?.defaultBlocks.map(item => item.blockType)).not.toContain('media-video');
     });
 
     it('registers standalone image and blog writing recipes without video blocks', () => {

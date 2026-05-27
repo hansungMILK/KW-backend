@@ -33,6 +33,7 @@ export type ImageGenerationPreferences = {
     imageEstimatedCostUsd: number;
     textAndOtherEstimatedCostUsd: number;
     estimatedTotalCostUsd: number;
+    sceneCountSelectionMode?: 'ai-recommended' | 'user-selected' | 'fixed';
     styleOptions: Array<Pick<ImageStylePreset, 'id' | 'label' | 'description'>>;
     sceneCountOptions: Array<{
         count: number;
@@ -185,6 +186,7 @@ export const buildImageGenerationPreferences = (params: {
     imageStyleId?: unknown;
     format?: ImageGenerationFormat;
     textAndOtherEstimatedCostUsd?: number;
+    sceneCountSelectionMode?: 'ai-recommended' | 'user-selected' | 'fixed';
 }): ImageGenerationPreferences => {
     const format = params.format ?? 'shorts-frame';
     const imageQuality = normalizeImageQuality(params.imageQuality);
@@ -205,6 +207,7 @@ export const buildImageGenerationPreferences = (params: {
         imageEstimatedCostUsd,
         textAndOtherEstimatedCostUsd,
         estimatedTotalCostUsd: roundUsd(imageEstimatedCostUsd + textAndOtherEstimatedCostUsd),
+        ...(params.sceneCountSelectionMode ? { sceneCountSelectionMode: params.sceneCountSelectionMode } : {}),
         styleOptions: IMAGE_STYLE_PRESETS.map(style => ({
             id: style.id,
             label: style.label,

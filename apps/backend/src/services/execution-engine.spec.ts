@@ -583,6 +583,78 @@ describe('executionEngine asset publication', () => {
         );
     });
 
+    it('uses the image batch timeout budget for countryball-image nodes', async () => {
+        vi.useFakeTimers();
+        node = {
+            ...node,
+            blockType: 'countryball-image',
+            inputPayload: {
+                normalizedScenes: Array.from({ length: 12 }, (_, index) => ({ sceneNumber: index + 1 })),
+            },
+        } as RunNode;
+        executeBlock.mockImplementationOnce(() => new Promise(() => undefined));
+
+        const execution = executionEngine.handleNodeExecution(run.runId, node.nodeId, 'exec-countryball-image-timeout');
+        await vi.advanceTimersByTimeAsync(0);
+        await vi.runOnlyPendingTimersAsync();
+        await execution;
+
+        expect(sequence).toContain('node.status:FAILED');
+        expect(updateRunNodeStatus).toHaveBeenCalledWith(
+            run.runId,
+            node.nodeId,
+            'FAILED',
+            expect.objectContaining({
+                errorCode: 'NODE_TIMEOUT',
+                errorMessage: expect.stringContaining('countryball-image execution timed out'),
+            })
+        );
+    });
+
+    it('uses the TTS timeout budget for countryball-tts nodes', async () => {
+        vi.useFakeTimers();
+        node = { ...node, blockType: 'countryball-tts' } as RunNode;
+        executeBlock.mockImplementationOnce(() => new Promise(() => undefined));
+
+        const execution = executionEngine.handleNodeExecution(run.runId, node.nodeId, 'exec-countryball-tts-timeout');
+        await vi.advanceTimersByTimeAsync(0);
+        await vi.runOnlyPendingTimersAsync();
+        await execution;
+
+        expect(sequence).toContain('node.status:FAILED');
+        expect(updateRunNodeStatus).toHaveBeenCalledWith(
+            run.runId,
+            node.nodeId,
+            'FAILED',
+            expect.objectContaining({
+                errorCode: 'NODE_TIMEOUT',
+                errorMessage: expect.stringContaining('countryball-tts execution timed out'),
+            })
+        );
+    });
+
+    it('uses the media-video timeout budget for countryball-video nodes', async () => {
+        vi.useFakeTimers();
+        node = { ...node, blockType: 'countryball-video' } as RunNode;
+        executeBlock.mockImplementationOnce(() => new Promise(() => undefined));
+
+        const execution = executionEngine.handleNodeExecution(run.runId, node.nodeId, 'exec-countryball-video-timeout');
+        await vi.advanceTimersByTimeAsync(0);
+        await vi.runOnlyPendingTimersAsync();
+        await execution;
+
+        expect(sequence).toContain('node.status:FAILED');
+        expect(updateRunNodeStatus).toHaveBeenCalledWith(
+            run.runId,
+            node.nodeId,
+            'FAILED',
+            expect.objectContaining({
+                errorCode: 'NODE_TIMEOUT',
+                errorMessage: expect.stringContaining('countryball-video execution timed out after 900 seconds'),
+            })
+        );
+    });
+
     it('uses the media-video timeout budget for longform-render nodes', async () => {
         vi.useFakeTimers();
         node = { ...node, blockType: 'longform-render' };

@@ -22,6 +22,8 @@ const readNumberEnv = (name: string, fallback: number, min = 0): number => {
     return Math.max(min, value);
 };
 
+const defaultElevenLabsVoiceId = readEnv('ELEVENLABS_TTS_VOICE_ID');
+
 /**
  * Keep backend runtime configuration in one place.
  * Add new environment variables here first.
@@ -73,43 +75,15 @@ export const env = {
     openaiTtsVoice: readEnv('OPENAI_TTS_VOICE', 'nova'),
     openaiTtsTimeoutMs: readIntEnv('OPENAI_TTS_TIMEOUT_MS', 120000, 1),
     openaiTtsMaxAttempts: readIntEnv('OPENAI_TTS_MAX_ATTEMPTS', 1, 1),
-    elevenLabsTtsVoiceId: readEnv('ELEVENLABS_TTS_VOICE_ID', 'pNInz6obpgDQGcFmaJgB'),
-    countryballTtsVoiceNarrator: readEnv(
-        'COUNTRYBALL_TTS_VOICE_NARRATOR',
-        readEnv('ELEVENLABS_TTS_VOICE_ID', 'pNInz6obpgDQGcFmaJgB')
-    ),
-    countryballTtsVoiceKr: readEnv('COUNTRYBALL_TTS_VOICE_KR', 'TxGEqnHWrfWFTfGW9XjX'),
-    countryballTtsVoiceJp: readEnv('COUNTRYBALL_TTS_VOICE_JP', 'EXAVITQu4vr4xnSDxMaL'),
-    countryballTtsVoiceUs: readEnv('COUNTRYBALL_TTS_VOICE_US', 'VR6AewLTigWG4xSOukaG'),
-    countryballTtsVoiceCn: readEnv('COUNTRYBALL_TTS_VOICE_CN', 'ErXwobaYiN019PkySvjV'),
-    countryballTtsVoiceMainTired: readEnv(
-        'COUNTRYBALL_TTS_VOICE_MAIN_TIRED',
-        readEnv('COUNTRYBALL_TTS_VOICE_KR', 'TxGEqnHWrfWFTfGW9XjX')
-    ),
-    countryballTtsVoiceMainConfident: readEnv(
-        'COUNTRYBALL_TTS_VOICE_MAIN_CONFIDENT',
-        readEnv('COUNTRYBALL_TTS_VOICE_KR', 'TxGEqnHWrfWFTfGW9XjX')
-    ),
-    countryballTtsVoiceRivalSmug: readEnv(
-        'COUNTRYBALL_TTS_VOICE_RIVAL_SMUG',
-        readEnv('COUNTRYBALL_TTS_VOICE_US', 'VR6AewLTigWG4xSOukaG')
-    ),
-    countryballTtsVoiceRivalAngry: readEnv(
-        'COUNTRYBALL_TTS_VOICE_RIVAL_ANGRY',
-        readEnv('COUNTRYBALL_TTS_VOICE_JP', 'EXAVITQu4vr4xnSDxMaL')
-    ),
-    countryballTtsVoiceNeutralSerious: readEnv(
-        'COUNTRYBALL_TTS_VOICE_NEUTRAL_SERIOUS',
-        readEnv('COUNTRYBALL_TTS_VOICE_US', 'VR6AewLTigWG4xSOukaG')
-    ),
-    countryballTtsVoicePanicHigh: readEnv(
-        'COUNTRYBALL_TTS_VOICE_PANIC_HIGH',
-        readEnv('COUNTRYBALL_TTS_VOICE_CN', 'ErXwobaYiN019PkySvjV')
-    ),
-    countryballTtsVoiceOldTeacher: readEnv(
-        'COUNTRYBALL_TTS_VOICE_OLD_TEACHER',
-        readEnv('COUNTRYBALL_TTS_VOICE_NARRATOR', readEnv('ELEVENLABS_TTS_VOICE_ID', 'pNInz6obpgDQGcFmaJgB'))
-    ),
+    elevenLabsTtsVoiceId: defaultElevenLabsVoiceId,
+    countryballTtsVoiceNarrator: readEnv('COUNTRYBALL_TTS_VOICE_NARRATOR', defaultElevenLabsVoiceId),
+    countryballTtsVoiceMainTired: readEnv('COUNTRYBALL_TTS_VOICE_MAIN_TIRED', defaultElevenLabsVoiceId),
+    countryballTtsVoiceMainConfident: readEnv('COUNTRYBALL_TTS_VOICE_MAIN_CONFIDENT', defaultElevenLabsVoiceId),
+    countryballTtsVoiceRivalSmug: readEnv('COUNTRYBALL_TTS_VOICE_RIVAL_SMUG', defaultElevenLabsVoiceId),
+    countryballTtsVoiceRivalAngry: readEnv('COUNTRYBALL_TTS_VOICE_RIVAL_ANGRY', defaultElevenLabsVoiceId),
+    countryballTtsVoiceNeutralSerious: readEnv('COUNTRYBALL_TTS_VOICE_NEUTRAL_SERIOUS', defaultElevenLabsVoiceId),
+    countryballTtsVoicePanicHigh: readEnv('COUNTRYBALL_TTS_VOICE_PANIC_HIGH', defaultElevenLabsVoiceId),
+    countryballTtsVoiceOldTeacher: readEnv('COUNTRYBALL_TTS_VOICE_OLD_TEACHER', defaultElevenLabsVoiceId),
     elevenLabsTtsModel: readEnv('ELEVENLABS_TTS_MODEL', 'eleven_flash_v2_5'),
     elevenLabsTtsOutputFormat: readEnv('ELEVENLABS_TTS_OUTPUT_FORMAT', 'mp3_44100_128'),
     elevenLabsTtsTimeoutMs: readIntEnv('ELEVENLABS_TTS_TIMEOUT_MS', 120000, 1),
@@ -123,6 +97,7 @@ export const env = {
     nanobananaModel: readEnv('NANOBANANA_MODEL', 'nano-banana'),
 } as const;
 
-export const isAwsExecutionEnvironment = !!readEnv('AWS_EXECUTION_ENV') || !!readEnv('LAMBDA_TASK_ROOT');
 export const isOffline = readBoolEnv('IS_OFFLINE', false);
+const hasAwsExecutionMarkers = !!readEnv('AWS_EXECUTION_ENV') || !!readEnv('LAMBDA_TASK_ROOT');
+export const isAwsExecutionEnvironment = hasAwsExecutionMarkers && !isOffline;
 export const isLocalStage = !isAwsExecutionEnvironment && (env.stage === 'local' || isOffline);

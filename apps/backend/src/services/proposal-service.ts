@@ -529,19 +529,24 @@ function applyApprovalOverrides(
     return nodes.map(node => {
         const blockType = node['blockType'] ?? node['type'];
         if (typeof blockType !== 'string') return node;
-        const shouldApplyImageOverrides = blockType === 'media-image' || blockType === 'content';
+        const shouldApplyImageOverrides =
+            blockType === 'media-image' ||
+            blockType === 'countryball-image' ||
+            blockType === 'content' ||
+            blockType === 'countryball-script';
         if (!shouldApplyImageOverrides && !contentProfile) return node;
 
         const config =
             node['config'] && typeof node['config'] === 'object' && !Array.isArray(node['config'])
                 ? (node['config'] as Record<string, unknown>)
                 : {};
-        const preset = blockType === 'media-image' && imageStyleId ? getImageStylePreset(imageStyleId) : undefined;
+        const isImageBlock = blockType === 'media-image' || blockType === 'countryball-image';
+        const preset = isImageBlock && imageStyleId ? getImageStylePreset(imageStyleId) : undefined;
         const overriddenConfig = {
             ...config,
-            ...(blockType === 'media-image' && imageStyleId ? { imageStyleId, imageStyleLabel: preset?.label } : {}),
-            ...(blockType === 'media-image' && imageQuality ? { imageQuality } : {}),
-            ...(sceneCount ? (blockType === 'media-image' ? { count: sceneCount } : { scenes: sceneCount }) : {}),
+            ...(isImageBlock && imageStyleId ? { imageStyleId, imageStyleLabel: preset?.label } : {}),
+            ...(isImageBlock && imageQuality ? { imageQuality } : {}),
+            ...(sceneCount ? (isImageBlock ? { count: sceneCount } : { scenes: sceneCount }) : {}),
             ...longformDirectRunApprovalConfig(contentProfile, blockType, proposalId),
         };
 
@@ -698,6 +703,7 @@ type ImageGenerationMetadata = {
     imageEstimatedCostUsd?: number;
     textAndOtherEstimatedCostUsd?: number;
     estimatedTotalCostUsd?: number;
+    sceneCountSelectionMode?: 'ai-recommended' | 'user-selected' | 'fixed';
     styleOptions?: unknown;
     qualityOptions?: Array<{
         id: 'low' | 'medium' | 'high';
@@ -761,6 +767,9 @@ function buildApprovalImageGenerationMetadata(
         imageStyleLabel: preset.label,
         imageQuality,
         sceneCount,
+        sceneCountSelectionMode: overrides?.sceneCount
+            ? 'user-selected'
+            : existingImageGeneration?.sceneCountSelectionMode,
         imageEstimatedCostUsd,
         textAndOtherEstimatedCostUsd,
         estimatedTotalCostUsd,
@@ -790,7 +799,10 @@ function buildApprovalContentProfilePreferences(
         userMessage: '',
         outputType: nodes.some(node => (node['blockType'] ?? node['type']) === 'media-video') ? 'video' : undefined,
         hasMediaVideo: nodes.some(node => (node['blockType'] ?? node['type']) === 'media-video'),
-        hasMediaImage: nodes.some(node => (node['blockType'] ?? node['type']) === 'media-image'),
+        hasMediaImage: nodes.some(node => {
+            const blockType = node['blockType'] ?? node['type'];
+            return blockType === 'media-image' || blockType === 'countryball-image';
+        }),
         contentProfileId: overrides?.contentProfileId ?? existing?.contentProfileId,
         scriptToneId: overrides?.scriptToneId ?? existing?.scriptToneId,
         scriptToneIntensity: overrides?.scriptToneIntensity ?? existing?.scriptToneIntensity,
@@ -817,7 +829,9 @@ function applyApprovalEstimatedCostOverrides(
 
     if (estimatedCost?.breakdown?.length) {
         const breakdown = estimatedCost.breakdown.map(item =>
-            item.blockType === 'media-image' ? { ...item, amount: imageEstimatedCostUsd } : item
+            item.blockType === 'media-image' || item.blockType === 'countryball-image'
+                ? { ...item, amount: imageEstimatedCostUsd }
+                : item
         );
         return {
             ...estimatedCost,
@@ -851,7 +865,10 @@ function getContentProfileMetadata(metadata: Record<string, unknown> | undefined
 }
 
 function findMediaImageNode(nodes: Array<Record<string, unknown>>): Record<string, unknown> | undefined {
-    return nodes.find(node => (node['blockType'] ?? node['type']) === 'media-image');
+    return nodes.find(node => {
+        const blockType = node['blockType'] ?? node['type'];
+        return blockType === 'media-image' || blockType === 'countryball-image';
+    });
 }
 
 function getNodeConfig(node: Record<string, unknown>): Record<string, unknown> {

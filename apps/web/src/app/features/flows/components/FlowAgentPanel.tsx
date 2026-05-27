@@ -48,6 +48,7 @@ type ImageGenerationMetadata = {
         imageEstimatedCostUsd?: number;
         textAndOtherEstimatedCostUsd?: number;
         estimatedTotalCostUsd?: number;
+        sceneCountSelectionMode?: 'ai-recommended' | 'user-selected' | 'fixed';
         styleOptions?: ImageStyleOption[];
         sceneCountOptions?: Array<{
             count: number;
@@ -419,6 +420,7 @@ export const FlowAgentPanel = ({
             const selectedImageStyleId =
                 proposalImageStyles[proposal.id] ??
                 (selectedIsCountryball ? 'countryball-comic' : imageGeneration?.imageStyleId);
+            const selectedSceneCountOverride = proposalSceneCounts[proposal.id];
             const approvalOptions = {
                 contentProfileId: selectedContentProfileId,
                 ...(!isImageProposal
@@ -438,7 +440,9 @@ export const FlowAgentPanel = ({
                     ? {
                           imageStyleId: selectedImageStyleId,
                           imageQuality: proposalImageQualities[proposal.id] ?? imageGeneration?.imageQuality,
-                          sceneCount: proposalSceneCounts[proposal.id] ?? imageGeneration?.sceneCount,
+                          sceneCount: selectedIsCountryball
+                              ? selectedSceneCountOverride
+                              : (selectedSceneCountOverride ?? imageGeneration?.sceneCount),
                       }
                     : {}),
             };
@@ -636,8 +640,8 @@ export const FlowAgentPanel = ({
                             imageGeneration?.recommendedStyleId;
                         const selectedQuality =
                             proposalImageQualities[proposal.id] ?? imageGeneration?.imageQuality ?? 'medium';
-                        const selectedSceneCount =
-                            proposalSceneCounts[proposal.id] ?? imageGeneration?.sceneCount ?? 12;
+                        const selectedSceneCountOverride = proposalSceneCounts[proposal.id];
+                        const selectedSceneCount = selectedSceneCountOverride ?? imageGeneration?.sceneCount ?? 12;
                         const selectedQualityOption = imageGeneration?.qualityOptions?.find(
                             option => option.id === selectedQuality
                         );
@@ -650,6 +654,8 @@ export const FlowAgentPanel = ({
                             typeof selectedImageCost === 'number'
                                 ? selectedImageCost + (imageGeneration?.textAndOtherEstimatedCostUsd ?? 0)
                                 : imageGeneration?.estimatedTotalCostUsd;
+                        const isCountryballAiSceneCount =
+                            selectedIsCountryball && selectedSceneCountOverride === undefined;
                         const sceneCountOptions = imageGeneration?.sceneCountOptions?.length
                             ? imageGeneration.sceneCountOptions
                             : [
@@ -845,8 +851,16 @@ export const FlowAgentPanel = ({
                                             <div className="text-[11px] font-semibold text-foreground">이미지 설정</div>
                                             <div className="text-[10px] text-muted-foreground">
                                                 모델: {imageGeneration.model ?? 'gpt-image-2'} ·{' '}
-                                                {isImageProposal ? '이미지 수' : '장면'}: {selectedSceneCount}장
+                                                {isCountryballAiSceneCount
+                                                    ? '예상 장면: AI 판단'
+                                                    : `${isImageProposal ? '이미지 수' : '장면'}: ${selectedSceneCount}장`}
                                             </div>
+                                            {isCountryballAiSceneCount ? (
+                                                <div className="rounded-md bg-primary/10 px-2 py-1 text-[10px] text-primary">
+                                                    기본은 컨트리볼 브리프가 장면 수를 판단합니다. 아래 숫자를 누르면
+                                                    직접 고정합니다.
+                                                </div>
+                                            ) : null}
                                             {shouldShowSceneCountChoices && (
                                                 <div className="flex flex-wrap gap-1">
                                                     {sceneCountOptions.map(option => (
@@ -854,9 +868,14 @@ export const FlowAgentPanel = ({
                                                             key={option.count}
                                                             type="button"
                                                             className={`rounded-md border px-2 py-1 text-[10px] transition-colors ${
-                                                                selectedSceneCount === option.count
-                                                                    ? 'border-primary bg-primary/20 text-primary'
-                                                                    : 'border-border bg-muted/30 text-muted-foreground hover:text-foreground'
+                                                                selectedSceneCountOverride !== undefined
+                                                                    ? selectedSceneCount === option.count
+                                                                        ? 'border-primary bg-primary/20 text-primary'
+                                                                        : 'border-border bg-muted/30 text-muted-foreground hover:text-foreground'
+                                                                    : !selectedIsCountryball &&
+                                                                        selectedSceneCount === option.count
+                                                                      ? 'border-primary bg-primary/20 text-primary'
+                                                                      : 'border-border bg-muted/30 text-muted-foreground hover:text-foreground'
                                                             }`}
                                                             disabled={isApproved}
                                                             onClick={() =>

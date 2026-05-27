@@ -44,4 +44,59 @@ describe('ContentPreviewModal', () => {
         expect(screen.getByText('고죠는 미동도 없고 나루토는 바로 압박해.')).toBeTruthy();
         expect(screen.queryByText(/이건 설정 싸움/)).toBeNull();
     });
+
+    it('shows countryball dialogue lines in script previews', () => {
+        render(
+            <ContentPreviewModal
+                open
+                onOpenChange={vi.fn()}
+                content={{
+                    type: 'script',
+                    value: {
+                        mode: 'countryball-script',
+                        title: '폴란드 K2 쇼크',
+                        scenes: [
+                            {
+                                dialogueLines: [
+                                    { country: '폴란드', line: '에이, 무슨 한국산 전차야?' },
+                                    { country: '한국', line: '그럼 한번 테스트해보시죠.' },
+                                ],
+                            },
+                        ],
+                    },
+                }}
+            />
+        );
+
+        expect(screen.getByText('폴란드: 에이, 무슨 한국산 전차야?')).toBeTruthy();
+        expect(screen.getByText('한국: 그럼 한번 테스트해보시죠.')).toBeTruthy();
+    });
+
+    it('shows countryball dialogue lines from normalized scenes in script previews', () => {
+        render(
+            <ContentPreviewModal
+                open
+                onOpenChange={vi.fn()}
+                content={{
+                    type: 'script',
+                    value: {
+                        mode: 'countryball-data',
+                        title: '밤 11시 주문, 아침 도착 실화?',
+                        normalizedScenes: [
+                            {
+                                caption: '밤 11시 주문',
+                                dialogueLines: [
+                                    { country: '미국', line: '너 지금 주문한다고?' },
+                                    { country: '한국', line: '응, 아침에 와.' },
+                                ],
+                            },
+                        ],
+                    },
+                }}
+            />
+        );
+
+        expect(screen.getByText('미국: 너 지금 주문한다고?')).toBeTruthy();
+        expect(screen.getByText('한국: 응, 아침에 와.')).toBeTruthy();
+    });
 });

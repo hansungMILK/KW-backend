@@ -23,6 +23,11 @@ export interface TtsResult {
     voiceId: string;
 }
 
+export interface ElevenLabsVoice {
+    voiceId: string;
+    name?: string;
+}
+
 const ELEVENLABS_BASE_URL = 'https://api.elevenlabs.io/v1';
 const OPENAI_TTS_PATH = '/audio/speech';
 const FFPROBE_PATH =
@@ -36,6 +41,12 @@ export const ttsAdapter = {
         return Boolean(await getProviderApiKey('elevenlabs'));
     },
 
+    async listElevenLabsVoices(): Promise<ElevenLabsVoice[]> {
+        const elevenLabsKey = await getProviderApiKey('elevenlabs');
+        if (!elevenLabsKey) return [];
+        return fetchElevenLabsVoices(elevenLabsKey);
+    },
+
     async synthesize(request: TtsRequest): Promise<TtsResult> {
         const elevenLabsKey = await getProviderApiKey('elevenlabs');
         if (elevenLabsKey) return synthesizeWithElevenLabs(elevenLabsKey, request);
@@ -46,6 +57,27 @@ export const ttsAdapter = {
         throw new Error('Provider credential not configured: elevenlabs or openai');
     },
 };
+
+async function fetchElevenLabsVoices(apiKey: string): Promise<ElevenLabsVoice[]> {
+    const response = await fetch(`${ELEVENLABS_BASE_URL}/voices`, {
+        method: 'GET',
+        headers: {
+            'xi-api-key': apiKey,
+        },
+    });
+    if (!response.ok) {
+        const body = await safeReadResponseText(response);
+        throw new Error(`ElevenLabs voices error ${response.status}: ${body || response.statusText}`);
+    }
+
+    const parsed = (await response.json()) as { voices?: Array<{ voice_id?: unknown; name?: unknown }> };
+    return (parsed.voices ?? [])
+        .map(voice => ({
+            voiceId: typeof voice.voice_id === 'string' ? voice.voice_id.trim() : '',
+            name: typeof voice.name === 'string' ? voice.name : undefined,
+        }))
+        .filter(voice => voice.voiceId);
+}
 
 async function synthesizeWithElevenLabs(apiKey: string, request: TtsRequest): Promise<TtsResult> {
     const model = request.modelId || env.elevenLabsTtsModel;
@@ -423,6 +455,14 @@ function createAbortError(message: string): Error {
 
 function throwIfAborted(signal?: AbortSignal): void {
     if (signal?.aborted) throw createAbortError(abortMessageFromSignal(signal));
+}
+
+async function safeReadResponseText(response: Response): Promise<string> {
+    try {
+        return (await response.text()).slice(0, 200);
+    } catch {
+        return '';
+    }
 }
 
 function abortMessageFromSignal(signal?: AbortSignal): string {

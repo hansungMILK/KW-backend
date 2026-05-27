@@ -169,6 +169,24 @@ describe('FlowAgentPanel proposal content profile controls', () => {
                     contentProfileId: 'shorts.info.v1',
                     profileOptions: undefined,
                 },
+                imageGeneration: {
+                    model: 'gpt-image-2',
+                    format: 'shorts-frame',
+                    imageStyleId: 'explainer-comic',
+                    imageQuality: 'medium',
+                    sceneCount: 12,
+                    sceneCountSelectionMode: 'ai-recommended',
+                    styleOptions: [
+                        { id: 'explainer-comic', label: '정보전달 만화' },
+                        { id: 'countryball-comic', label: '컨트리볼 만화' },
+                    ],
+                    sceneCountOptions: [
+                        { count: 8, label: '8장' },
+                        { count: 12, label: '12장' },
+                        { count: 16, label: '16장' },
+                    ],
+                    qualityOptions: [{ id: 'medium', label: 'medium', estimatedImageCostUsd: 0.492 }],
+                },
             },
         };
 
@@ -201,6 +219,125 @@ describe('FlowAgentPanel proposal content profile controls', () => {
                 expect.objectContaining({
                     contentProfileId: 'shorts.countryball.v1',
                     imageStyleId: 'countryball-comic',
+                })
+            );
+        });
+        const approvalOptions = vi.mocked(approveProposal).mock.calls[0]?.[1] as Record<string, unknown>;
+        expect(approvalOptions['sceneCount']).toBeUndefined();
+    });
+
+    it('labels countryball scene count as AI-decided until the user pins a count', async () => {
+        const countryballProposal: MessageProposal = {
+            ...proposal,
+            id: 'proposal-countryball-ai-count-label',
+            metadata: {
+                ...proposal.metadata,
+                contentProfile: {
+                    ...proposal.metadata?.contentProfile,
+                    contentProfileId: 'shorts.countryball.v1',
+                },
+                imageGeneration: {
+                    model: 'gpt-image-2',
+                    format: 'shorts-frame',
+                    imageStyleId: 'countryball-comic',
+                    imageQuality: 'medium',
+                    sceneCount: 12,
+                    sceneCountSelectionMode: 'ai-recommended',
+                    styleOptions: [{ id: 'countryball-comic', label: '컨트리볼 만화' }],
+                    sceneCountOptions: [
+                        { count: 8, label: '8장' },
+                        { count: 12, label: '12장' },
+                        { count: 16, label: '16장' },
+                    ],
+                    qualityOptions: [{ id: 'medium', label: 'medium', estimatedImageCostUsd: 0.492 }],
+                },
+            },
+        };
+
+        render(
+            <FlowAgentPanel
+                open
+                onClose={() => undefined}
+                flowId="flow-1"
+                externalProposal={{
+                    type: 'proposal.created',
+                    id: 'proposal-created-countryball-ai-count-label',
+                    proposalId: countryballProposal.id,
+                    flowId: 'flow-1',
+                    blocks: countryballProposal.blocks,
+                    estimatedCost: countryballProposal.estimatedCost,
+                    metadata: countryballProposal.metadata,
+                    description: '컨트리볼 제안',
+                    timestamp: Date.now(),
+                }}
+            />
+        );
+
+        expect(await screen.findByText(/예상 장면: AI 판단/)).toBeTruthy();
+        expect(screen.queryByText(/예상 장면: 12장/)).toBeNull();
+
+        fireEvent.click(screen.getByRole('button', { name: '16장' }));
+
+        expect(await screen.findByText(/장면: 16장/)).toBeTruthy();
+    });
+
+    it('sends a countryball scene count only when the user explicitly chooses one', async () => {
+        const countryballProposal: MessageProposal = {
+            ...proposal,
+            id: 'proposal-countryball-scene-count',
+            metadata: {
+                ...proposal.metadata,
+                contentProfile: {
+                    ...proposal.metadata?.contentProfile,
+                    contentProfileId: 'shorts.countryball.v1',
+                },
+                imageGeneration: {
+                    model: 'gpt-image-2',
+                    format: 'shorts-frame',
+                    imageStyleId: 'countryball-comic',
+                    imageQuality: 'medium',
+                    sceneCount: 12,
+                    sceneCountSelectionMode: 'ai-recommended',
+                    styleOptions: [{ id: 'countryball-comic', label: '컨트리볼 만화' }],
+                    sceneCountOptions: [
+                        { count: 8, label: '8장' },
+                        { count: 12, label: '12장' },
+                        { count: 16, label: '16장' },
+                    ],
+                    qualityOptions: [{ id: 'medium', label: 'medium', estimatedImageCostUsd: 0.492 }],
+                },
+            },
+        };
+
+        render(
+            <FlowAgentPanel
+                open
+                onClose={() => undefined}
+                flowId="flow-1"
+                externalProposal={{
+                    type: 'proposal.created',
+                    id: 'proposal-created-countryball-scene-count',
+                    proposalId: countryballProposal.id,
+                    flowId: 'flow-1',
+                    blocks: countryballProposal.blocks,
+                    estimatedCost: countryballProposal.estimatedCost,
+                    metadata: countryballProposal.metadata,
+                    description: '컨트리볼 제안',
+                    timestamp: Date.now(),
+                }}
+            />
+        );
+
+        expect(await screen.findByText(/기본은 컨트리볼 브리프가 장면 수를 판단합니다/)).toBeTruthy();
+        fireEvent.click(screen.getByRole('button', { name: '16장' }));
+        fireEvent.click(screen.getByRole('button', { name: '승인' }));
+
+        await waitFor(() => {
+            expect(approveProposal).toHaveBeenCalledWith(
+                'proposal-countryball-scene-count',
+                expect.objectContaining({
+                    contentProfileId: 'shorts.countryball.v1',
+                    sceneCount: 16,
                 })
             );
         });

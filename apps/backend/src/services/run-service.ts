@@ -214,6 +214,12 @@ const LEGACY_BLOCK_PROVIDER_MAP: Record<string, ApiKeyProvider> = {
     analysis: 'openai',
     'media-tts': 'elevenlabs',
     search: 'anthropic',
+    'countryball-brief': 'openai',
+    'countryball-script': 'openai',
+    'countryball-analysis': 'openai',
+    'countryball-image': 'openai',
+    'countryball-tts': 'elevenlabs',
+    'countryball-video': 'openai',
     content: 'anthropic',
     integration: 'anthropic',
     'longform-tts': 'elevenlabs',
@@ -221,6 +227,12 @@ const LEGACY_BLOCK_PROVIDER_MAP: Record<string, ApiKeyProvider> = {
 
 const OPENAI_BLOCK_PROVIDER_MAP: Record<string, ApiKeyProvider> = {
     search: 'openai',
+    'countryball-brief': 'openai',
+    'countryball-script': 'openai',
+    'countryball-analysis': 'openai',
+    'countryball-image': 'openai',
+    'countryball-tts': 'elevenlabs',
+    'countryball-video': 'openai',
     content: 'openai',
     analysis: 'openai',
     'media-image': 'openai',
@@ -231,7 +243,7 @@ const OPENAI_BLOCK_PROVIDER_MAP: Record<string, ApiKeyProvider> = {
     'longform-tts': 'elevenlabs',
 };
 
-const TTS_BLOCK_TYPES = new Set(['media-tts', 'longform-tts']);
+const TTS_BLOCK_TYPES = new Set(['media-tts', 'countryball-tts', 'longform-tts']);
 
 type RunServiceFailure = {
     ok: false;
@@ -629,6 +641,30 @@ const estimateRunCostUsd = (nodes: Array<Record<string, unknown>>): number => {
             case 'search':
                 total += 0.02;
                 break;
+            case 'countryball-brief':
+                total += 0.03;
+                break;
+            case 'countryball-script':
+                total += 0.08;
+                break;
+            case 'countryball-data':
+                total += 0.01;
+                break;
+            case 'countryball-analysis':
+                total += 0.03;
+                break;
+            case 'countryball-image':
+                total += estimateGptImage2CostUsd(
+                    getMediaImageSceneCount(node),
+                    getNodeConfig(node)['imageQuality'] ?? env.openaiImageQuality
+                );
+                break;
+            case 'countryball-tts':
+                total += 0.02;
+                break;
+            case 'countryball-video':
+                total += 0.02;
+                break;
             case 'content':
                 total += 0.08;
                 break;
@@ -890,6 +926,10 @@ async function checkMissingApiKeys(nodes: Array<Record<string, unknown>>): Promi
     return missing;
 }
 
+function shouldSkipProviderPreflight(): boolean {
+    return env.orchestratorMode === 'mock';
+}
+
 // ============================================================================
 // Run service
 // ============================================================================
@@ -934,19 +974,21 @@ export const runService = {
         const longformApprovalResult = checkLongformGateBApproval(preflightNodes);
         if (longformApprovalResult) return longformApprovalResult;
 
-        if ((await requiresPaidOpenAI(preflightNodes)) && !isPaidOpenAIAllowed()) {
-            return { ok: false, error: PAID_OPENAI_DISABLED, status: 422 };
-        }
+        if (!shouldSkipProviderPreflight()) {
+            if ((await requiresPaidOpenAI(preflightNodes)) && !isPaidOpenAIAllowed()) {
+                return { ok: false, error: PAID_OPENAI_DISABLED, status: 422 };
+            }
 
-        // F-34: API key pre-flight check
-        const missingProviders = await checkMissingApiKeys(preflightNodes);
-        if (missingProviders.length > 0) {
-            return {
-                ok: false,
-                error: `MISSING_API_KEYS`,
-                status: 422,
-                missingProviders,
-            };
+            // F-34: API key pre-flight check
+            const missingProviders = await checkMissingApiKeys(preflightNodes);
+            if (missingProviders.length > 0) {
+                return {
+                    ok: false,
+                    error: `MISSING_API_KEYS`,
+                    status: 422,
+                    missingProviders,
+                };
+            }
         }
 
         const now = new Date().toISOString();
@@ -1036,14 +1078,16 @@ export const runService = {
         const longformApprovalResult = checkLongformGateBApproval([costGuardTargetNode]);
         if (longformApprovalResult) return longformApprovalResult;
 
-        if ((await requiresPaidOpenAI([targetNode])) && !isPaidOpenAIAllowed()) {
-            return { ok: false, error: PAID_OPENAI_DISABLED, status: 422 };
-        }
+        if (!shouldSkipProviderPreflight()) {
+            if ((await requiresPaidOpenAI([targetNode])) && !isPaidOpenAIAllowed()) {
+                return { ok: false, error: PAID_OPENAI_DISABLED, status: 422 };
+            }
 
-        // F-34: API key check for single node
-        const missingProviders = await checkMissingApiKeys([targetNode]);
-        if (missingProviders.length > 0) {
-            return { ok: false, error: 'MISSING_API_KEYS', status: 422, missingProviders };
+            // F-34: API key check for single node
+            const missingProviders = await checkMissingApiKeys([targetNode]);
+            if (missingProviders.length > 0) {
+                return { ok: false, error: 'MISSING_API_KEYS', status: 422, missingProviders };
+            }
         }
 
         const now = new Date().toISOString();

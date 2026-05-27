@@ -226,6 +226,13 @@ export const buildContentProfilePreferences = (params: {
 
 const CONTENT_PROFILE_CONTEXT_BLOCKS = new Set([
     'search',
+    'countryball-brief',
+    'countryball-script',
+    'countryball-data',
+    'countryball-analysis',
+    'countryball-image',
+    'countryball-tts',
+    'countryball-video',
     'content',
     'data',
     'analysis',

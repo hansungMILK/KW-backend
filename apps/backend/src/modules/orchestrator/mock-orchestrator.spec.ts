@@ -63,6 +63,60 @@ describe('mockOrchestrator content profile proposal metadata', () => {
                 }),
             })
         );
+        expect(proposal.proposedNodes.map(node => node.blockType)).not.toContain('countryball-brief');
+    });
+
+    it('routes explicit countryball Shorts through the isolated countryball product flow', async () => {
+        const proposal = await mockOrchestrator.generateProposal(
+            'flow-1',
+            '국뽕 컨트리볼쇼츠 주제 추천해서 리비아 대수로 공사로 만들어줘'
+        );
+
+        const blockTypes = proposal.proposedNodes.map(node => node.blockType);
+        expect(blockTypes).toEqual([
+            'search',
+            'countryball-brief',
+            'countryball-script',
+            'countryball-data',
+            'countryball-analysis',
+            'countryball-image',
+            'countryball-tts',
+            'countryball-video',
+            'integration',
+        ]);
+        expect(proposal.metadata?.['contentProfile']).toEqual(
+            expect.objectContaining({
+                contentProfileId: 'shorts.countryball.v1',
+                narrativeMode: 'countryball-situation-reenactment',
+                requestBasis: 'user-requested',
+            })
+        );
+
+        const nodeByType = Object.fromEntries(proposal.proposedNodes.map(node => [node.blockType, node.id]));
+        expect(proposal.proposedEdges).toContainEqual(
+            expect.objectContaining({
+                sourceNodeId: nodeByType['search'],
+                targetNodeId: nodeByType['countryball-brief'],
+            })
+        );
+        expect(proposal.proposedEdges).toContainEqual(
+            expect.objectContaining({
+                sourceNodeId: nodeByType['countryball-brief'],
+                targetNodeId: nodeByType['countryball-script'],
+            })
+        );
+        expect(proposal.proposedEdges).toContainEqual(
+            expect.objectContaining({
+                sourceNodeId: nodeByType['countryball-analysis'],
+                targetNodeId: nodeByType['countryball-image'],
+            })
+        );
+        expect(proposal.proposedEdges).toContainEqual(
+            expect.objectContaining({
+                sourceNodeId: nodeByType['countryball-analysis'],
+                targetNodeId: nodeByType['countryball-tts'],
+            })
+        );
     });
 
     it('proposes a user-facing longform production flow with Gate B blocked until review approval', async () => {

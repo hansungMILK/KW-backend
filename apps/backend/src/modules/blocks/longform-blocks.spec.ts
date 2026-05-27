@@ -29,7 +29,7 @@ vi.mock('../../adapters/ai/tts-adapter', () => ({
             estimatedDurationSec: 2,
             provider: 'elevenlabs',
             model: 'eleven_flash_v2_5',
-            voiceId: 'pNInz6obpgDQGcFmaJgB',
+            voiceId: 'voice-default',
         })),
     },
 }));
@@ -698,7 +698,7 @@ describe('longform blocks', () => {
             },
             longformProductionQa: {
                 ttsProvider: 'elevenlabs',
-                voiceId: 'pNInz6obpgDQGcFmaJgB',
+                voiceId: 'voice-default',
                 subtitleCueCount: 0,
                 motionCueCount: 0,
                 visualSceneCount: 1,

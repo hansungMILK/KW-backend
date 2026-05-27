@@ -28,24 +28,29 @@ export function compileWorkflowPlan(data: ClaudeProposalOutput): CompileWorkflow
         const catalog = DEFAULT_WORKFLOW_PACK_REGISTRY.orchestratorBlocks[block.type];
         if (!catalog) return fail(`unknown block type: ${block.type}`);
 
-        if (block.type === 'media-video' && !VIDEO_OUTPUT_TYPES.has(data.plan.outputType)) {
-            return fail('media-video requires outputType video/mixed');
+        if (
+            (block.type === 'media-video' || block.type === 'countryball-video') &&
+            !VIDEO_OUTPUT_TYPES.has(data.plan.outputType)
+        ) {
+            return fail(`${block.type} requires outputType video/mixed`);
         }
 
         if (
-            block.type === 'media-image' &&
+            (block.type === 'media-image' || block.type === 'countryball-image') &&
             !IMAGE_OUTPUT_TYPES.has(data.plan.outputType) &&
-            !requiredCapabilities.has('image.generate')
+            !requiredCapabilities.has('image.generate') &&
+            !requiredCapabilities.has('countryball.image')
         ) {
-            return fail('media-image requires image.generate capability or image/video/mixed outputType');
+            return fail(`${block.type} requires image.generate capability or image/video/mixed outputType`);
         }
 
         if (
-            block.type === 'media-tts' &&
+            (block.type === 'media-tts' || block.type === 'countryball-tts') &&
             !AUDIO_OUTPUT_TYPES.has(data.plan.outputType) &&
-            !requiredCapabilities.has('audio.tts')
+            !requiredCapabilities.has('audio.tts') &&
+            !requiredCapabilities.has('countryball.tts')
         ) {
-            return fail('media-tts requires audio.tts capability or audio/video/mixed outputType');
+            return fail(`${block.type} requires audio.tts capability or audio/video/mixed outputType`);
         }
     }
 
@@ -57,6 +62,17 @@ export function compileWorkflowPlan(data: ClaudeProposalOutput): CompileWorkflow
 
         if (imageIndex < 0 || ttsIndex < 0 || !videoParents.has(imageIndex) || !videoParents.has(ttsIndex)) {
             return fail('media-video requires upstream media-image and media-tts edges');
+        }
+    }
+
+    if (data.plan.outputType === 'video' && data.blocks.some(block => block.type === 'countryball-video')) {
+        const videoIndex = data.blocks.findIndex(block => block.type === 'countryball-video');
+        const imageIndex = data.blocks.findIndex(block => block.type === 'countryball-image');
+        const ttsIndex = data.blocks.findIndex(block => block.type === 'countryball-tts');
+        const videoParents = new Set(data.edges.filter(edge => edge.to === videoIndex).map(edge => edge.from));
+
+        if (imageIndex < 0 || ttsIndex < 0 || !videoParents.has(imageIndex) || !videoParents.has(ttsIndex)) {
+            return fail('countryball-video requires upstream countryball-image and countryball-tts edges');
         }
     }
 
@@ -81,7 +97,7 @@ export function seedRootBlockInputs(data: ClaudeProposalOutput, userMessage: str
             };
         }
 
-        if (block.type === 'content' && !hasSeedInput(block.config)) {
+        if ((block.type === 'content' || block.type === 'countryball-script') && !hasSeedInput(block.config)) {
             return {
                 ...block,
                 config: {

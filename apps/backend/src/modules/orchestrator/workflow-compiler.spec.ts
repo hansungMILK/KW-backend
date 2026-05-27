@@ -179,6 +179,66 @@ describe('compileWorkflowPlan', () => {
         expect(result.ok).toBe(true);
     });
 
+    it('accepts an isolated countryball Shorts product flow while keeping image/TTS parallel', () => {
+        const result = compileWorkflowPlan({
+            plan: {
+                goal: '컨트리볼 쇼츠 기획 브리프부터 영상까지 만든다',
+                outputType: 'video',
+                planType: 'pipeline',
+                requiredCapabilities: [
+                    'source.collect',
+                    'countryball.brief',
+                    'countryball.script',
+                    'countryball.data',
+                    'countryball.analysis',
+                    'countryball.image',
+                    'countryball.tts',
+                    'countryball.video',
+                    'metadata.generate',
+                ],
+                selectedBlocks: [
+                    { blockType: 'search', reason: '요청 소재를 확인한다' },
+                    { blockType: 'countryball-brief', reason: '컨트리볼 상황극 기획 브리프를 만든다' },
+                    { blockType: 'countryball-script', reason: '컨트리볼 전용 대본을 작성한다' },
+                    { blockType: 'countryball-data', reason: '컨트리볼 장면 계약을 구조화한다' },
+                    { blockType: 'countryball-analysis', reason: '컨트리볼 품질 기준으로 검수한다' },
+                    { blockType: 'countryball-image', reason: '컨트리볼 장면 이미지를 만든다' },
+                    { blockType: 'countryball-tts', reason: '국가볼 대사 음성을 만든다' },
+                    { blockType: 'countryball-video', reason: '컨트리볼 자막 배치로 합성한다' },
+                    { blockType: 'integration', reason: '메타데이터를 만든다' },
+                ],
+                rejectedBlocks: [],
+                assumptions: [],
+            },
+            blocks: [
+                { type: 'search', label: '자료 수집', config: {} },
+                { type: 'countryball-brief', label: '컨트리볼 기획 브리프', config: {} },
+                { type: 'countryball-script', label: '컨트리볼 대본 생성', config: {} },
+                { type: 'countryball-data', label: '컨트리볼 데이터 정규화', config: {} },
+                { type: 'countryball-analysis', label: '컨트리볼 품질 검수', config: {} },
+                { type: 'countryball-image', label: '컨트리볼 이미지 생성', config: { count: 12 } },
+                { type: 'countryball-tts', label: '컨트리볼 음성 생성', config: {} },
+                { type: 'countryball-video', label: '컨트리볼 영상 합성', config: {} },
+                { type: 'integration', label: '메타데이터 생성', config: {} },
+            ],
+            edges: [
+                { from: 0, to: 1 },
+                { from: 1, to: 2 },
+                { from: 2, to: 3 },
+                { from: 3, to: 4 },
+                { from: 4, to: 5 },
+                { from: 4, to: 6 },
+                { from: 5, to: 7 },
+                { from: 6, to: 7 },
+                { from: 7, to: 8 },
+            ],
+            estimatedCostUsd: 0.92,
+            summary: '컨트리볼 전용 블록으로 이미지/TTS를 병렬 생성합니다.',
+        });
+
+        expect(result.ok).toBe(true);
+    });
+
     it('rejects video composition without both image and tts upstream edges', () => {
         const result = compileWorkflowPlan({
             plan: {

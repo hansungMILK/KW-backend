@@ -296,6 +296,99 @@ describe('proposalService.approve image generation overrides', () => {
         expect(putMessage).toHaveBeenCalledOnce();
     });
 
+    it('keeps countryball scene count AI-driven unless the user explicitly overrides it', async () => {
+        const proposal: Proposal = {
+            proposalId: 'proposal-countryball',
+            flowId: 'flow-countryball',
+            sourceMessageId: 'message-countryball',
+            status: 'PENDING',
+            proposedNodes: [
+                {
+                    id: 'node-script',
+                    blockType: 'countryball-script',
+                    type: 'countryball-script',
+                    config: {
+                        topic: '컨트리볼 쇼츠',
+                    },
+                },
+                {
+                    id: 'node-image',
+                    blockType: 'countryball-image',
+                    type: 'countryball-image',
+                    config: {
+                        imageStyleId: 'countryball-comic',
+                        imageQuality: 'medium',
+                    },
+                },
+            ],
+            proposedEdges: [],
+            estimatedCost: {
+                currency: 'USD',
+                total: 0.652,
+                breakdown: [
+                    { blockType: 'countryball-script', amount: 0.16 },
+                    { blockType: 'countryball-image', amount: 0.492 },
+                ],
+            },
+            metadata: {
+                contentProfile: {
+                    contentProfileId: 'shorts.countryball.v1',
+                    reviewMode: 'direct-run',
+                },
+                imageGeneration: {
+                    model: 'gpt-image-2',
+                    imageStyleId: 'countryball-comic',
+                    imageStyleLabel: '컨트리볼 만화',
+                    imageQuality: 'medium',
+                    sceneCount: 12,
+                    sceneCountSelectionMode: 'ai-recommended',
+                    imageEstimatedCostUsd: 0.492,
+                    textAndOtherEstimatedCostUsd: 0.16,
+                    estimatedTotalCostUsd: 0.652,
+                },
+            },
+            approvalRequired: true,
+            createdAt: '2026-05-11T00:00:00.000Z',
+            updatedAt: '2026-05-11T00:00:00.000Z',
+        };
+
+        getProposal.mockResolvedValue(proposal);
+        getFlow.mockResolvedValue({
+            id: 'flow-countryball',
+            name: 'Flow',
+            state: 'DRAFT',
+            nodes: [],
+            edges: [],
+            createdAt: '2026-05-11T00:00:00.000Z',
+            updatedAt: '2026-05-11T00:00:00.000Z',
+        });
+
+        const result = await proposalService.approve('proposal-countryball', undefined, undefined, {
+            contentProfileId: 'shorts.countryball.v1',
+            imageStyleId: 'countryball-comic',
+            imageQuality: 'medium',
+        });
+
+        expect(result.ok).toBe(true);
+        const savedFlow = putFlow.mock.calls[0]?.[0];
+        expect(savedFlow?.nodes).toEqual([
+            expect.objectContaining({
+                id: 'node-script',
+                config: expect.not.objectContaining({
+                    scenes: expect.anything(),
+                    count: expect.anything(),
+                }),
+            }),
+            expect.objectContaining({
+                id: 'node-image',
+                config: expect.not.objectContaining({
+                    count: expect.anything(),
+                    scenes: expect.anything(),
+                }),
+            }),
+        ]);
+    });
+
     it('applies selected content profile preferences to approved nodes and proposal metadata', async () => {
         const proposal: Proposal = {
             proposalId: 'proposal-2',

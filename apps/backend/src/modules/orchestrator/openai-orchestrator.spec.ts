@@ -496,6 +496,49 @@ describe('openaiOrchestrator longform Gate A', () => {
         );
     });
 
+    it('routes explicit countryball requests through dedicated blocks with AI scene count as the default', async () => {
+        const proposal = await openaiOrchestrator.generateProposal(
+            'flow-countryball',
+            '컨트리볼 쇼츠 만들어줘. 상대국이 주인공 국가볼의 특징을 무시하다가 직접 보고 태세 전환하는 플롯.'
+        );
+
+        expect(proposal.proposedNodes.map(node => node.blockType)).toEqual([
+            'search',
+            'countryball-brief',
+            'countryball-script',
+            'countryball-data',
+            'countryball-analysis',
+            'countryball-image',
+            'countryball-tts',
+            'countryball-video',
+            'integration',
+        ]);
+        expect(proposal.proposedNodes.map(node => node.blockType)).not.toContain('content');
+        expect(proposal.proposedNodes.map(node => node.blockType)).not.toContain('media-image');
+
+        const scriptNode = proposal.proposedNodes.find(node => node.blockType === 'countryball-script');
+        const imageNode = proposal.proposedNodes.find(node => node.blockType === 'countryball-image');
+        expect(scriptNode?.config).toEqual(
+            expect.objectContaining({
+                topic: expect.stringContaining('컨트리볼 쇼츠'),
+            })
+        );
+        expect(scriptNode?.config).not.toHaveProperty('scenes');
+        expect(imageNode?.config).toEqual(
+            expect.objectContaining({
+                imageStyleId: 'countryball-comic',
+            })
+        );
+        expect(imageNode?.config).not.toHaveProperty('count');
+        expect(proposal.metadata?.['imageGeneration']).toEqual(
+            expect.objectContaining({
+                sceneCountSelectionMode: 'ai-recommended',
+                sceneCount: 12,
+                imageStyleId: 'countryball-comic',
+            })
+        );
+    });
+
     it('uses a text writing recipe for blog article requests without adding media blocks', async () => {
         const proposal = await openaiOrchestrator.generateProposal(
             'flow-blog',

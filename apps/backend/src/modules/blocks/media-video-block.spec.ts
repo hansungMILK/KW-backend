@@ -270,7 +270,7 @@ describe('mediaVideoBlock', () => {
         });
         expect(result.output.longformProductionQa).toMatchObject({
             ttsProvider: 'elevenlabs',
-            voiceId: 'pNInz6obpgDQGcFmaJgB',
+            voiceId: 'voice-default',
             subtitleCueCount: 1,
             motionCueCount: 1,
         });
@@ -290,7 +290,7 @@ describe('mediaVideoBlock', () => {
             },
             longformProductionQa: {
                 ttsProvider: 'elevenlabs',
-                voiceId: 'pNInz6obpgDQGcFmaJgB',
+                voiceId: 'voice-default',
                 subtitleCueCount: 1,
                 motionCueCount: 1,
             },
@@ -675,7 +675,7 @@ function longformVideoInput(overrides: Record<string, unknown> = {}) {
             url: 'http://localhost:8800/_local-assets/longform-audio.mp3',
             durationSec: 5,
             provider: 'elevenlabs',
-            voiceId: 'pNInz6obpgDQGcFmaJgB',
+            voiceId: 'voice-default',
         },
         motionCues: [{ sceneNumber: 1, type: 'slow-zoom-in' }],
         scenes: [

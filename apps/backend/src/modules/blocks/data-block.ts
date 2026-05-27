@@ -92,7 +92,6 @@ interface DialogueLine {
     delivery?: string;
     meaning?: string;
     interpretation?: string;
-    voiceRole?: string;
     durationSec?: number;
 }
 
@@ -100,7 +99,6 @@ type NarratorLine =
     | string
     | {
           text: string;
-          voiceRole?: string;
       };
 
 /**
@@ -327,9 +325,6 @@ function normalizeDialogueLines(input: unknown): DialogueLine[] | undefined {
                 ...(typeof item['interpretation'] === 'string' && item['interpretation'].trim()
                     ? { interpretation: item['interpretation'].trim() }
                     : {}),
-                ...(typeof item['voiceRole'] === 'string' && item['voiceRole'].trim()
-                    ? { voiceRole: item['voiceRole'].trim() }
-                    : {}),
                 ...(typeof item['durationSec'] === 'number' && Number.isFinite(item['durationSec'])
                     ? { durationSec: item['durationSec'] }
                     : {}),
@@ -350,9 +345,6 @@ function normalizeNarratorLine(input: unknown): NarratorLine | undefined {
     if (!text) return undefined;
     return {
         text,
-        ...(typeof input['voiceRole'] === 'string' && input['voiceRole'].trim()
-            ? { voiceRole: input['voiceRole'].trim() }
-            : {}),
     };
 }
 

@@ -81,6 +81,33 @@ const firstStringValue = (...values: unknown[]): string | undefined => {
     return undefined;
 };
 
+const getSceneScriptLines = (scene: Record<string, unknown>): string[] => {
+    const dialogueLines = asRecordArray(scene.dialogueLines)
+        .map(line => {
+            const country = firstStringValue(line.country, line.speaker);
+            const text = firstStringValue(line.line, line.text);
+            if (!text) return undefined;
+            return country ? `${country}: ${text}` : text;
+        })
+        .filter((line): line is string => Boolean(line));
+    if (dialogueLines.length > 0) return dialogueLines;
+
+    const narration = firstStringValue(scene.narration, scene.caption, scene.visualText);
+    if (narration) return [narration];
+    return [];
+};
+
+const getScriptScenes = (record: Record<string, unknown>): Record<string, unknown>[] => {
+    const directScenes = asRecordArray(record.scenes);
+    if (directScenes.length > 0) return directScenes;
+    const normalizedScenes = asRecordArray(record.normalizedScenes);
+    if (normalizedScenes.length > 0) return normalizedScenes;
+    const nestedScript = isRecordValue(record.script) ? record.script : undefined;
+    const nestedScenes = nestedScript ? asRecordArray(nestedScript.scenes) : [];
+    if (nestedScenes.length > 0) return nestedScenes;
+    return [];
+};
+
 const getUrlFromRecord = (value: unknown): string | undefined => {
     if (!isRecordValue(value)) return undefined;
     const nestedVideo = isRecordValue(value.video) ? value.video : undefined;
@@ -304,12 +331,10 @@ const ImageGalleryPreview: React.FC<{ value: unknown }> = ({ value }) => {
 const ScriptPreview: React.FC<{ value: unknown }> = ({ value }) => {
     const recordValue = isRecordValue(value) ? value : {};
     const script = isRecordValue(recordValue.script) ? recordValue.script : {};
-    const scenes = asRecordArray(recordValue.scenes);
+    const scenes = getScriptScenes(recordValue);
     const title = firstStringValue(recordValue.title, script.hook, recordValue.hook) ?? '생성된 대본';
     const cta = firstStringValue(script.cta, recordValue.cta);
-    const narrationLines = scenes
-        .map(scene => firstStringValue(scene.narration, scene.caption, scene.visualText))
-        .filter(Boolean);
+    const narrationLines = scenes.flatMap(getSceneScriptLines);
     const bodyText = [...narrationLines, cta].filter(Boolean).join('\n\n');
 
     return (
@@ -323,17 +348,23 @@ const ScriptPreview: React.FC<{ value: unknown }> = ({ value }) => {
             </div>
             <div className="mt-5 space-y-4">
                 {scenes.map((scene, index) => {
-                    const narration = firstStringValue(scene.narration, scene.caption, scene.visualText);
-                    if (!narration) return null;
+                    const sceneLines = getSceneScriptLines(scene);
+                    if (sceneLines.length === 0) return null;
                     return (
                         <section
-                            key={`${index}-${narration}`}
+                            key={`${index}-${sceneLines.join('|')}`}
                             className="grid gap-3 border-b border-border/70 pb-4 sm:grid-cols-[72px_1fr]"
                         >
                             <div className="text-xs font-semibold uppercase tracking-wide text-amber-600">
                                 Scene {index + 1}
                             </div>
-                            <p className="text-base leading-8 text-foreground">{narration}</p>
+                            <div className="space-y-1">
+                                {sceneLines.map(line => (
+                                    <p key={line} className="text-base leading-8 text-foreground">
+                                        {line}
+                                    </p>
+                                ))}
+                            </div>
                         </section>
                     );
                 })}

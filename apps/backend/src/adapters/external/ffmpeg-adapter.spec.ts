@@ -130,8 +130,8 @@ describe('ffmpeg composition duration boundary', () => {
                     caption: 'overlay smoke',
                 },
             ],
-            outputWidth: 320,
-            outputHeight: 568,
+            outputWidth: 1080,
+            outputHeight: 1920,
             outputFormat: 'mp4',
         });
 
@@ -154,6 +154,52 @@ describe('ffmpeg composition duration boundary', () => {
         expect(filterGraph).toContain('trim=duration=0.5,setpts=PTS-STARTPTS');
         expect(filterGraph).not.toContain('concat=n=1');
         expect(filterGraph).toContain('[v0]format=yuv420p[v]');
+    });
+
+    it('passes countryball caption position into drawtext coordinates', async () => {
+        vi.resetModules();
+
+        const child = new EventEmitter() as EventEmitter & {
+            stderr: EventEmitter;
+            kill: ReturnType<typeof vi.fn>;
+        };
+        child.stderr = new EventEmitter();
+        child.kill = vi.fn();
+
+        const spawn = vi.fn(() => child);
+        vi.doMock('child_process', () => ({
+            spawn,
+            spawnSync: vi.fn(() => ({ status: 0, stdout: 'drawtext', stderr: '' })),
+        }));
+
+        const { ffmpegAdapter } = await import('./ffmpeg-adapter');
+        const composition = ffmpegAdapter.compose({
+            images: [
+                {
+                    url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
+                    durationSec: 0.5,
+                    title: '컨트리볼',
+                    caption: '말하는 볼 옆 자막',
+                    captionPosition: 'middle-right',
+                    captionStyle: 'whiteBlack',
+                },
+            ],
+            outputWidth: 320,
+            outputHeight: 568,
+            outputFormat: 'mp4',
+        });
+
+        await vi.waitFor(() => expect(spawn).toHaveBeenCalled());
+        child.emit('exit', 0, null);
+
+        await expect(composition).rejects.toThrow();
+        const args = spawn.mock.calls[0]?.[1] as string[];
+        const filterGraph = args[args.indexOf('-filter_complex') + 1];
+
+        expect(filterGraph).toContain("text='말하는 볼 옆 자막'");
+        expect(filterGraph).toContain('x=w-text_w-64');
+        expect(filterGraph).toContain('y=960');
+        expect(filterGraph).toContain('fontcolor=white');
     });
 });
 

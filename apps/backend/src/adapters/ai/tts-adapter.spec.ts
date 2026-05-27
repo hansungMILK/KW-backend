@@ -44,6 +44,17 @@ const mockAudioResponse = () =>
         arrayBuffer: vi.fn(async () => Uint8Array.from([1, 2, 3]).buffer),
     }) as unknown as Response;
 
+const mockVoicesResponse = () =>
+    ({
+        ok: true,
+        json: vi.fn(async () => ({
+            voices: [
+                { voice_id: 'voice-adam', name: 'Adam' },
+                { voice_id: 'voice-rachel', name: 'Rachel' },
+            ],
+        })),
+    }) as unknown as Response;
+
 describe('ttsAdapter', () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -99,6 +110,24 @@ describe('ttsAdapter', () => {
 
         await expect(ttsAdapter.synthesize({ text: '키 없음' })).rejects.toThrow(
             'Provider credential not configured: elevenlabs or openai'
+        );
+    });
+
+    it('lists available ElevenLabs voices without hardcoded ids', async () => {
+        getProviderApiKeyMock.mockImplementation(async provider => (provider === 'elevenlabs' ? 'eleven-key' : null));
+        vi.mocked(fetch).mockResolvedValueOnce(mockVoicesResponse());
+
+        const voices = await ttsAdapter.listElevenLabsVoices();
+
+        expect(voices).toEqual([
+            { voiceId: 'voice-adam', name: 'Adam' },
+            { voiceId: 'voice-rachel', name: 'Rachel' },
+        ]);
+        expect(fetch).toHaveBeenCalledWith(
+            'https://api.elevenlabs.io/v1/voices',
+            expect.objectContaining({
+                headers: expect.objectContaining({ 'xi-api-key': 'eleven-key' }),
+            })
         );
     });
 });

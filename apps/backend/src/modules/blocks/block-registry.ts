@@ -1,5 +1,12 @@
 import { analysisBlock } from './analysis-block';
 import { contentBlock } from './content-block';
+import { countryballAnalysisBlock } from './countryball/countryball-analysis-block';
+import { countryballDataBlock } from './countryball/countryball-data-block';
+import { countryballImageBlock } from './countryball/countryball-image-block';
+import { countryballScriptBlock } from './countryball/countryball-script-block';
+import { countryballTtsBlock } from './countryball/countryball-tts-block';
+import { countryballVideoBlock } from './countryball/countryball-video-block';
+import { countryballBriefBlock } from './countryball-brief-block';
 import { dataBlock } from './data-block';
 import { integrationBlock } from './integration-block';
 import {
@@ -39,6 +46,13 @@ registry.set('output-preview', outputPreviewBlock);
 registry.set('buffer-delay', bufferDelayBlock);
 registry.set('text-transform', textTransformBlock);
 registry.set('search', searchBlock);
+registry.set('countryball-brief', countryballBriefBlock);
+registry.set('countryball-script', countryballScriptBlock);
+registry.set('countryball-data', countryballDataBlock);
+registry.set('countryball-analysis', countryballAnalysisBlock);
+registry.set('countryball-image', countryballImageBlock);
+registry.set('countryball-tts', countryballTtsBlock);
+registry.set('countryball-video', countryballVideoBlock);
 registry.set('content', contentBlock);
 registry.set('data', dataBlock);
 registry.set('analysis', analysisBlock);

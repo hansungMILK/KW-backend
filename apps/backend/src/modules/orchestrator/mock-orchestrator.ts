@@ -26,6 +26,34 @@ const SHORTS_BLOCKS = [
     { type: 'integration', label: '메타데이터 생성', config: {} },
 ] as const;
 
+const COUNTRYBALL_SHORTS_BLOCKS = [
+    { type: 'search', label: '자료 수집', config: { query: '컨트리볼 쇼츠 제작' } },
+    { type: 'countryball-brief', label: '컨트리볼 기획 브리프', config: {} },
+    { type: 'countryball-script', label: '컨트리볼 대본 생성', config: { durationSec: 60 } },
+    { type: 'countryball-data', label: '컨트리볼 데이터 정규화', config: {} },
+    { type: 'countryball-analysis', label: '컨트리볼 품질 검수', config: { mode: 'countryball' } },
+    {
+        type: 'countryball-image',
+        label: '컨트리볼 이미지 생성',
+        config: { imageQuality: 'medium' },
+    },
+    { type: 'countryball-tts', label: '컨트리볼 음성 생성', config: { lang: 'ko' } },
+    { type: 'countryball-video', label: '컨트리볼 영상 합성', config: { format: '9:16', backgroundMusic: true } },
+    { type: 'integration', label: '메타데이터 생성', config: {} },
+] as const;
+
+const COUNTRYBALL_SHORTS_EDGES = [
+    { from: 0, to: 1 },
+    { from: 1, to: 2 },
+    { from: 2, to: 3 },
+    { from: 3, to: 4 },
+    { from: 4, to: 5 },
+    { from: 4, to: 6 },
+    { from: 5, to: 7 },
+    { from: 6, to: 7 },
+    { from: 7, to: 8 },
+];
+
 const IMAGE_BLOCKS = [
     {
         type: 'content',
@@ -37,6 +65,13 @@ const IMAGE_BLOCKS = [
 
 const COST_PER_BLOCK: Record<string, number> = {
     search: 0.02,
+    'countryball-brief': 0.03,
+    'countryball-script': 0.16,
+    'countryball-data': 0.01,
+    'countryball-analysis': 0.04,
+    'countryball-image': 0.7,
+    'countryball-tts': 0.1,
+    'countryball-video': 0.2,
     content: 0.15,
     data: 0.01,
     analysis: 0.05,
@@ -126,8 +161,9 @@ export const mockOrchestrator: Orchestrator = {
         const longformGateA = isLongformContentProfile(contentProfile.contentProfileId)
             ? buildLongformGateAWorkflow(userMessage, contentProfile)
             : undefined;
-        const proposalBlocks = longformGateA?.blocks ?? SHORTS_BLOCKS;
-        const proposalEdges = longformGateA?.edges;
+        const countryballShorts = !longformGateA && contentProfile.contentProfileId === 'shorts.countryball.v1';
+        const proposalBlocks = longformGateA?.blocks ?? (countryballShorts ? COUNTRYBALL_SHORTS_BLOCKS : SHORTS_BLOCKS);
+        const proposalEdges = longformGateA?.edges ?? (countryballShorts ? COUNTRYBALL_SHORTS_EDGES : undefined);
         const summary = longformGateA?.summary;
 
         // Generate 8 nodes in a vertical layout
@@ -142,6 +178,9 @@ export const mockOrchestrator: Orchestrator = {
                 {
                     ...block.config,
                     ...(block.type === 'search' ? { query: userMessage } : {}),
+                    ...(block.type === 'countryball-brief' ? { topic: userMessage, userRequest: userMessage } : {}),
+                    ...(block.type === 'countryball-script' ? { topic: userMessage, userRequest: userMessage } : {}),
+                    ...(block.type === 'countryball-image' ? { imageStyleId: 'countryball-comic' } : {}),
                     ...(block.type === 'longform-source' ? { query: userMessage, userRequest: userMessage } : {}),
                     ...(block.type === 'content' ? { topic: userMessage } : {}),
                     ...(block.type === 'longform-brief' || block.type === 'longform-script'
@@ -236,7 +275,9 @@ export const mockOrchestrator: Orchestrator = {
             approvalRequired: true,
             assistantMessage:
                 summary ??
-                `기본 12장 이미지 기반 1분 쇼츠 파이프라인 8개 블록이 필요합니다. 예상 비용: $${total.toFixed(2)}. 승인하시겠습니까?`,
+                (countryballShorts
+                    ? `컨트리볼 브리프가 장면 수를 판단하는 전용 쇼츠 파이프라인 ${nodes.length}개 블록이 필요합니다. 예상 비용: $${total.toFixed(2)}. 승인하시겠습니까?`
+                    : `기본 12장 이미지 기반 1분 쇼츠 파이프라인 ${nodes.length}개 블록이 필요합니다. 예상 비용: $${total.toFixed(2)}. 승인하시겠습니까?`),
         };
     },
 };

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { NodeBlock } from './NodeBlock';
@@ -107,6 +107,65 @@ describe('NodeBlock longform previews', () => {
         expect(screen.getByText('1. 처음부터 풀전력이면 시작부터 숨이 막혀.')).toBeTruthy();
         expect(screen.getByDisplayValue(/처음부터 풀전력이면 시작부터 숨이 막혀/)).toBeTruthy();
         expect(screen.queryByText(/이건 설정 싸움/)).toBeNull();
+    });
+
+    it('shows countryball dialogue lines as a script preview', () => {
+        testState.registry = {
+            'countryball-script': makeDefinition('countryball-script', '컨트리볼 대본 생성'),
+        };
+
+        renderNode(
+            makeNode('countryball-script', {
+                mode: 'countryball-script',
+                title: '폴란드 K2 쇼크',
+                scenes: [
+                    {
+                        sceneNumber: 1,
+                        dialogueLines: [
+                            { country: '폴란드', line: '에이, 무슨 한국산 전차야?' },
+                            { country: '한국', line: '그럼 한번 테스트해보시죠.' },
+                        ],
+                    },
+                    {
+                        sceneNumber: 2,
+                        dialogueLines: [{ country: '폴란드', line: '잠깐, 진흙탕에서 왜 날아다녀?' }],
+                    },
+                ],
+            })
+        );
+
+        expect(screen.getByText('대본 크게 보기')).toBeTruthy();
+        expect(screen.getByText('1. 폴란드: 에이, 무슨 한국산 전차야? / 한국: 그럼 한번 테스트해보시죠.')).toBeTruthy();
+        fireEvent.click(screen.getByText('대본 크게 보기'));
+        expect(screen.getByText('대본 문서')).toBeTruthy();
+        expect(screen.getByText('폴란드: 에이, 무슨 한국산 전차야?')).toBeTruthy();
+        expect(screen.getByText('한국: 그럼 한번 테스트해보시죠.')).toBeTruthy();
+    });
+
+    it('shows countryball dialogue lines from normalizedScenes', () => {
+        testState.registry = {
+            'countryball-data': makeDefinition('countryball-data', '컨트리볼 데이터 정규화'),
+        };
+
+        renderNode(
+            makeNode('countryball-data', {
+                mode: 'countryball-data',
+                title: '밤 11시 주문, 아침 도착 실화?',
+                normalizedScenes: [
+                    {
+                        sceneNumber: 1,
+                        caption: '밤 11시 주문',
+                        dialogueLines: [
+                            { country: '미국', line: '너 지금 주문한다고?' },
+                            { country: '한국', line: '응, 아침에 와.' },
+                        ],
+                    },
+                ],
+            })
+        );
+
+        expect(screen.getByText('대본 크게 보기')).toBeTruthy();
+        expect(screen.getByText('1. 미국: 너 지금 주문한다고? / 한국: 응, 아침에 와.')).toBeTruthy();
     });
 
     it('shows single-image prompt planning as an image prompt, not a script review card', () => {

@@ -23,6 +23,7 @@ ${getWorkflowPackCatalogPrompt()}
 - If the request needs current facts, URLs, prices, news, official documents, or source verification, include search.
 - If the request is just text writing, summarization, translation, or explanation, keep the workflow text/data oriented.
 - If the request is a Shorts/video request, build a video pipeline with source/script/structured data/review/image/TTS/video and optional metadata.
+- If the Shorts request explicitly asks for 컨트리볼, 국가볼, countryball, or polandball, use the dedicated countryball product flow: search -> countryball-brief -> countryball-script -> countryball-data -> countryball-analysis -> countryball-image and countryball-tts in parallel -> countryball-video -> integration. Do not use generic content/data/analysis/media-image/media-tts/media-video for countryball.
 - If the request is a longform request, use the dedicated longform production factory blocks in one canvas: longform-source -> longform-brief -> longform-script -> longform-storyboard -> longform-scene-json -> longform-review -> longform-tts -> longform-srt-align -> longform-motion-compose -> longform-render -> longform-qa -> longform-package. Gate B blocks must set mediaExecutionAllowed:false and approvalRequired:true until review approval. Do not include generic search/content/data/analysis, media-image, media-tts, media-video, or integration in the longform recipe.
 - If the request is a single image request, use content -> media-image only unless search is needed for factual visual accuracy.
 

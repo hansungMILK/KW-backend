@@ -12,6 +12,13 @@ export const BLOCK_TYPES = [
     'buffer-delay',
     'text-transform',
     'search',
+    'countryball-brief',
+    'countryball-script',
+    'countryball-data',
+    'countryball-analysis',
+    'countryball-image',
+    'countryball-tts',
+    'countryball-video',
     'content',
     'data',
     'analysis',
@@ -90,6 +97,67 @@ const NarratorLineSchema = z.union([
     }),
 ]);
 
+const CountryballVoiceRoleSchema = z.enum([
+    'narrator_short',
+    'main_tired',
+    'main_confident',
+    'rival_smug',
+    'rival_angry',
+    'neutral_serious',
+    'panic_high',
+    'deep_serious',
+    'old_teacher',
+]);
+
+const CountryballCaptionOverlaySchema = z.object({
+    type: z.enum(['dialogue', 'action', 'reaction', 'title', 'ending']),
+    text: z.string(),
+    speakerCountry: z.string().optional(),
+    anchorTarget: z.enum(['speaker', 'sceneCenter', 'topBand', 'bottomBand']),
+    preferredPosition: z.enum([
+        'upper-left',
+        'upper-center',
+        'upper-right',
+        'middle-left',
+        'center',
+        'middle-right',
+        'lower-left',
+        'lower-center',
+        'lower-right',
+    ]),
+    style: z.enum(['whiteBlack', 'yellowBlack', 'redBlack', 'smallWhite', 'titleBand']),
+    emphasisWords: z.array(z.string()).optional(),
+    avoidZones: z.array(z.string()).optional(),
+});
+
+const CountryballDialogueLineSchema = z.object({
+    country: z.string(),
+    line: z.string(),
+    tone: z.string().optional(),
+    voiceRole: CountryballVoiceRoleSchema,
+    captionEmphasis: z.array(z.string()).optional(),
+    pauseAfterMs: z.number().optional(),
+});
+
+const CountryballSceneSchema = z.object({
+    sceneId: z.string(),
+    sceneNumber: z.number().optional(),
+    timeRange: z.string().optional(),
+    scenePurpose: z.string(),
+    location: z.string(),
+    visualTone: z.string(),
+    screenAction: z.string(),
+    dialogueLines: z.array(CountryballDialogueLineSchema),
+    expressionChanges: z.array(z.string()),
+    sfx: z.array(z.string()),
+    editBeat: z.string(),
+    narratorLine: NarratorLineSchema.nullable().optional(),
+    captionOverlay: z.array(CountryballCaptionOverlaySchema),
+    props: z.array(z.string()).optional(),
+    imagePrompt: z.string().optional(),
+    durationSec: z.number().optional(),
+});
+
 /**
  * Common block executor interface.
  * Every block implements this contract.
@@ -158,6 +226,120 @@ export const SearchOutputSchema = z.object({
     presetId: z.string().optional(),
 });
 
+/** countryball-brief block */
+export const CountryballBriefOutputSchema = z.object({
+    mode: z.literal('countryball-brief'),
+    presetId: z.literal('countryball-shorts'),
+    requestTopic: z.string().optional(),
+    requestSpec: z.record(z.string(), z.unknown()).optional(),
+    keywords: z.array(z.string()).optional(),
+    articles: z.array(SourceRefSchema).optional(),
+    countryballBrief: z
+        .object({
+            targetCountry: z.string().optional(),
+            storyGenre: z.string().optional(),
+            targetFeature: z.string().optional(),
+            mainConflict: z.string().optional(),
+            recommendedSceneCount: z.number().optional(),
+            scriptVariables: z.record(z.string(), z.unknown()).optional(),
+            storyFlow: z.array(z.string()).optional(),
+            cast: z.array(z.record(z.string(), z.unknown())).optional(),
+            visualTheme: z.string().optional(),
+            soundMapping: z.record(z.string(), z.unknown()).optional(),
+            endingPayoff: z.string().optional(),
+            thumbnailTexts: z.array(z.string()).optional(),
+        })
+        .passthrough(),
+});
+
+/** countryball-script block */
+export const CountryballScriptOutputSchema = z.object({
+    mode: z.literal('countryball-script'),
+    presetId: z.literal('countryball-shorts'),
+    narrativeMode: z.literal('countryball-dialogue-skit'),
+    title: z.string(),
+    topic: z.string().optional(),
+    cast: z.array(
+        z.object({
+            country: z.string(),
+            role: z.string().optional(),
+            defaultEmotion: z.string().optional(),
+            voiceRole: CountryballVoiceRoleSchema.optional(),
+        })
+    ),
+    scenes: z.array(CountryballSceneSchema).min(1),
+    thumbnailTexts: z.array(z.string()).optional(),
+    metadata: z.record(z.unknown()).optional(),
+});
+
+/** countryball-data block */
+export const CountryballDataOutputSchema = z.object({
+    mode: z.literal('countryball-data'),
+    presetId: z.literal('countryball-shorts'),
+    normalizedScenes: z.array(CountryballSceneSchema).min(1),
+    cast: CountryballScriptOutputSchema.shape.cast,
+    metadata: z.record(z.unknown()).optional(),
+});
+
+/** countryball-image block */
+export const CountryballImageOutputSchema = z.object({
+    images: z.array(
+        z.object({
+            sceneNumber: z.number(),
+            sceneId: z.string().optional(),
+            url: z.string(),
+            width: z.number(),
+            height: z.number(),
+            prompt: z.string(),
+            captionOverlay: z.array(CountryballCaptionOverlaySchema).optional(),
+        })
+    ),
+    normalizedScenes: z.array(CountryballSceneSchema).optional(),
+    metadata: z.record(z.unknown()).optional(),
+});
+
+/** countryball-tts block */
+export const CountryballTtsOutputSchema = z.object({
+    audio: z.object({
+        url: z.string(),
+        durationSec: z.number(),
+        format: z.string(),
+        sampleRate: z.number().optional(),
+        provider: z.string().optional(),
+        model: z.string().optional(),
+        voiceMode: z.literal('countryball-role-voices').optional(),
+        voiceSegments: z
+            .array(
+                z.object({
+                    sceneId: z.string().optional(),
+                    sceneNumber: z.number(),
+                    country: z.string(),
+                    text: z.string(),
+                    voiceRole: z.string(),
+                    voiceId: z.string(),
+                    durationSec: z.number().optional(),
+                    pauseAfterMs: z.number().optional(),
+                })
+            )
+            .optional(),
+    }),
+    narrationText: z.string().optional(),
+    subtitleCues: z
+        .array(
+            z.object({
+                sceneNumber: z.number(),
+                text: z.string(),
+                role: z.enum(['title', 'dialogue', 'action', 'reaction', 'ending']).optional(),
+                speakerCountry: z.string().optional(),
+                startSec: z.number(),
+                endSec: z.number(),
+            })
+        )
+        .optional(),
+    normalizedScenes: z.array(CountryballSceneSchema).optional(),
+    metadata: z.record(z.unknown()).optional(),
+});
+
 /** content block */
 export const ContentOutputSchema = z.object({
     title: z.string().optional(),
@@ -168,6 +350,7 @@ export const ContentOutputSchema = z.object({
     requestSpec: z.record(z.string(), z.unknown()).optional(),
     outputContract: z.record(z.string(), z.unknown()).optional(),
     sourceCoverage: z.array(z.record(z.string(), z.unknown())).optional(),
+    countryballBrief: CountryballBriefOutputSchema.shape.countryballBrief.optional(),
     hook: z.string(),
     script: z
         .object({

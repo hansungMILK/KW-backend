@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getProviderApiKey } from './credential-resolver';
 import { runService } from './run-service';
 import { openaiAdapter } from '../adapters/ai/openai-adapter';
+import { isPaidOpenAIAllowed } from '../adapters/ai/paid-openai-guard';
 import { queue } from '../adapters/aws/queue';
+import { env } from '../config/env';
 import { flowRepo } from '../repositories/flow-repository';
 import { runRepo } from '../repositories/run-repository';
 
@@ -56,11 +58,13 @@ const updateRunNodeStatus = vi.mocked(runRepo.updateRunNodeStatus);
 const updateRunStatus = vi.mocked(runRepo.updateRunStatus);
 const sendQueueMessage = vi.mocked(queue.send);
 const getProviderApiKeyMock = vi.mocked(getProviderApiKey);
+const isPaidOpenAIAllowedMock = vi.mocked(isPaidOpenAIAllowed);
 const chatJson = vi.mocked(openaiAdapter.chatJson);
 
 describe('runService cost guards', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        isPaidOpenAIAllowedMock.mockReturnValue(true);
     });
 
     it('does not require provider keys for deterministic longform Gate A review nodes', async () => {
@@ -665,6 +669,53 @@ describe('runService cost guards', () => {
         expect(getProviderApiKeyMock).toHaveBeenCalledWith('openai');
         expect(putRun).toHaveBeenCalled();
         expect(sendQueueMessage).toHaveBeenCalled();
+    });
+
+    it('does not require paid provider credentials for mock-mode countryball runs', async () => {
+        const previousMode = env.orchestratorMode;
+        (env as { orchestratorMode: string }).orchestratorMode = 'mock';
+        isPaidOpenAIAllowedMock.mockReturnValue(false);
+        getFlow.mockResolvedValueOnce({
+            id: 'flow-countryball-mock',
+            name: 'Countryball mock flow',
+            state: 'READY',
+            nodes: [
+                { id: 'node-search', blockType: 'search', label: '자료 수집', config: {} },
+                { id: 'node-brief', blockType: 'countryball-brief', label: '컨트리볼 브리프', config: {} },
+                { id: 'node-script', blockType: 'countryball-script', label: '컨트리볼 대본', config: {} },
+                { id: 'node-analysis', blockType: 'countryball-analysis', label: '컨트리볼 검수', config: {} },
+                { id: 'node-image', blockType: 'countryball-image', label: '컨트리볼 이미지', config: {} },
+                { id: 'node-tts', blockType: 'countryball-tts', label: '컨트리볼 음성', config: {} },
+                { id: 'node-video', blockType: 'countryball-video', label: '컨트리볼 영상', config: {} },
+            ],
+            edges: [
+                { source: 'node-search', target: 'node-brief' },
+                { source: 'node-brief', target: 'node-script' },
+                { source: 'node-script', target: 'node-analysis' },
+                { source: 'node-analysis', target: 'node-image' },
+                { source: 'node-analysis', target: 'node-tts' },
+                { source: 'node-image', target: 'node-video' },
+                { source: 'node-tts', target: 'node-video' },
+            ],
+            createdAt: '2026-05-26T00:00:00.000Z',
+            updatedAt: '2026-05-26T00:00:00.000Z',
+        });
+        getProviderApiKeyMock.mockResolvedValue(null);
+        putRun.mockResolvedValue(undefined);
+        putRunNode.mockResolvedValue(undefined);
+        sendQueueMessage.mockResolvedValue(undefined);
+
+        try {
+            const result = await runService.createRun('flow-countryball-mock');
+
+            expect(result).toEqual(expect.objectContaining({ ok: true }));
+            expect(isPaidOpenAIAllowedMock).not.toHaveBeenCalled();
+            expect(getProviderApiKeyMock).not.toHaveBeenCalled();
+            expect(putRun).toHaveBeenCalled();
+            expect(sendQueueMessage).toHaveBeenCalled();
+        } finally {
+            (env as { orchestratorMode: string }).orchestratorMode = previousMode;
+        }
     });
 
     it('does not treat raw node apiKeyOverride config as a configured provider credential', async () => {

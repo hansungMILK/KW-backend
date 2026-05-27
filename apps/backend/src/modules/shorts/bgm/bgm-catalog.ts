@@ -58,7 +58,17 @@ export function resolveShortsBgmTrack(track: ShortsBgmTrack): ResolvedShortsBgmT
 }
 
 function resolveTrackPath(filename: string): string {
-    return isAbsolute(filename) ? filename : resolve(join(ASSET_DIR, filename));
+    if (isAbsolute(filename)) return filename;
+
+    const configuredPath = resolve(join(ASSET_DIR, filename));
+    if (existsSync(configuredPath)) return configuredPath;
+
+    if (!isAbsolute(ASSET_DIR)) {
+        const backendAssetPath = resolve(join('apps/backend', ASSET_DIR, filename));
+        if (existsSync(backendAssetPath)) return backendAssetPath;
+    }
+
+    return configuredPath;
 }
 
 export function listAvailableShortsBgmTracks(): ResolvedShortsBgmTrack[] {

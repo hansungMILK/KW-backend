@@ -28,16 +28,16 @@ export function resolveBaseUrl(env = process.env) {
 
 export function resolveWebOrigin(env = process.env) {
     const stage = env.SMOKE_STAGE || env.STAGE || 'dev';
-    const explicitOrigin = env.SMOKE_WEB_ORIGIN || env.WEB_ORIGIN;
+    const explicitOrigin = env.SMOKE_WEB_ORIGIN || env.WEB_ORIGIN || env.DEV_WEB_ORIGIN;
     if (explicitOrigin) return normalizeUrl(explicitOrigin);
 
     if (stage === 'dev') {
-        if (!env.DEV_WEB_ORIGIN) throw new Error('DEV_WEB_ORIGIN or SMOKE_WEB_ORIGIN is required for dev CORS smoke.');
-        return normalizeUrl(env.DEV_WEB_ORIGIN);
+        throw new Error('DEV_WEB_ORIGIN or SMOKE_WEB_ORIGIN is required for dev CORS smoke.');
     }
     if (stage === 'prod') {
-        if (!env.PROD_WEB_ORIGIN)
-            {throw new Error('PROD_WEB_ORIGIN or SMOKE_WEB_ORIGIN is required for prod CORS smoke.');}
+        if (!env.PROD_WEB_ORIGIN) {
+            throw new Error('PROD_WEB_ORIGIN or SMOKE_WEB_ORIGIN is required for prod CORS smoke.');
+        }
         return normalizeUrl(env.PROD_WEB_ORIGIN);
     }
     return normalizeUrl(env.LOCAL_WEB_ORIGIN || 'http://localhost:3000');

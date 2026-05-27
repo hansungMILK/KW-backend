@@ -67,7 +67,15 @@ provider:
         OPENAI_TTS_VOICE: ${env:OPENAI_TTS_VOICE, 'nova'}
         OPENAI_TTS_TIMEOUT_MS: ${env:OPENAI_TTS_TIMEOUT_MS, '120000'}
         OPENAI_TTS_MAX_ATTEMPTS: ${env:OPENAI_TTS_MAX_ATTEMPTS, '1'}
-        ELEVENLABS_TTS_VOICE_ID: ${env:ELEVENLABS_TTS_VOICE_ID, 'pNInz6obpgDQGcFmaJgB'}
+        ELEVENLABS_TTS_VOICE_ID: ${env:ELEVENLABS_TTS_VOICE_ID, ''}
+        COUNTRYBALL_TTS_VOICE_NARRATOR: ${env:COUNTRYBALL_TTS_VOICE_NARRATOR, ''}
+        COUNTRYBALL_TTS_VOICE_MAIN_TIRED: ${env:COUNTRYBALL_TTS_VOICE_MAIN_TIRED, ''}
+        COUNTRYBALL_TTS_VOICE_MAIN_CONFIDENT: ${env:COUNTRYBALL_TTS_VOICE_MAIN_CONFIDENT, ''}
+        COUNTRYBALL_TTS_VOICE_RIVAL_SMUG: ${env:COUNTRYBALL_TTS_VOICE_RIVAL_SMUG, ''}
+        COUNTRYBALL_TTS_VOICE_RIVAL_ANGRY: ${env:COUNTRYBALL_TTS_VOICE_RIVAL_ANGRY, ''}
+        COUNTRYBALL_TTS_VOICE_NEUTRAL_SERIOUS: ${env:COUNTRYBALL_TTS_VOICE_NEUTRAL_SERIOUS, ''}
+        COUNTRYBALL_TTS_VOICE_PANIC_HIGH: ${env:COUNTRYBALL_TTS_VOICE_PANIC_HIGH, ''}
+        COUNTRYBALL_TTS_VOICE_OLD_TEACHER: ${env:COUNTRYBALL_TTS_VOICE_OLD_TEACHER, ''}
         ELEVENLABS_TTS_MODEL: ${env:ELEVENLABS_TTS_MODEL, 'eleven_flash_v2_5'}
         ELEVENLABS_TTS_OUTPUT_FORMAT: ${env:ELEVENLABS_TTS_OUTPUT_FORMAT, 'mp3_44100_128'}
         ELEVENLABS_TTS_TIMEOUT_MS: ${env:ELEVENLABS_TTS_TIMEOUT_MS, '120000'}
@@ -178,15 +186,14 @@ custom:
             - http://localhost:3001
             - http://127.0.0.1:3001
         dev:
-            - https://flow-dev.eureka.codes
-            - ${env:DEV_WEB_ORIGIN, ''}
+            - ${env:DEV_WEB_ORIGIN}
             - http://localhost:3000
             - http://localhost:3001
         prod:
             - https://flow.eureka.codes
     corsAllowedOriginsCsv:
         local: http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001
-        dev: https://flow-dev.eureka.codes,${env:DEV_WEB_ORIGIN, ''},http://localhost:3000,http://localhost:3001
+        dev: ${env:DEV_WEB_ORIGIN},http://localhost:3000,http://localhost:3001
         prod: https://flow.eureka.codes
     ffmpegPath:
         local: ${env:FFMPEG_PATH, '/opt/bin/ffmpeg'}

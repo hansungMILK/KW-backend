@@ -880,11 +880,38 @@ const getVideoPreviewRecord = (value: Record<string, unknown>): Record<string, u
     return isVideoRecord(value) ? value : undefined;
 };
 
+const getScriptScenes = (record: Record<string, unknown>): Record<string, unknown>[] => {
+    const directScenes = asRecordArray(record.scenes);
+    if (directScenes.length > 0) return directScenes;
+    const normalizedScenes = asRecordArray(record.normalizedScenes);
+    if (normalizedScenes.length > 0) return normalizedScenes;
+    const nestedScript = isRecordValue(record.script) ? record.script : undefined;
+    const nestedScenes = nestedScript ? asRecordArray(nestedScript.scenes) : [];
+    if (nestedScenes.length > 0) return nestedScenes;
+    return [];
+};
+
 const buildScriptDraft = (scenes: Record<string, unknown>[]): string =>
     scenes
-        .map(scene => firstStringValue(scene.narration, scene.caption, scene.visualText))
+        .map(
+            scene =>
+                buildCountryballDialogueDraft(scene) ??
+                firstStringValue(scene.narration, scene.caption, scene.visualText)
+        )
         .filter((line): line is string => Boolean(line))
         .join('\n');
+
+const buildCountryballDialogueDraft = (scene: Record<string, unknown>): string | undefined => {
+    const dialogueLines = asRecordArray(scene.dialogueLines)
+        .map(line => {
+            const country = firstStringValue(line.country, line.speaker);
+            const text = firstStringValue(line.line, line.text);
+            if (!text) return undefined;
+            return country ? `${country}: ${text}` : text;
+        })
+        .filter((line): line is string => Boolean(line));
+    return dialogueLines.length > 0 ? dialogueLines.join(' / ') : undefined;
+};
 
 const buildLongformDraft = (value: Record<string, unknown>): string => {
     const directDraft = firstStringValue(value.fullScriptDraft);
@@ -1054,7 +1081,7 @@ const FriendlyOutputPreview: React.FC<{
     onLongformReviewApprove,
 }) => {
     const recordValue = isRecordValue(value) ? value : null;
-    const scenes = asRecordArray(recordValue?.scenes);
+    const scenes = recordValue ? getScriptScenes(recordValue) : [];
     const subtitleCues = asRecordArray(recordValue?.subtitleCues);
     const motionCues = asRecordArray(recordValue?.motionCues);
     const longformNodeType = nodeType?.startsWith('longform-') ? nodeType : undefined;

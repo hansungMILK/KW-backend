@@ -8,7 +8,15 @@ import { isLocalStage } from '../../config/env';
 import { getLocalAssetPath } from '../aws/s3';
 
 export interface VideoCompositionRequest {
-    images: Array<{ url: string; durationSec: number; title?: string; caption?: string; sourceLabel?: string }>;
+    images: Array<{
+        url: string;
+        durationSec: number;
+        title?: string;
+        caption?: string;
+        sourceLabel?: string;
+        captionPosition?: CaptionPosition;
+        captionStyle?: CaptionStyle;
+    }>;
     audioUrl?: string;
     backgroundMusic?:
         | boolean
@@ -55,6 +63,17 @@ let cachedSubtitlesSupport: boolean | undefined;
 let cachedSipsSupport: boolean | undefined;
 
 type OverlayStrategy = 'none' | 'drawtext' | 'ass' | 'image';
+export type CaptionPosition =
+    | 'upper-left'
+    | 'upper-center'
+    | 'upper-right'
+    | 'middle-left'
+    | 'center'
+    | 'middle-right'
+    | 'lower-left'
+    | 'lower-center'
+    | 'lower-right';
+export type CaptionStyle = 'whiteBlack' | 'yellowBlack' | 'redBlack' | 'smallWhite' | 'titleBand';
 
 export const ffmpegAdapter = {
     async compose(request: VideoCompositionRequest): Promise<VideoCompositionResult> {
@@ -73,6 +92,8 @@ export const ffmpegAdapter = {
                 title?: string;
                 caption?: string;
                 sourceLabel?: string;
+                captionPosition?: CaptionPosition;
+                captionStyle?: CaptionStyle;
                 overlayPath?: string;
                 subtitlePath?: string;
             }> = [];
@@ -89,6 +110,8 @@ export const ffmpegAdapter = {
                     title: image.title,
                     caption: image.caption,
                     sourceLabel: image.sourceLabel,
+                    captionPosition: image.captionPosition,
+                    captionStyle: image.captionStyle,
                 });
                 await request.onProgress?.(
                     40 + Math.round(((i + 1) / request.images.length) * 12),
@@ -251,6 +274,8 @@ function buildArgs(
         title?: string;
         caption?: string;
         sourceLabel?: string;
+        captionPosition?: CaptionPosition;
+        captionStyle?: CaptionStyle;
         overlayPath?: string;
         subtitlePath?: string;
     }>,
@@ -401,7 +426,13 @@ export function resolveOverlayFontFile(): string | undefined {
 function resolveFontCandidatePath(candidate: string): string {
     const trimmed = candidate.trim();
     if (trimmed.startsWith('/')) return trimmed;
-    return resolve(trimmed);
+    const cwdPath = resolve(trimmed);
+    if (existsSync(cwdPath)) return cwdPath;
+    if (trimmed.startsWith('assets/')) {
+        const backendAssetPath = resolve('apps/backend', trimmed);
+        if (existsSync(backendAssetPath)) return backendAssetPath;
+    }
+    return cwdPath;
 }
 
 function resolveOverlayFontsDir(): string | undefined {
@@ -412,10 +443,11 @@ function resolveOverlayFontsDir(): string | undefined {
 }
 
 export function isSupportedFontFile(candidate: string | undefined): candidate is string {
-    if (!candidate || !existsSync(candidate)) return false;
+    const resolved = candidate ? resolveFontCandidatePath(candidate) : undefined;
+    if (!resolved || !existsSync(resolved)) return false;
 
     try {
-        const header = readFileSync(candidate, { encoding: null, flag: 'r' }).subarray(0, 4);
+        const header = readFileSync(resolved, { encoding: null, flag: 'r' }).subarray(0, 4);
         const signature = header.toString('latin1');
         const sfntVersion = header.readUInt32BE(0);
         return signature === 'OTTO' || signature === 'ttcf' || sfntVersion === 0x00010000 || signature === 'true';
@@ -476,7 +508,13 @@ function roundToMillis(value: number): number {
 }
 
 async function createOverlayPng(
-    image: { title?: string; caption?: string; sourceLabel?: string },
+    image: {
+        title?: string;
+        caption?: string;
+        sourceLabel?: string;
+        captionPosition?: CaptionPosition;
+        captionStyle?: CaptionStyle;
+    },
     index: number,
     workDir: string
 ): Promise<string> {
@@ -497,7 +535,14 @@ async function createOverlayPng(
 }
 
 async function createOverlayAss(
-    image: { title?: string; caption?: string; sourceLabel?: string; durationSec?: number },
+    image: {
+        title?: string;
+        caption?: string;
+        sourceLabel?: string;
+        durationSec?: number;
+        captionPosition?: CaptionPosition;
+        captionStyle?: CaptionStyle;
+    },
     index: number,
     workDir: string
 ): Promise<string> {
@@ -511,6 +556,8 @@ function buildOverlayAss(image: {
     caption?: string;
     sourceLabel?: string;
     durationSec?: number;
+    captionPosition?: CaptionPosition;
+    captionStyle?: CaptionStyle;
 }): string {
     const end = formatAssTime(normalizeDurationSec(image.durationSec));
     const titleLines =
@@ -526,8 +573,9 @@ function buildOverlayAss(image: {
         );
     }
     if (FFMPEG_OVERLAY_MODE === 'all' && captionLines.length > 0) {
+        const captionPoint = assCaptionPoint(image.captionPosition);
         dialogues.push(
-            `Dialogue: 0,0:00:00.00,${end},Caption,,0,0,0,,{\\pos(540,1660)}${escapeAss(captionLines.join('\\N'))}`
+            `Dialogue: 0,0:00:00.00,${end},Caption,,0,0,0,,{\\pos(${captionPoint.x},${captionPoint.y})}${escapeAss(captionLines.join('\\N'))}`
         );
     }
     if ((FFMPEG_OVERLAY_MODE === 'source' || FFMPEG_OVERLAY_MODE === 'all') && sourceLabel) {
@@ -552,7 +600,13 @@ ${dialogues.join('\n')}
 `;
 }
 
-function buildOverlaySvg(image: { title?: string; caption?: string; sourceLabel?: string }): string {
+function buildOverlaySvg(image: {
+    title?: string;
+    caption?: string;
+    sourceLabel?: string;
+    captionPosition?: CaptionPosition;
+    captionStyle?: CaptionStyle;
+}): string {
     const titleLines =
         FFMPEG_OVERLAY_MODE === 'all' ? splitOverlayLines(compactOverlayText(image.title, 28), 11, 2) : [];
     const captionLines =
@@ -565,8 +619,12 @@ function buildOverlaySvg(image: { title?: string; caption?: string; sourceLabel?
             return svgText(line, 540, y, 118, color, 9);
         })
         .join('\n');
+    const captionPoint = svgCaptionPoint(image.captionPosition);
+    const captionFill = captionFillColor(image.captionStyle);
     const captionText = captionLines
-        .map((line, index) => svgText(line, 540, 1500 + index * 92, 76, REFERENCE_YELLOW, 8))
+        .map((line, index) =>
+            svgText(line, captionPoint.x, captionPoint.y + index * 92, 76, captionFill, 8, captionPoint.anchor)
+        )
         .join('\n');
     const sourceText = sourceLabel ? svgText(sourceLabel, 540, 1888, 30, 'rgba(255,255,255,0.78)', 2) : '';
 
@@ -584,11 +642,19 @@ function buildOverlaySvg(image: { title?: string; caption?: string; sourceLabel?
 </svg>`;
 }
 
-function svgText(text: string, x: number, y: number, fontSize: number, fill: string, strokeWidth: number): string {
+function svgText(
+    text: string,
+    x: number,
+    y: number,
+    fontSize: number,
+    fill: string,
+    strokeWidth: number,
+    anchor: 'start' | 'middle' | 'end' = 'middle'
+): string {
     if (!text) return '';
     const escaped = escapeXml(text);
     const family = 'Apple SD Gothic Neo, AppleGothic, Arial Unicode MS, sans-serif';
-    const shadow = `<text x="${x}" y="${y}" text-anchor="middle" font-family="${family}" font-size="${fontSize}" font-weight="900" fill="${fill}" stroke="black" stroke-width="${strokeWidth}" paint-order="stroke" dominant-baseline="middle">${escaped}</text>`;
+    const shadow = `<text x="${x}" y="${y}" text-anchor="${anchor}" font-family="${family}" font-size="${fontSize}" font-weight="900" fill="${fill}" stroke="black" stroke-width="${strokeWidth}" paint-order="stroke" dominant-baseline="middle">${escaped}</text>`;
     const fills = [
         [0, 0],
         [-1.8, 0],
@@ -600,14 +666,20 @@ function svgText(text: string, x: number, y: number, fontSize: number, fill: str
     ]
         .map(
             ([dx, dy]) =>
-                `<text x="${x + dx}" y="${y + dy}" text-anchor="middle" font-family="${family}" font-size="${fontSize}" font-weight="900" fill="${fill}" dominant-baseline="middle">${escaped}</text>`
+                `<text x="${x + dx}" y="${y + dy}" text-anchor="${anchor}" font-family="${family}" font-size="${fontSize}" font-weight="900" fill="${fill}" dominant-baseline="middle">${escaped}</text>`
         )
         .join('\n');
     return `${shadow}\n${fills}`;
 }
 
 function buildDrawtextOverlayFilter(
-    image: { title?: string; caption?: string; sourceLabel?: string },
+    image: {
+        title?: string;
+        caption?: string;
+        sourceLabel?: string;
+        captionPosition?: CaptionPosition;
+        captionStyle?: CaptionStyle;
+    },
     fontFile: string | undefined
 ): string {
     if (FFMPEG_OVERLAY_MODE === 'off' || !fontFile) return '';
@@ -629,9 +701,11 @@ function buildDrawtextOverlayFilter(
     }
 
     if (FFMPEG_OVERLAY_MODE === 'all' && captionLines.length > 0) {
+        const captionPoint = drawtextCaptionPoint(image.captionPosition);
+        const captionColor = drawtextCaptionColor(image.captionStyle);
         captionLines.forEach((line, index) => {
             filters.push(
-                `drawtext=fontfile='${font}':text='${escapeDrawtext(line)}':x=(w-text_w)/2:y=${1430 + index * 92}:fontsize=76:fontcolor=yellow:borderw=7:bordercolor=black`
+                `drawtext=fontfile='${font}':text='${escapeDrawtext(line)}':x=${captionPoint.x}:y=${captionPoint.y + index * 92}:fontsize=76:fontcolor=${captionColor}:borderw=7:bordercolor=black`
             );
         });
     }
@@ -652,6 +726,63 @@ function buildAssSubtitleFilter(subtitlePath: string, fontsDir: string | undefin
     const options = [`filename='${escapeFilterValue(subtitlePath)}'`];
     if (fontsDir) options.push(`fontsdir='${escapeFilterValue(fontsDir)}'`);
     return `,subtitles=${options.join(':')}`;
+}
+
+function drawtextCaptionPoint(position: CaptionPosition | undefined): { x: string; y: number } {
+    return {
+        x: drawtextCaptionX(position),
+        y: captionY(position),
+    };
+}
+
+function assCaptionPoint(position: CaptionPosition | undefined): { x: number; y: number } {
+    return {
+        x: captionX(position),
+        y: captionY(position),
+    };
+}
+
+function svgCaptionPoint(position: CaptionPosition | undefined): {
+    x: number;
+    y: number;
+    anchor: 'start' | 'middle' | 'end';
+} {
+    const x = captionX(position);
+    return {
+        x,
+        y: captionY(position),
+        anchor: x < 540 ? 'start' : x > 540 ? 'end' : 'middle',
+    };
+}
+
+function drawtextCaptionX(position: CaptionPosition | undefined): string {
+    if (position?.endsWith('-left')) return '64';
+    if (position?.endsWith('-right')) return 'w-text_w-64';
+    return '(w-text_w)/2';
+}
+
+function captionX(position: CaptionPosition | undefined): number {
+    if (position?.endsWith('-left')) return 64;
+    if (position?.endsWith('-right')) return 1016;
+    return 540;
+}
+
+function captionY(position: CaptionPosition | undefined): number {
+    if (position?.startsWith('upper-')) return 620;
+    if (position?.startsWith('middle-') || position === 'center') return 960;
+    return 1430;
+}
+
+function drawtextCaptionColor(style: CaptionStyle | undefined): string {
+    if (style === 'whiteBlack' || style === 'smallWhite') return 'white';
+    if (style === 'redBlack') return '#ff3b30';
+    return 'yellow';
+}
+
+function captionFillColor(style: CaptionStyle | undefined): string {
+    if (style === 'whiteBlack' || style === 'smallWhite') return '#ffffff';
+    if (style === 'redBlack') return '#ff3b30';
+    return REFERENCE_YELLOW;
 }
 
 function compactOverlayText(value: string | undefined, maxLength: number): string {

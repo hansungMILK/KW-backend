@@ -111,7 +111,7 @@ function resolveNodeExecutionTimeoutMs(
     resolvedInput: Record<string, unknown> | null,
     config?: Record<string, unknown> | null
 ): number {
-    if (blockType === 'media-image') {
+    if (blockType === 'media-image' || blockType === 'countryball-image') {
         const sceneCount =
             arrayLength(resolvedInput?.['normalizedScenes']) ??
             arrayLength(resolvedInput?.['scenes']) ??
@@ -126,11 +126,11 @@ function resolveNodeExecutionTimeoutMs(
         );
     }
 
-    if (blockType === 'media-tts' || blockType === 'longform-tts') {
+    if (blockType === 'media-tts' || blockType === 'longform-tts' || blockType === 'countryball-tts') {
         return Math.max(env.nodeExecutionTimeoutMs, env.elevenLabsTtsTimeoutMs + 30000);
     }
 
-    if (blockType === 'media-video' || blockType === 'longform-render') {
+    if (blockType === 'media-video' || blockType === 'longform-render' || blockType === 'countryball-video') {
         return Math.max(env.nodeExecutionTimeoutMs, 900000);
     }
 

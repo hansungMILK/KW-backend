@@ -7,13 +7,13 @@ test('requires deployed dev CORS smoke origin to be explicit', () => {
     assert.throws(() => resolveWebOrigin({ SMOKE_STAGE: 'dev' }), /DEV_WEB_ORIGIN or SMOKE_WEB_ORIGIN/);
 });
 
-test('allows deploy-specific web origin override for CORS smoke', () => {
+test('allows deploy-specific web origin for dev CORS smoke', () => {
     assert.equal(
         resolveWebOrigin({
             SMOKE_STAGE: 'dev',
-            DEV_WEB_ORIGIN: 'https://example.cloudfront.net/',
+            DEV_WEB_ORIGIN: 'https://preview.example.com/',
         }),
-        'https://example.cloudfront.net'
+        'https://preview.example.com'
     );
 });
 

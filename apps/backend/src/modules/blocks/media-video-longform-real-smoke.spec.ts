@@ -88,7 +88,7 @@ describe('mediaVideoBlock longform real MP4 smoke', () => {
                         url: getPublicUrl('smoke/longform-b/audio.mp3'),
                         durationSec: 2,
                         provider: 'elevenlabs',
-                        voiceId: 'pNInz6obpgDQGcFmaJgB',
+                        voiceId: 'voice-default',
                     },
                     motionCues: [
                         { sceneNumber: 1, type: 'slow-zoom-in' },
@@ -152,7 +152,7 @@ describe('mediaVideoBlock longform real MP4 smoke', () => {
                 });
                 expect(output['longformProductionQa']).toMatchObject({
                     ttsProvider: 'elevenlabs',
-                    voiceId: 'pNInz6obpgDQGcFmaJgB',
+                    voiceId: 'voice-default',
                     subtitleCueCount: 2,
                     motionCueCount: 2,
                 });

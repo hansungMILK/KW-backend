@@ -7,6 +7,13 @@ export type WorkflowCapability =
     | 'utility.delay'
     | 'text.transform'
     | 'source.collect'
+    | 'countryball.brief'
+    | 'countryball.script'
+    | 'countryball.data'
+    | 'countryball.analysis'
+    | 'countryball.image'
+    | 'countryball.tts'
+    | 'countryball.video'
     | 'text.generate'
     | 'data.structure'
     | 'quality.review'
@@ -90,6 +97,70 @@ export const ORCHESTRATOR_BLOCK_CATALOG: Record<AllowedBlockType, BlockCatalogEn
         output: 'json sources, keywords, trend score',
         whenToUse: '외부 자료, 최신성, 출처, URL, 사실 검증이 필요한 경우',
         whenNotToUse: '사용자가 단순 변환, 단일 이미지, 내부 텍스트 편집만 요청한 경우',
+    },
+    'countryball-brief': {
+        blockType: 'countryball-brief',
+        label: '컨트리볼 기획 브리프',
+        capabilities: ['countryball.brief'],
+        input: 'json sources, request spec, and user countryball intent',
+        output: 'json countryball creative brief: target feature, conflict, story flow, cast, visual theme, sound mapping',
+        whenToUse:
+            '사용자가 컨트리볼/국가볼/폴란드볼 쇼츠를 명시했을 때 search 뒤에서 전용 상황극 의도를 정리하는 경우',
+        whenNotToUse: '일반 쇼츠, 롱폼, 단일 이미지, 일반 텍스트 요청',
+    },
+    'countryball-script': {
+        blockType: 'countryball-script',
+        label: '컨트리볼 대본 생성',
+        capabilities: ['countryball.script'],
+        input: 'countryball brief, user request, and optional source context',
+        output: 'json countryball dialogue skit contract with scenes, dialogueLines, captionOverlay, sfx, edit beats',
+        whenToUse: '컨트리볼 전용 상황극 대본과 장면 계약을 작성할 때',
+        whenNotToUse: '일반 쇼츠 대본, 롱폼 대본, 단일 이미지 프롬프트',
+    },
+    'countryball-data': {
+        blockType: 'countryball-data',
+        label: '컨트리볼 데이터 정규화',
+        capabilities: ['countryball.data'],
+        input: 'countryball script contract',
+        output: 'json normalized countryball scenes preserving dialogueLines and captionOverlay',
+        whenToUse: '컨트리볼 scene/caption/voice 계약을 후속 블록이 읽기 쉽게 정규화할 때',
+        whenNotToUse: '일반 쇼츠 장면 정규화',
+    },
+    'countryball-analysis': {
+        blockType: 'countryball-analysis',
+        label: '컨트리볼 품질 검수',
+        capabilities: ['countryball.analysis'],
+        input: 'normalized countryball scenes',
+        output: 'json countryball QA result plus normalized scenes for parallel media generation',
+        whenToUse: '컨트리볼 대화 중심성, 행동 장면, captionOverlay 계약을 검수할 때',
+        whenNotToUse: '일반 사실성/출처 검수',
+    },
+    'countryball-image': {
+        blockType: 'countryball-image',
+        label: '컨트리볼 이미지 생성',
+        capabilities: ['countryball.image', 'image.generate'],
+        input: 'countryball scenes with screenAction, cast, visualTone, props, expressionChanges',
+        output: 'json countryball image assets and image prompts',
+        whenToUse: '컨트리볼 장면을 정보패널이 아닌 상황극 컷 이미지로 생성할 때',
+        whenNotToUse: '일반 쇼츠 이미지 생성',
+    },
+    'countryball-tts': {
+        blockType: 'countryball-tts',
+        label: '컨트리볼 음성 생성',
+        capabilities: ['countryball.tts', 'audio.tts'],
+        input: 'countryball dialogueLines with voiceRole',
+        output: 'json role-voice TTS audio and subtitle cues',
+        whenToUse: '국가볼 대사를 role-based ElevenLabs voice로 생성할 때',
+        whenNotToUse: '일반 나레이션 TTS',
+    },
+    'countryball-video': {
+        blockType: 'countryball-video',
+        label: '컨트리볼 영상 합성',
+        capabilities: ['countryball.video', 'video.compose'],
+        input: 'countryball image assets, role-voice audio, captionOverlay, and timing cues',
+        output: 'json countryball MP4 video asset',
+        whenToUse: '컨트리볼 전용 captionOverlay와 dialogue 중심 영상 합성을 할 때',
+        whenNotToUse: '일반 쇼츠 영상 합성',
     },
     content: {
         blockType: 'content',

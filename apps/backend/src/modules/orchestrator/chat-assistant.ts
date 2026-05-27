@@ -153,6 +153,13 @@ const isObviousChatMessage = (text: string): boolean => {
 
 const AVAILABLE_BLOCKS = [
     'search',
+    'countryball-brief',
+    'countryball-script',
+    'countryball-data',
+    'countryball-analysis',
+    'countryball-image',
+    'countryball-tts',
+    'countryball-video',
     'content',
     'data',
     'analysis',
