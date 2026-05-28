@@ -997,6 +997,7 @@ const hasFriendlyOutputPreview = (value: unknown): boolean => {
     if (!isRecordValue(value)) return false;
     return (
         isLongformGateARecord(value) ||
+        asRecordArray(value.angleOptions).length > 0 ||
         isRecordValue(value.script) ||
         asRecordArray(value.scenes).length > 0 ||
         Boolean(value.title || value.hook) ||
@@ -1070,6 +1071,7 @@ const FriendlyOutputPreview: React.FC<{
     reviewEnabled?: boolean;
     reviewedOutputSaved?: boolean;
     onReviewedOutputSave?: (value: Record<string, unknown>) => void;
+    onCountryballAngleSelect?: (angleId: string) => Promise<void> | void;
     onLongformReviewApprove?: (value: Record<string, unknown>) => Promise<void> | void;
 }> = ({
     value,
@@ -1078,9 +1080,11 @@ const FriendlyOutputPreview: React.FC<{
     reviewEnabled = false,
     reviewedOutputSaved = false,
     onReviewedOutputSave,
+    onCountryballAngleSelect,
     onLongformReviewApprove,
 }) => {
     const recordValue = isRecordValue(value) ? value : null;
+    const countryballAngleOptions = asRecordArray(recordValue?.angleOptions);
     const scenes = recordValue ? getScriptScenes(recordValue) : [];
     const subtitleCues = asRecordArray(recordValue?.subtitleCues);
     const motionCues = asRecordArray(recordValue?.motionCues);
@@ -1114,6 +1118,94 @@ const FriendlyOutputPreview: React.FC<{
             />
         </>
     );
+
+    if (countryballAngleOptions.length > 0) {
+        const recommendedChoice = isRecordValue(recordValue.recommendedChoice) ? recordValue.recommendedChoice : {};
+        const recommendedId = firstStringValue(recommendedChoice.id);
+        const selectedAngleId = firstStringValue(recordValue.selectedAngleId);
+        return withModal(
+            <div
+                className="p-2.5 bg-purple-500/10 rounded-lg border border-purple-500/30 overflow-auto"
+                style={{ maxHeight }}
+            >
+                <div className="flex items-center justify-between gap-2">
+                    <div>
+                        <div className="text-[10px] font-semibold text-purple-200">컨트리볼 앵글 후보</div>
+                        <div className="mt-0.5 text-[10px] text-muted-foreground">
+                            마음에 드는 상황극 방향을 선택하면 그 앵글로 대본이 이어집니다.
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        className="shrink-0 rounded border border-purple-400/40 px-2 py-0.5 text-[10px] text-purple-100 hover:bg-purple-500/15"
+                        onClick={event => {
+                            event.stopPropagation();
+                            setModalContent({ value: recordValue, type: 'json' });
+                        }}
+                    >
+                        전체 보기
+                    </button>
+                </div>
+                <div className="mt-2 space-y-2">
+                    {countryballAngleOptions.slice(0, 3).map((option, index) => {
+                        const id = firstStringValue(option.id) ?? `angle_${index + 1}`;
+                        const title = firstStringValue(option.title) ?? `앵글 ${index + 1}`;
+                        const pitch = firstStringValue(option.oneLinePitch);
+                        const strength = firstStringValue(option.strength, option.bestFor);
+                        const isRecommended = id === recommendedId;
+                        const isSelected = recordValue.angleSelectionStatus === 'selected' && id === selectedAngleId;
+                        return (
+                            <div
+                                key={id}
+                                className={cn(
+                                    'rounded border bg-background/45 p-2',
+                                    isSelected ? 'border-emerald-400/50' : 'border-purple-400/20'
+                                )}
+                            >
+                                <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                        <div className="flex flex-wrap items-center gap-1">
+                                            <span className="text-[10px] font-semibold text-foreground">{title}</span>
+                                            {isRecommended && (
+                                                <span className="rounded-full bg-purple-500/20 px-1.5 py-0.5 text-[9px] text-purple-100">
+                                                    추천
+                                                </span>
+                                            )}
+                                            {isSelected && (
+                                                <span className="rounded-full bg-emerald-500/20 px-1.5 py-0.5 text-[9px] text-emerald-100">
+                                                    선택됨
+                                                </span>
+                                            )}
+                                        </div>
+                                        {pitch && (
+                                            <div className="mt-1 text-[10px] text-foreground/80 line-clamp-2">
+                                                {pitch}
+                                            </div>
+                                        )}
+                                        {strength && (
+                                            <div className="mt-1 text-[9px] text-muted-foreground line-clamp-1">
+                                                {strength}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <button
+                                        type="button"
+                                        className="shrink-0 rounded bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground hover:bg-primary/90"
+                                        onClick={event => {
+                                            event.stopPropagation();
+                                            void onCountryballAngleSelect?.(id);
+                                        }}
+                                    >
+                                        {index + 1}번 선택
+                                    </button>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+        );
+    }
 
     if (longformNodeType === 'longform-srt-align' && recordValue && subtitleCues.length > 0) {
         const alignmentMethod = firstStringValue(recordValue.alignmentMethod) ?? 'TTS-duration-aligned';
@@ -1986,6 +2078,19 @@ const OutputPreview: React.FC<
                         typeof node.config?.reviewedOutput === 'string' && node.config.reviewedOutput.length > 0
                     }
                     onReviewedOutputSave={updated => onConfigChange?.('reviewedOutput', JSON.stringify(updated))}
+                    onCountryballAngleSelect={async angleId => {
+                        const patch = {
+                            selectedAngleId: angleId,
+                            angleSelectionStatus: 'selected',
+                        };
+                        if (onConfigPatch) {
+                            await onConfigPatch(patch);
+                        } else {
+                            for (const [key, value] of Object.entries(patch)) {
+                                onConfigChange?.(key, value);
+                            }
+                        }
+                    }}
                     onLongformReviewApprove={async updated => {
                         const approvalPatch = {
                             reviewedOutput: JSON.stringify(updated),

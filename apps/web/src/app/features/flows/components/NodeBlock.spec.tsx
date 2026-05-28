@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { NodeBlock } from './NodeBlock';
 
+import type { ConfigValue } from './NodeBlock';
 import type { BlockDefinitionWithFrontend, NodeData } from '@flows/flows';
 
 const testState = vi.hoisted(() => ({
@@ -52,7 +53,7 @@ const makeNode = (type: string, value: unknown): NodeData => ({
     },
 });
 
-const renderNode = (node: NodeData) =>
+const renderNode = (node: NodeData, handlers?: { onConfigPatch?: (patch: Record<string, ConfigValue>) => void }) =>
     render(
         <NodeBlock
             node={node}
@@ -63,6 +64,7 @@ const renderNode = (node: NodeData) =>
             }}
             configHandlers={{
                 onConfigChange: vi.fn(),
+                onConfigPatch: handlers?.onConfigPatch,
                 onLabelChange: vi.fn(),
                 onToggleAuto: vi.fn(),
             }}
@@ -166,6 +168,55 @@ describe('NodeBlock longform previews', () => {
 
         expect(screen.getByText('대본 크게 보기')).toBeTruthy();
         expect(screen.getByText('1. 미국: 너 지금 주문한다고? / 한국: 응, 아침에 와.')).toBeTruthy();
+    });
+
+    it('shows countryball angle options and saves the selected angle to config', () => {
+        testState.registry = {
+            'countryball-angle-lab': makeDefinition('countryball-angle-lab', '컨트리볼 앵글 선택'),
+        };
+        const onConfigPatch = vi.fn();
+
+        renderNode(
+            makeNode('countryball-angle-lab', {
+                mode: 'countryball-angle-lab',
+                angleOptions: [
+                    {
+                        id: 'angle_1',
+                        title: '새벽 문앞 괴담',
+                        oneLinePitch: '미국볼이 새벽 4시 문앞 소리를 침입 사건으로 오해한다.',
+                        selectedMechanisms: [{ id: 'ordinary_as_absurd' }],
+                        scenePreview: [{ beat: 1, scene: '밤 11시 30분 주문' }],
+                    },
+                    {
+                        id: 'angle_2',
+                        title: '계란이 출근보다 빠르다',
+                        oneLinePitch: '계란 배송이 미국볼보다 먼저 하루를 시작한다.',
+                        selectedMechanisms: [{ id: 'speed_pressure' }],
+                        scenePreview: [{ beat: 1, scene: '아침 식탁' }],
+                    },
+                    {
+                        id: 'angle_3',
+                        title: '배송 상자 신앙',
+                        oneLinePitch: '외국볼이 배송 상자를 신성한 물건처럼 받든다.',
+                        selectedMechanisms: [{ id: 'ritualization' }],
+                        scenePreview: [{ beat: 1, scene: '상자 앞 촛불' }],
+                    },
+                ],
+                recommendedChoice: { id: 'angle_1', reason: '새벽배송 체감 포인트가 가장 선명함' },
+            }),
+            { onConfigPatch }
+        );
+
+        expect(screen.getByText('컨트리볼 앵글 후보')).toBeTruthy();
+        expect(screen.getByText('새벽 문앞 괴담')).toBeTruthy();
+        expect(screen.getByText('계란이 출근보다 빠르다')).toBeTruthy();
+        fireEvent.click(screen.getByText('1번 선택'));
+        expect(onConfigPatch).toHaveBeenCalledWith(
+            expect.objectContaining({
+                selectedAngleId: 'angle_1',
+                angleSelectionStatus: 'selected',
+            })
+        );
     });
 
     it('shows single-image prompt planning as an image prompt, not a script review card', () => {

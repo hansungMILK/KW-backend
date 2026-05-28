@@ -76,6 +76,8 @@ describe('mockOrchestrator content profile proposal metadata', () => {
         expect(blockTypes).toEqual([
             'search',
             'countryball-brief',
+            'countryball-angle-lab',
+            'countryball-writer-brain',
             'countryball-script',
             'countryball-data',
             'countryball-analysis',
@@ -102,6 +104,18 @@ describe('mockOrchestrator content profile proposal metadata', () => {
         expect(proposal.proposedEdges).toContainEqual(
             expect.objectContaining({
                 sourceNodeId: nodeByType['countryball-brief'],
+                targetNodeId: nodeByType['countryball-angle-lab'],
+            })
+        );
+        expect(proposal.proposedEdges).toContainEqual(
+            expect.objectContaining({
+                sourceNodeId: nodeByType['countryball-angle-lab'],
+                targetNodeId: nodeByType['countryball-writer-brain'],
+            })
+        );
+        expect(proposal.proposedEdges).toContainEqual(
+            expect.objectContaining({
+                sourceNodeId: nodeByType['countryball-writer-brain'],
                 targetNodeId: nodeByType['countryball-script'],
             })
         );

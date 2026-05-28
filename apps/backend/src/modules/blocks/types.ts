@@ -13,6 +13,8 @@ export const BLOCK_TYPES = [
     'text-transform',
     'search',
     'countryball-brief',
+    'countryball-angle-lab',
+    'countryball-writer-brain',
     'countryball-script',
     'countryball-data',
     'countryball-analysis',
@@ -251,6 +253,101 @@ export const CountryballBriefOutputSchema = z.object({
         })
         .passthrough(),
 });
+
+const CountryballAngleMechanismSchema = z.object({
+    id: z.string(),
+    reason: z.string().optional(),
+});
+
+const CountryballAngleOptionSchema = z
+    .object({
+        id: z.string(),
+        title: z.string(),
+        oneLinePitch: z.string(),
+        coreObservation: z.string().optional(),
+        selectedMechanisms: z.array(CountryballAngleMechanismSchema).min(1),
+        storyShape: z
+            .object({
+                opening: z.string(),
+                middleEscalation: z.string(),
+                peakMoment: z.string(),
+                endingPayoff: z.string(),
+            })
+            .passthrough(),
+        scenePreview: z
+            .array(
+                z
+                    .object({
+                        beat: z.number(),
+                        scene: z.string(),
+                        whyItWorks: z.string().optional(),
+                    })
+                    .passthrough()
+            )
+            .min(3),
+        characterUse: z.record(z.string(), z.unknown()).optional(),
+        informationStrategy: z
+            .object({
+                directInfo: z.array(z.string()).optional(),
+                visualInfo: z.array(z.string()).optional(),
+                hiddenBackgroundInfo: z.array(z.string()).optional(),
+            })
+            .passthrough()
+            .optional(),
+        thumbnailPotential: z.string().optional(),
+        strength: z.string().optional(),
+        risk: z.string().optional(),
+        bestFor: z.string().optional(),
+        score: z.record(z.string(), z.number()).optional(),
+    })
+    .passthrough();
+
+/** countryball-angle-lab block */
+export const CountryballAngleLabOutputSchema = z.object({
+    mode: z.literal('countryball-angle-lab'),
+    presetId: z.literal('countryball-shorts'),
+    requestTopic: z.string().optional(),
+    angleOptions: z.array(CountryballAngleOptionSchema).length(3),
+    selectedAngleId: z.string().optional(),
+    selectedAngle: CountryballAngleOptionSchema.optional(),
+    angleSelectionStatus: z.enum(['pending', 'selected']).optional(),
+    recommendedChoice: z
+        .object({
+            id: z.string(),
+            reason: z.string().optional(),
+        })
+        .passthrough(),
+    selectionPrompt: z.string().optional(),
+    metadata: z.record(z.unknown()).optional(),
+});
+
+/** countryball-writer-brain block */
+export const CountryballWriterBrainOutputSchema = z
+    .object({
+        mode: z.literal('countryball-writer-brain'),
+        presetId: z.literal('countryball-shorts'),
+        selectedAngleId: z.string(),
+        writerBrain: z.record(z.string(), z.unknown()),
+        storyBrief: z
+            .object({
+                setting: z.string().optional(),
+                characterEngine: z.record(z.string(), z.unknown()).optional(),
+                sceneFlow: z.array(z.record(z.string(), z.unknown())).min(1),
+            })
+            .passthrough(),
+        informationControl: z
+            .object({
+                canSayDirectly: z.array(z.string()).optional(),
+                showVisually: z.array(z.string()).optional(),
+                backgroundOnly: z.array(z.string()).optional(),
+                mustNotSayLikeLecture: z.array(z.string()).optional(),
+            })
+            .passthrough(),
+        scriptRules: z.record(z.string(), z.unknown()).optional(),
+        recommendedSceneCount: z.number().optional(),
+        metadata: z.record(z.unknown()).optional(),
+    })
+    .passthrough();
 
 /** countryball-script block */
 export const CountryballScriptOutputSchema = z.object({

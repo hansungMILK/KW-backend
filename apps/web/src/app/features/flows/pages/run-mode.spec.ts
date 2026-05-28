@@ -30,6 +30,13 @@ const longformScriptNode = (config: Record<string, unknown>): NodeData => ({
     config,
 });
 
+const countryballAngleLabNode = (config: Record<string, unknown>): NodeData => ({
+    id: 'node-countryball-angle-lab',
+    type: 'countryball-angle-lab',
+    name: 'Countryball angle lab',
+    config,
+});
+
 describe('workflow run mode', () => {
     it('keeps the run button disabled while a workflow is still running', () => {
         expect(
@@ -176,6 +183,33 @@ describe('workflow run mode', () => {
         ).toEqual({
             executionMode: 'step',
             scriptReviewFirst: true,
+        });
+    });
+
+    it('runs countryball production in step mode until a story angle is selected', () => {
+        expect(
+            getWorkflowRunMode([
+                countryballAngleLabNode({
+                    reviewMode: 'script-first',
+                }),
+            ])
+        ).toEqual({
+            executionMode: 'step',
+            scriptReviewFirst: true,
+        });
+    });
+
+    it('runs the full countryball production workflow after a story angle is selected', () => {
+        expect(
+            getWorkflowRunMode([
+                countryballAngleLabNode({
+                    reviewMode: 'script-first',
+                    selectedAngleId: 'angle_1',
+                }),
+            ])
+        ).toEqual({
+            executionMode: 'full',
+            scriptReviewFirst: false,
         });
     });
 

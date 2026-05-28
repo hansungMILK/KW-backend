@@ -25,6 +25,7 @@ Hard rules:
 - The explicit user plot is binding. If the user says "ignore -> test -> surprise -> reorder", preserve that beat order and translate it into Countryball skit scenes.
 - If the input includes a recommended or user-selected scene count, return exactly the requested scene count. If no count is provided, choose the number of scenes from story density and keep the returned scenes length equal to that choice.
 - The whole output must feel like one continuous skit, not disconnected facts.
+- If the input includes a countryball-writer-brain contract, it is binding. Follow its selectedAngleId, writerBrain, storyBrief.sceneFlow, informationControl, and scriptRules before any source facts.
 - Before writing scenes, use the brief's scriptVariables or infer them: targetCountry, targetFeature, comparisonCountries, mainConflict, storyGenre, BGM_Track_A, BGM_Track_B, visualTheme, skitPremise, setting, comicMechanism, emotionalArc, payoff, speechFlavorPlan, and voiceRolePlan.
 - Use the brief's skitPremise, setting, comicMechanism, emotionalArc, payoff, and storyFlow as the spine when present.
 - Use a Shorts-native dramatic arc when it fits: context/setup, build-up, turning point/BGM switch, showcase/climax, resolution/ending. Do not force this arc when the user plot clearly needs a different shape.
@@ -82,17 +83,18 @@ export const countryballScriptBlock: BlockExecutor = {
         const start = Date.now();
         const topic = extractTopic(input, config);
         const brief = extractBrief(input);
-        const sceneCount = resolveSceneCount(input, config, brief);
+        const writerBrain = extractWriterBrain(input);
+        const sceneCount = resolveSceneCount(input, config, brief, writerBrain);
 
         if (env.orchestratorMode === 'mock') {
             const output = normalizeCountryballScriptOutput(
                 buildFallbackScript(
                     topic,
-                    brief,
+                    writerBrain ?? brief,
                     sceneCount ?? readSceneCount(brief?.['recommendedSceneCount'], 5) ?? 5
                 ),
                 topic,
-                brief,
+                writerBrain ?? brief,
                 sceneCount
             );
             return { output, durationMs: Date.now() - start };
@@ -101,7 +103,7 @@ export const countryballScriptBlock: BlockExecutor = {
         const response = await openaiAdapter.chatJson({
             model: env.openaiModel,
             systemPrompt: COUNTRYBALL_SCRIPT_SYSTEM_PROMPT,
-            userMessage: buildScriptUserMessage(topic, brief, sceneCount, input),
+            userMessage: buildScriptUserMessage(topic, brief, writerBrain, sceneCount, input),
             maxTokens: env.openaiCountryballContentMaxTokens,
         });
         const parsed = parseJsonLike(response.content);
@@ -111,7 +113,7 @@ export const countryballScriptBlock: BlockExecutor = {
             );
         }
 
-        const output = normalizeCountryballScriptOutput(parsed, topic, brief, sceneCount);
+        const output = normalizeCountryballScriptOutput(parsed, topic, writerBrain ?? brief, sceneCount);
         const validated = CountryballScriptOutputSchema.safeParse(output);
         if (!validated.success) {
             throw new Error(`[countryball-script] Output schema validation failed: ${validated.error.message}`);
@@ -124,6 +126,7 @@ export const countryballScriptBlock: BlockExecutor = {
 function buildScriptUserMessage(
     topic: string,
     brief: Record<string, unknown> | undefined,
+    writerBrain: Record<string, unknown> | undefined,
     sceneCount: number | undefined,
     input: unknown
 ): string {
@@ -132,19 +135,26 @@ function buildScriptUserMessage(
         sceneCount
             ? `SCENE COUNT:\n${sceneCount}\nReturn exactly ${sceneCount} scenes.`
             : 'SCENE COUNT:\nAI_DECIDES\nChoose a scene count from 5-16 based on story density, then return that exact number of scenes.',
+        writerBrain ? `WRITER BRAIN CONTRACT:\n${JSON.stringify(writerBrain, null, 2)}` : undefined,
         brief ? `COUNTRYBALL BRIEF:\n${JSON.stringify(brief)}` : undefined,
-        isRecord(input) && Array.isArray(input['articles'])
+        !writerBrain && isRecord(input) && Array.isArray(input['articles'])
             ? `OPTIONAL SOURCES:\n${JSON.stringify(input['articles']).slice(0, 5000)}`
             : undefined,
         [
             'Write a complete countryball dialogue skit contract.',
             'Preserve the explicit user plot order when the request contains one.',
+            writerBrain
+                ? 'WRITER BRAIN CONTRACT is binding: follow selectedAngleId, storyBrief.sceneFlow, visualGag, characterAction, informationControl, and scriptRules. Do not mine raw source facts for lecture dialogue.'
+                : undefined,
             'COUNTRYBALL SKIT SPINE: Use skitPremise, setting, comicMechanism, emotionalArc, payoff, storyFlow, speechFlavorPlan, and voiceRolePlan from the brief. If they are present, they are binding.',
+            'If informationControl.mustNotSayLikeLecture exists, those words may appear as props, captions, or background logic, but must not become long explanatory dialogue.',
             'Include recommendedSceneCount equal to scenes.length.',
             'Do not write narrator-only explanation.',
             'Do not put captions inside image prompts.',
             'The final scenes must be understandable from countryball action, expression, and dialogue.',
-        ].join('\n'),
+        ]
+            .filter(Boolean)
+            .join('\n'),
     ]
         .filter(Boolean)
         .join('\n\n');
@@ -456,8 +466,9 @@ function normalizePosition(
         'lower-center',
         'lower-right',
     ];
-    if (allowed.includes(value as CountryballCaptionOverlay['preferredPosition']))
-        {return value as CountryballCaptionOverlay['preferredPosition'];}
+    if (allowed.includes(value as CountryballCaptionOverlay['preferredPosition'])) {
+        return value as CountryballCaptionOverlay['preferredPosition'];
+    }
     if (type === 'title') return 'upper-center';
     if (type === 'ending') return 'lower-center';
     return 'middle-right';
@@ -513,6 +524,15 @@ function extractBrief(input: unknown): Record<string, unknown> | undefined {
     return undefined;
 }
 
+function extractWriterBrain(input: unknown): Record<string, unknown> | undefined {
+    if (!isRecord(input)) return undefined;
+    if (input['mode'] === 'countryball-writer-brain') return input;
+    if (isRecord(input['writerBrain']) || isRecord(input['storyBrief']) || isRecord(input['informationControl'])) {
+        return input;
+    }
+    return undefined;
+}
+
 function timeRangeForScene(sceneNumber: number, sceneCount: number): string {
     const start = Math.round(((sceneNumber - 1) / sceneCount) * 60);
     const end = Math.round((sceneNumber / sceneCount) * 60);
@@ -530,10 +550,12 @@ function detectTargetCountry(text: string): string {
 function resolveSceneCount(
     input: unknown,
     config: Record<string, unknown> | undefined,
-    brief: Record<string, unknown> | undefined
+    brief: Record<string, unknown> | undefined,
+    writerBrain: Record<string, unknown> | undefined
 ): number | undefined {
     return (
         readSceneCount(config?.['scenes'] ?? config?.['sceneCount'] ?? config?.['count']) ??
+        readSceneCount(writerBrain?.['recommendedSceneCount']) ??
         readSceneCount(brief?.['recommendedSceneCount']) ??
         readSceneCount(isRecord(input) ? input['recommendedSceneCount'] : undefined)
     );

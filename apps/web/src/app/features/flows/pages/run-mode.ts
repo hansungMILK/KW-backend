@@ -92,6 +92,19 @@ const hasApprovedLongformReview = (node: NodeData | undefined): boolean => {
     );
 };
 
+const hasSelectedCountryballAngle = (node: NodeData | undefined): boolean => {
+    const config = node?.config;
+    if (!config) return false;
+    const selectedAngleId = config['selectedAngleId'];
+    return (
+        config['angleSelectionStatus'] === 'selected' ||
+        (typeof selectedAngleId === 'string' && selectedAngleId.trim().length > 0) ||
+        (!!config['selectedAngle'] &&
+            typeof config['selectedAngle'] === 'object' &&
+            !Array.isArray(config['selectedAngle']))
+    );
+};
+
 const isLongformGateANode = (node: NodeData): boolean => {
     const type = getWorkflowNodeType(node);
     return (
@@ -112,6 +125,9 @@ export const getWorkflowRunMode = (nodes: NodeData[] | undefined): WorkflowRunMo
             }
             if (type === 'longform-review') {
                 return node.config?.['reviewMode'] === 'script-first' && !longformGateAApproved;
+            }
+            if (type === 'countryball-angle-lab') {
+                return node.config?.['reviewMode'] === 'script-first' && !hasSelectedCountryballAngle(node);
             }
             return false;
         }) ?? false;

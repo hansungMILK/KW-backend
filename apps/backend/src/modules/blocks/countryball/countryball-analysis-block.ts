@@ -105,6 +105,20 @@ function validateScenes(
                     sceneNumber,
                 });
             }
+            if (isLectureLikeDialogue(lineText)) {
+                issues.push({
+                    severity: 'critical',
+                    message: '컨트리볼 대사는 강의형 대사가 아니라 상황 속 짧은 반응이어야 합니다.',
+                    sceneNumber,
+                });
+            }
+            if (isWeakAcceptanceLine(lineText)) {
+                issues.push({
+                    severity: 'high',
+                    message: '컨트리볼 엔딩/반응은 납득 설명으로 끝나면 안 됩니다.',
+                    sceneNumber,
+                });
+            }
             if (country) dialogueCountries.add(country);
             if (voiceRole) dialogueVoiceRoles.add(voiceRole);
         }
@@ -157,6 +171,18 @@ function text(input: unknown): string {
 function hasMechanicalJapaneseSuffix(country: string, line: string): boolean {
     if (!/일본|japan/i.test(country)) return false;
     return /(요|네요|합니다|입니다|하죠|하지요)[.。!！?？]*\s*(데스|です)[!！.。?？]*$/i.test(line);
+}
+
+function isLectureLikeDialogue(line: string): boolean {
+    const lectureTerms = ['인프라', '자동화', '투자', '전국망', '시스템', '구조', '정책', '고도화'];
+    const causalTerms = ['그러니까', '때문', '가능', '굴러', '묶어', '처리', '운영'];
+    const lectureTermCount = lectureTerms.filter(term => line.includes(term)).length;
+    if (lectureTermCount >= 2) return true;
+    return lectureTermCount >= 1 && causalTerms.some(term => line.includes(term)) && line.length > 28;
+}
+
+function isWeakAcceptanceLine(line: string): boolean {
+    return /납득|이해했어|이해했어요|완전 이해|오케이.*이제/.test(line);
 }
 
 function isRecord(input: unknown): input is Record<string, unknown> {

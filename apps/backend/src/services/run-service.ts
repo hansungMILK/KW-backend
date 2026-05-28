@@ -215,6 +215,8 @@ const LEGACY_BLOCK_PROVIDER_MAP: Record<string, ApiKeyProvider> = {
     'media-tts': 'elevenlabs',
     search: 'anthropic',
     'countryball-brief': 'openai',
+    'countryball-angle-lab': 'openai',
+    'countryball-writer-brain': 'openai',
     'countryball-script': 'openai',
     'countryball-analysis': 'openai',
     'countryball-image': 'openai',
@@ -228,6 +230,8 @@ const LEGACY_BLOCK_PROVIDER_MAP: Record<string, ApiKeyProvider> = {
 const OPENAI_BLOCK_PROVIDER_MAP: Record<string, ApiKeyProvider> = {
     search: 'openai',
     'countryball-brief': 'openai',
+    'countryball-angle-lab': 'openai',
+    'countryball-writer-brain': 'openai',
     'countryball-script': 'openai',
     'countryball-analysis': 'openai',
     'countryball-image': 'openai',
@@ -632,6 +636,17 @@ const LONGFORM_GATE_B_BLOCK_TYPES = new Set([
     'longform-package',
 ]);
 
+const COUNTRYBALL_GATE_B_BLOCK_TYPES = new Set([
+    'countryball-writer-brain',
+    'countryball-script',
+    'countryball-data',
+    'countryball-analysis',
+    'countryball-image',
+    'countryball-tts',
+    'countryball-video',
+    'integration',
+]);
+
 const estimateRunCostUsd = (nodes: Array<Record<string, unknown>>): number => {
     let total = 0;
 
@@ -643,6 +658,12 @@ const estimateRunCostUsd = (nodes: Array<Record<string, unknown>>): number => {
                 break;
             case 'countryball-brief':
                 total += 0.03;
+                break;
+            case 'countryball-angle-lab':
+                total += 0.04;
+                break;
+            case 'countryball-writer-brain':
+                total += 0.04;
                 break;
             case 'countryball-script':
                 total += 0.08;
@@ -856,6 +877,24 @@ const isUnapprovedLongformGateBNode = (node: Record<string, unknown>): boolean =
     return LONGFORM_GATE_B_BLOCK_TYPES.has(getBlockType(node)) && !hasApprovedLongformGateAArtifact(node);
 };
 
+const isCountryballAngleLabNode = (node: Record<string, unknown>): boolean =>
+    getBlockType(node) === 'countryball-angle-lab';
+
+const hasSelectedCountryballAngle = (node: Record<string, unknown>): boolean => {
+    const config = getNodeConfig(node);
+    const data = getNodeData(node);
+    const records = [config, data];
+
+    return records.some(record => {
+        const selectedAngleId = record['selectedAngleId'];
+        return (
+            record['angleSelectionStatus'] === 'selected' ||
+            (typeof selectedAngleId === 'string' && selectedAngleId.trim().length > 0) ||
+            isRecord(record['selectedAngle'])
+        );
+    });
+};
+
 const getPreflightNodesForRun = (
     nodes: Array<Record<string, unknown>>,
     executionMode: 'full' | 'step'
@@ -867,8 +906,18 @@ const getPreflightNodesForRun = (
         nodes.some(isLongformReviewNode) &&
         nodes.some(isUnapprovedLongformGateBNode);
 
-    if (!shouldStopForReview) return nodes;
-    return nodes.filter(node => !LONGFORM_GATE_B_BLOCK_TYPES.has(getBlockType(node)));
+    const shouldStopForCountryballAngle =
+        executionMode === 'step' &&
+        nodes.some(isCountryballAngleLabNode) &&
+        !nodes.some(node => isCountryballAngleLabNode(node) && hasSelectedCountryballAngle(node));
+
+    if (!shouldStopForReview && !shouldStopForCountryballAngle) return nodes;
+    return nodes.filter(node => {
+        const blockType = getBlockType(node);
+        if (shouldStopForReview && LONGFORM_GATE_B_BLOCK_TYPES.has(blockType)) return false;
+        if (shouldStopForCountryballAngle && COUNTRYBALL_GATE_B_BLOCK_TYPES.has(blockType)) return false;
+        return true;
+    });
 };
 
 const requiresPaidOpenAI = async (nodes: Array<Record<string, unknown>>): Promise<boolean> => {

@@ -5,6 +5,8 @@ import type { WorkflowPackManifest } from './types';
 const countryballBlocks = [
     { blockType: 'search', label: '컨트리볼 자료 수집' },
     { blockType: 'countryball-brief', label: '컨트리볼 기획 브리프' },
+    { blockType: 'countryball-angle-lab', label: '컨트리볼 앵글 선택' },
+    { blockType: 'countryball-writer-brain', label: '컨트리볼 작가 설계' },
     { blockType: 'countryball-script', label: '컨트리볼 대본 생성' },
     { blockType: 'countryball-data', label: '컨트리볼 데이터 정규화' },
     { blockType: 'countryball-analysis', label: '컨트리볼 품질 검수' },
@@ -20,10 +22,12 @@ const countryballEdges = [
     { from: 2, to: 3 },
     { from: 3, to: 4 },
     { from: 4, to: 5 },
-    { from: 4, to: 6 },
-    { from: 5, to: 7 },
+    { from: 5, to: 6 },
     { from: 6, to: 7 },
-    { from: 7, to: 8 },
+    { from: 6, to: 8 },
+    { from: 7, to: 9 },
+    { from: 8, to: 9 },
+    { from: 9, to: 10 },
 ];
 
 export const countryballShortsPack: WorkflowPackManifest = {
@@ -35,6 +39,8 @@ export const countryballShortsPack: WorkflowPackManifest = {
     capabilities: [
         'source.collect',
         'countryball.brief',
+        'countryball.angle-lab',
+        'countryball.writer-brain',
         'countryball.script',
         'countryball.data',
         'countryball.analysis',
@@ -45,6 +51,8 @@ export const countryballShortsPack: WorkflowPackManifest = {
     ],
     blocks: [
         contributionFor('countryball-brief'),
+        contributionFor('countryball-angle-lab'),
+        contributionFor('countryball-writer-brain'),
         contributionFor('countryball-script'),
         contributionFor('countryball-data'),
         contributionFor('countryball-analysis'),
@@ -63,6 +71,8 @@ export const countryballShortsPack: WorkflowPackManifest = {
             requiredCapabilities: [
                 'source.collect',
                 'countryball.brief',
+                'countryball.angle-lab',
+                'countryball.writer-brain',
                 'countryball.script',
                 'countryball.data',
                 'countryball.analysis',
@@ -73,7 +83,7 @@ export const countryballShortsPack: WorkflowPackManifest = {
             ],
             defaultBlocks: countryballBlocks,
             defaultEdges: countryballEdges,
-            costPolicy: { estimatedCostUsd: 0.93, hardCapUsd: 2, requiresApproval: true },
+            costPolicy: { estimatedCostUsd: 1.01, hardCapUsd: 2, requiresApproval: true },
         },
     ],
 };

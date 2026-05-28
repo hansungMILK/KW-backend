@@ -29,6 +29,8 @@ const SHORTS_BLOCKS = [
 const COUNTRYBALL_SHORTS_BLOCKS = [
     { type: 'search', label: '자료 수집', config: { query: '컨트리볼 쇼츠 제작' } },
     { type: 'countryball-brief', label: '컨트리볼 기획 브리프', config: {} },
+    { type: 'countryball-angle-lab', label: '컨트리볼 앵글 선택', config: { reviewMode: 'script-first' } },
+    { type: 'countryball-writer-brain', label: '컨트리볼 작가 설계', config: {} },
     { type: 'countryball-script', label: '컨트리볼 대본 생성', config: { durationSec: 60 } },
     { type: 'countryball-data', label: '컨트리볼 데이터 정규화', config: {} },
     { type: 'countryball-analysis', label: '컨트리볼 품질 검수', config: { mode: 'countryball' } },
@@ -48,10 +50,12 @@ const COUNTRYBALL_SHORTS_EDGES = [
     { from: 2, to: 3 },
     { from: 3, to: 4 },
     { from: 4, to: 5 },
-    { from: 4, to: 6 },
-    { from: 5, to: 7 },
+    { from: 5, to: 6 },
     { from: 6, to: 7 },
-    { from: 7, to: 8 },
+    { from: 6, to: 8 },
+    { from: 7, to: 9 },
+    { from: 8, to: 9 },
+    { from: 9, to: 10 },
 ];
 
 const IMAGE_BLOCKS = [
@@ -66,6 +70,8 @@ const IMAGE_BLOCKS = [
 const COST_PER_BLOCK: Record<string, number> = {
     search: 0.02,
     'countryball-brief': 0.03,
+    'countryball-angle-lab': 0.04,
+    'countryball-writer-brain': 0.04,
     'countryball-script': 0.16,
     'countryball-data': 0.01,
     'countryball-analysis': 0.04,
@@ -179,6 +185,10 @@ export const mockOrchestrator: Orchestrator = {
                     ...block.config,
                     ...(block.type === 'search' ? { query: userMessage } : {}),
                     ...(block.type === 'countryball-brief' ? { topic: userMessage, userRequest: userMessage } : {}),
+                    ...(block.type === 'countryball-angle-lab' ? { topic: userMessage, userRequest: userMessage } : {}),
+                    ...(block.type === 'countryball-writer-brain'
+                        ? { topic: userMessage, userRequest: userMessage }
+                        : {}),
                     ...(block.type === 'countryball-script' ? { topic: userMessage, userRequest: userMessage } : {}),
                     ...(block.type === 'countryball-image' ? { imageStyleId: 'countryball-comic' } : {}),
                     ...(block.type === 'longform-source' ? { query: userMessage, userRequest: userMessage } : {}),

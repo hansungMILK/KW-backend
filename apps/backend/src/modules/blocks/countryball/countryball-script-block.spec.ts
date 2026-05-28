@@ -96,6 +96,82 @@ describe('countryballScriptBlock prompt contract', () => {
         expect(result.output['metadata']).toEqual(expect.objectContaining({ recommendedSceneCount: 7 }));
     });
 
+    it('uses the selected writer brain as the binding skit contract instead of raw source facts', async () => {
+        vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
+            content: JSON.stringify({
+                title: '새벽 문앞 괴담',
+                topic: '밤늦게 주문하고 아침에 도착하는 한국 새벽배송',
+                recommendedSceneCount: 6,
+                cast: [
+                    {
+                        country: '한국',
+                        role: '새벽배송이 일상인 주인공',
+                        defaultEmotion: 'calm',
+                        voiceRole: 'main_confident',
+                    },
+                    {
+                        country: '미국',
+                        role: '새벽 문앞 소리를 침입으로 오해하는 리액션 담당',
+                        defaultEmotion: 'panic',
+                        voiceRole: 'panic_high',
+                    },
+                ],
+                scenes: Array.from({ length: 6 }, (_, index) => makeScene(index + 1)),
+                thumbnailTexts: ['새벽 4시 문앞 소리'],
+            }),
+            model: 'gpt-test',
+            inputTokens: 1,
+            outputTokens: 1,
+            latencyMs: 1,
+        });
+
+        await countryballScriptBlock.execute({
+            topic: '컨트리볼쇼츠제작. 주제: 밤늦게 주문하고 아침에 도착하는 한국 국뽕 쇼츠',
+            mode: 'countryball-writer-brain',
+            selectedAngleId: 'angle_1',
+            writerBrain: {
+                bestStoryAngle: '새벽배송을 물류 설명이 아니라 새벽 4시 문앞 괴담처럼 시작한다.',
+                informationUseRule: '인프라 설명은 대사가 아니라 시간, 상자, 문앞 소리로만 보여준다.',
+            },
+            storyBrief: {
+                setting: '한국볼의 방, 새벽 문앞 복도, 아침 식탁',
+                sceneFlow: [
+                    {
+                        beat: 1,
+                        scene: '밤 11시 30분 한국볼이 계란을 주문한다.',
+                        characterAction: '미국볼이 시계를 보고 굳는다.',
+                        visualGag: '미국볼 머리 위 다음 주 배송 상상 자막',
+                        avoid: '물류 인프라 설명',
+                    },
+                ],
+            },
+            informationControl: {
+                canSayDirectly: ['밤 주문', '새벽 도착', '신선식품'],
+                showVisually: ['새벽 4시 알림', '문앞 상자', '계란'],
+                backgroundOnly: ['물류센터', '전국망'],
+                mustNotSayLikeLecture: ['인프라', '자동화', '투자', '전국망', '시스템'],
+            },
+            scriptRules: {
+                humorRule: '정보보다 미국볼의 오해와 리액션이 웃겨야 함',
+                endingRule: '상자 숭배 또는 계란 출근 같은 이미지로 끝낼 것',
+            },
+            recommendedSceneCount: 6,
+            articles: [
+                {
+                    title: '배송 인프라 설명 기사',
+                    summary: '물류 인프라, 자동화, 투자, 전국망이 핵심이라는 설명',
+                },
+            ],
+        });
+
+        const request = vi.mocked(openaiAdapter.chatJson).mock.calls[0]?.[0].userMessage ?? '';
+        expect(request).toContain('WRITER BRAIN CONTRACT');
+        expect(request).toContain('새벽 4시 문앞 괴담');
+        expect(request).toContain('mustNotSayLikeLecture');
+        expect(request).toContain('인프라');
+        expect(request).not.toContain('OPTIONAL SOURCES');
+    });
+
     it('rejects model output that ignores an explicit selected scene count', async () => {
         vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
             content: JSON.stringify({

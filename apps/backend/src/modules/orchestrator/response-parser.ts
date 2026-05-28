@@ -19,6 +19,8 @@ export const ALLOWED_BLOCK_TYPES = [
     'text-transform',
     'search',
     'countryball-brief',
+    'countryball-angle-lab',
+    'countryball-writer-brain',
     'countryball-script',
     'countryball-data',
     'countryball-analysis',

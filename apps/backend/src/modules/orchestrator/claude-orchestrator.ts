@@ -30,6 +30,8 @@ const COST_ESTIMATES: Record<AllowedBlockType, number> = {
     'text-transform': 0,
     search: 0.02,
     'countryball-brief': 0.03,
+    'countryball-angle-lab': 0.04,
+    'countryball-writer-brain': 0.04,
     'countryball-script': 0.16,
     'countryball-data': 0.01,
     'countryball-analysis': 0.04,

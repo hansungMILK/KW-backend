@@ -505,6 +505,8 @@ describe('openaiOrchestrator longform Gate A', () => {
         expect(proposal.proposedNodes.map(node => node.blockType)).toEqual([
             'search',
             'countryball-brief',
+            'countryball-angle-lab',
+            'countryball-writer-brain',
             'countryball-script',
             'countryball-data',
             'countryball-analysis',
@@ -517,7 +519,9 @@ describe('openaiOrchestrator longform Gate A', () => {
         expect(proposal.proposedNodes.map(node => node.blockType)).not.toContain('media-image');
 
         const scriptNode = proposal.proposedNodes.find(node => node.blockType === 'countryball-script');
+        const angleNode = proposal.proposedNodes.find(node => node.blockType === 'countryball-angle-lab');
         const imageNode = proposal.proposedNodes.find(node => node.blockType === 'countryball-image');
+        expect(angleNode?.config).toEqual(expect.objectContaining({ reviewMode: 'script-first' }));
         expect(scriptNode?.config).toEqual(
             expect.objectContaining({
                 topic: expect.stringContaining('컨트리볼 쇼츠'),

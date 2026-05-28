@@ -91,6 +91,31 @@ describe('countryballAnalysisBlock', () => {
             /일본볼 말투|기계적/
         );
     });
+
+    it('rejects lecture-style infrastructure dialogue and weak acceptance endings', async () => {
+        const scenes = makeScenes();
+        scenes[2] = {
+            ...scenes[2],
+            dialogueLines: [
+                {
+                    country: '한국',
+                    line: '투자 크게 하고, 자동화 깔고, 전국망으로 묶어. 그러니까 빨라지는 거지.',
+                    tone: 'explainer',
+                    voiceRole: 'main_confident',
+                },
+                {
+                    country: '미국',
+                    line: '오케이, 이제 완전 납득.',
+                    tone: 'flat',
+                    voiceRole: 'panic_high',
+                },
+            ],
+        };
+
+        await expect(countryballAnalysisBlock.execute({ normalizedScenes: scenes })).rejects.toThrow(
+            /강의형 대사|납득/
+        );
+    });
 });
 
 function makeScenes() {

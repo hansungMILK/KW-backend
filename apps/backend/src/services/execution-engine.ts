@@ -51,7 +51,7 @@ function isExecutionTimeoutError(err: unknown): boolean {
 }
 
 function isStepReviewStopNode(blockType: string): boolean {
-    return blockType === 'content' || blockType === 'longform-review';
+    return blockType === 'content' || blockType === 'longform-review' || blockType === 'countryball-angle-lab';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -69,10 +69,23 @@ function isApprovedLongformReviewOutput(value: unknown): boolean {
     );
 }
 
+function isSelectedCountryballAngleOutput(value: unknown): boolean {
+    if (!isRecord(value)) return false;
+    const selectedAngleId = value['selectedAngleId'];
+    return (
+        value['angleSelectionStatus'] === 'selected' ||
+        (typeof selectedAngleId === 'string' && selectedAngleId.trim().length > 0) ||
+        isRecord(value['selectedAngle'])
+    );
+}
+
 function shouldStopAtStepReviewNode(node: { blockType: string; status: string; outputPayload?: unknown }): boolean {
     if (node.status !== 'COMPLETED' || !isStepReviewStopNode(node.blockType)) return false;
     if (node.blockType === 'longform-review') {
         return !isApprovedLongformReviewOutput(node.outputPayload);
+    }
+    if (node.blockType === 'countryball-angle-lab') {
+        return !isSelectedCountryballAngleOutput(node.outputPayload);
     }
     return true;
 }
@@ -343,13 +356,17 @@ export const executionEngine = {
                 nodeAfter => run.executionMode === 'step' && nodeAfter !== null && shouldStopAtStepReviewNode(nodeAfter)
             );
             if (reviewNode) {
+                const reviewMessage =
+                    reviewNode.blockType === 'countryball-angle-lab'
+                        ? 'Countryball angle selection step completed'
+                        : 'Script review step completed';
                 await skipPendingNodes(runId);
                 await runRepo.updateRunStatus(runId, 'COMPLETED', {
                     completedAt: new Date().toISOString(),
                     finalOutputSummary: {
                         stoppedForReview: true,
                         reviewNodeId: reviewNode.nodeId,
-                        message: 'Script review step completed',
+                        message: reviewMessage,
                     },
                 });
 

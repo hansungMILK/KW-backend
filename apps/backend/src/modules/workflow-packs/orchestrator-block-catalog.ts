@@ -8,6 +8,8 @@ export type WorkflowCapability =
     | 'text.transform'
     | 'source.collect'
     | 'countryball.brief'
+    | 'countryball.angle-lab'
+    | 'countryball.writer-brain'
     | 'countryball.script'
     | 'countryball.data'
     | 'countryball.analysis'
@@ -103,16 +105,33 @@ export const ORCHESTRATOR_BLOCK_CATALOG: Record<AllowedBlockType, BlockCatalogEn
         label: '컨트리볼 기획 브리프',
         capabilities: ['countryball.brief'],
         input: 'json sources, request spec, and user countryball intent',
-        output: 'json countryball creative brief: target feature, conflict, story flow, cast, visual theme, sound mapping',
-        whenToUse:
-            '사용자가 컨트리볼/국가볼/폴란드볼 쇼츠를 명시했을 때 search 뒤에서 전용 상황극 의도를 정리하는 경우',
+        output: 'json countryball source brief: target feature, conflict, visual facts, cast candidates',
+        whenToUse: '사용자가 컨트리볼/국가볼/폴란드볼 쇼츠를 명시했을 때 search 뒤에서 전용 기획 재료를 정리하는 경우',
+        whenNotToUse: '일반 쇼츠, 롱폼, 단일 이미지, 일반 텍스트 요청',
+    },
+    'countryball-angle-lab': {
+        blockType: 'countryball-angle-lab',
+        label: '컨트리볼 앵글 선택',
+        capabilities: ['countryball.angle-lab'],
+        input: 'countryball brief, user request, and optional sources',
+        output: 'three selectable countryball skit angles plus recommended choice',
+        whenToUse: '컨트리볼 대본 작성 전 작가 AI가 서로 다른 상황극 앵글 3개를 제안해야 할 때',
+        whenNotToUse: '사용자가 이미 확정 대본을 제공했거나 일반 쇼츠 요청일 때',
+    },
+    'countryball-writer-brain': {
+        blockType: 'countryball-writer-brain',
+        label: '컨트리볼 작가 설계',
+        capabilities: ['countryball.writer-brain'],
+        input: 'selected countryball angle and optional user adjustment',
+        output: 'binding writer brain, story brief, information control, and script rules',
+        whenToUse: '선택된 앵글을 실제 장면 흐름과 강의 금지 규칙으로 확장해야 할 때',
         whenNotToUse: '일반 쇼츠, 롱폼, 단일 이미지, 일반 텍스트 요청',
     },
     'countryball-script': {
         blockType: 'countryball-script',
         label: '컨트리볼 대본 생성',
         capabilities: ['countryball.script'],
-        input: 'countryball brief, user request, and optional source context',
+        input: 'countryball writer brain, story brief, and information control',
         output: 'json countryball dialogue skit contract with scenes, dialogueLines, captionOverlay, sfx, edit beats',
         whenToUse: '컨트리볼 전용 상황극 대본과 장면 계약을 작성할 때',
         whenNotToUse: '일반 쇼츠 대본, 롱폼 대본, 단일 이미지 프롬프트',

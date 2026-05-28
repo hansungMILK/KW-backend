@@ -227,6 +227,8 @@ export const buildContentProfilePreferences = (params: {
 const CONTENT_PROFILE_CONTEXT_BLOCKS = new Set([
     'search',
     'countryball-brief',
+    'countryball-angle-lab',
+    'countryball-writer-brain',
     'countryball-script',
     'countryball-data',
     'countryball-analysis',
@@ -267,7 +269,7 @@ export const enrichContentProfileNodeConfig = (
     return {
         ...base,
         contentProfileId: preferences.contentProfileId,
-        reviewMode: preferences.reviewMode,
+        reviewMode: base['reviewMode'] ?? preferences.reviewMode,
         ...(preferences.narrativeMode ? { narrativeMode: preferences.narrativeMode } : {}),
         ...(preferences.requestBasis ? { requestBasis: preferences.requestBasis } : {}),
         ...(blockType === 'content' || blockType === 'longform-script'
