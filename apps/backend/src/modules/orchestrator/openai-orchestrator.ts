@@ -7,7 +7,11 @@ import { env } from '../../config/env';
 import { traceService } from '../../services/trace-service';
 import { generateNumericId } from '../../utils/id-generator';
 import { log } from '../../utils/logger';
-import { buildContentProfilePreferences, enrichContentProfileNodeConfig } from '../content-profile/content-profile';
+import {
+    buildContentProfilePreferences,
+    enrichContentProfileNodeConfig,
+    isCountryballShortsRequest,
+} from '../content-profile/content-profile';
 import {
     DEFAULT_SHORTS_SCENE_COUNT,
     buildImageGenerationPreferences,
@@ -181,6 +185,44 @@ export const openaiOrchestrator: Orchestrator = {
                     aiRecipeDecisionModel: aiRecipeDecisionResponse.model,
                     aiDecisionModel: aiDecisionResponse.model,
                     aiDecisionLatencyMs: aiDecisionResponse.latencyMs,
+                    plan: data.plan,
+                    latencyMs: Date.now() - startMs,
+                });
+                return proposal;
+            }
+
+            if (isCountryballShortsRequest(userMessage)) {
+                const requestSpec = buildRequestSpecFromDecision(userMessage, aiRecipeDecision);
+                const topic = firstNonEmpty(aiRecipeDecision.understanding.surfaceTerms) ?? userMessage.trim();
+                const baseConfig = {
+                    topic: topic || userMessage.trim(),
+                    requestSpec,
+                    requestUnderstanding: aiRecipeDecision.understanding,
+                    requestIntent: aiRecipeDecision.intent,
+                    requestMode: aiRecipeDecision.mode,
+                };
+                const data = buildCountryballShortsWorkflow(userMessage, aiRecipeDecision, baseConfig, requestSpec);
+                const contentProfile = buildContentProfilePreferences({
+                    userMessage,
+                    outputType: 'video',
+                    hasMediaVideo: true,
+                    hasMediaImage: true,
+                    scriptToneId: aiRecipeDecision.scriptToneId,
+                });
+                const proposal = buildProposalResult(data, userMessage, contentProfile, {
+                    aiRequestDecision: aiRecipeDecision,
+                });
+                await traceService.record(flowId, null, 'TOOL_RESULT', 'Countryball recipe proposal generated', {
+                    promptVersion: PROMPT_VERSION,
+                    blockCount: proposal.proposedNodes.length,
+                    edgeCount: proposal.proposedEdges.length,
+                    estimatedCost: proposal.estimatedCost.total,
+                    contentProfileId: contentProfile.contentProfileId,
+                    scriptToneId: contentProfile.scriptToneId,
+                    reviewMode: contentProfile.reviewMode,
+                    aiRecipeDecisionModel: aiRecipeDecisionResponse.model,
+                    aiRecipeDecisionLatencyMs: aiRecipeDecisionResponse.latencyMs,
+                    aiRecipeDecision,
                     plan: data.plan,
                     latencyMs: Date.now() - startMs,
                 });

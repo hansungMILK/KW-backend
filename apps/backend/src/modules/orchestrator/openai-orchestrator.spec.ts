@@ -4,6 +4,8 @@ import { openaiOrchestrator } from './openai-orchestrator';
 import { openaiAdapter } from '../../adapters/ai/openai-adapter';
 import { DEFAULT_WORKFLOW_PACK_REGISTRY } from '../workflow-packs';
 
+const idState = vi.hoisted(() => ({ next: 0 }));
+
 vi.mock('../../config/env', () => ({
     env: {
         openaiOrchestratorModel: 'gpt-test',
@@ -24,7 +26,7 @@ vi.mock('../../services/trace-service', () => ({
 }));
 
 vi.mock('../../utils/id-generator', () => ({
-    generateNumericId: vi.fn(() => 'node-id'),
+    generateNumericId: vi.fn(() => `node-id-${++idState.next}`),
 }));
 
 const paidVideoPlan = {
@@ -185,6 +187,7 @@ function expectGenericPlannerCalled() {
 
 describe('openaiOrchestrator longform Gate A', () => {
     beforeEach(() => {
+        idState.next = 0;
         vi.clearAllMocks();
         mockPlannerResponses();
     });
@@ -541,6 +544,48 @@ describe('openaiOrchestrator longform Gate A', () => {
                 imageStyleId: 'countryball-comic',
             })
         );
+    });
+
+    it('does not fall back to the freeform planner for explicit countryball shorts even when the recipe classifier is uncertain', async () => {
+        const request =
+            '컨트리볼 쇼츠 만들어줘. 주제: 밤늦게 물건을 주문하고 몇 시간 만에 집 앞에 배송되는 한국 국뽕 쇼츠';
+        vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
+            content: JSON.stringify(genericDecision(null, request)),
+            model: 'gpt-test',
+            inputTokens: 1,
+            outputTokens: 1,
+            latencyMs: 1,
+        });
+
+        const proposal = await openaiOrchestrator.generateProposal('flow-countryball-uncertain', request);
+
+        expect(proposal.assistantMessage).not.toContain('워크플로우 계획이 요청과 맞지 않습니다');
+        expect(proposal.proposedNodes.map(node => node.blockType)).toEqual([
+            'search',
+            'countryball-brief',
+            'countryball-angle-lab',
+            'countryball-writer-brain',
+            'countryball-script',
+            'countryball-data',
+            'countryball-analysis',
+            'countryball-image',
+            'countryball-tts',
+            'countryball-video',
+            'integration',
+        ]);
+        expect(proposal.proposedEdges).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    sourceNodeId: proposal.proposedNodes[7]?.id,
+                    targetNodeId: proposal.proposedNodes[9]?.id,
+                }),
+                expect.objectContaining({
+                    sourceNodeId: proposal.proposedNodes[8]?.id,
+                    targetNodeId: proposal.proposedNodes[9]?.id,
+                }),
+            ])
+        );
+        expect(openaiAdapter.chatJson).toHaveBeenCalledTimes(1);
     });
 
     it('uses a text writing recipe for blog article requests without adding media blocks', async () => {
