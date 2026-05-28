@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { NodeBlock } from './NodeBlock';
@@ -53,7 +53,13 @@ const makeNode = (type: string, value: unknown): NodeData => ({
     },
 });
 
-const renderNode = (node: NodeData, handlers?: { onConfigPatch?: (patch: Record<string, ConfigValue>) => void }) =>
+const renderNode = (
+    node: NodeData,
+    handlers?: {
+        onConfigPatch?: (patch: Record<string, ConfigValue>) => void | Promise<void>;
+        onCountryballAngleSelected?: () => void | Promise<void>;
+    }
+) =>
     render(
         <NodeBlock
             node={node}
@@ -72,6 +78,7 @@ const renderNode = (node: NodeData, handlers?: { onConfigPatch?: (patch: Record<
                 onDelete: vi.fn(),
                 onTrigger: vi.fn(),
                 onViewLogs: vi.fn(),
+                onCountryballAngleSelected: handlers?.onCountryballAngleSelected,
             }}
             onMouseDown={vi.fn()}
         />
@@ -170,11 +177,12 @@ describe('NodeBlock longform previews', () => {
         expect(screen.getByText('1. 미국: 너 지금 주문한다고? / 한국: 응, 아침에 와.')).toBeTruthy();
     });
 
-    it('shows countryball angle options and saves the selected angle to config', () => {
+    it('shows countryball angle options, saves a selected snapshot, and resumes production', async () => {
         testState.registry = {
             'countryball-angle-lab': makeDefinition('countryball-angle-lab', '컨트리볼 앵글 선택'),
         };
-        const onConfigPatch = vi.fn();
+        const onConfigPatch = vi.fn(async () => undefined);
+        const onCountryballAngleSelected = vi.fn();
 
         renderNode(
             makeNode('countryball-angle-lab', {
@@ -203,20 +211,29 @@ describe('NodeBlock longform previews', () => {
                     },
                 ],
                 recommendedChoice: { id: 'angle_1', reason: '새벽배송 체감 포인트가 가장 선명함' },
+                selectionPrompt: '세 가지 중 하나를 골라주세요.',
             }),
-            { onConfigPatch }
+            { onConfigPatch, onCountryballAngleSelected }
         );
 
         expect(screen.getByText('컨트리볼 앵글 후보')).toBeTruthy();
         expect(screen.getByText('새벽 문앞 괴담')).toBeTruthy();
         expect(screen.getByText('계란이 출근보다 빠르다')).toBeTruthy();
+        expect(screen.getByText(/선택하면 이 방향으로 작가 설계와 대본 생성을 이어갑니다/)).toBeTruthy();
         fireEvent.click(screen.getByText('1번 선택'));
-        expect(onConfigPatch).toHaveBeenCalledWith(
-            expect.objectContaining({
-                selectedAngleId: 'angle_1',
-                angleSelectionStatus: 'selected',
-            })
-        );
+        await waitFor(() => {
+            expect(onConfigPatch).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    selectedAngleId: 'angle_1',
+                    angleSelectionStatus: 'selected',
+                    selectedAngle: expect.objectContaining({ id: 'angle_1', title: '새벽 문앞 괴담' }),
+                    angleOptions: expect.any(Array),
+                    recommendedChoice: expect.any(Object),
+                    selectionPrompt: '세 가지 중 하나를 골라주세요.',
+                })
+            );
+            expect(onCountryballAngleSelected).toHaveBeenCalledTimes(1);
+        });
     });
 
     it('shows single-image prompt planning as an image prompt, not a script review card', () => {

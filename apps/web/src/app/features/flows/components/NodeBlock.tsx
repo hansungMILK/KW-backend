@@ -47,7 +47,14 @@ import { arePortTypesCompatible, getVisiblePorts, tryParseJson } from '../utils'
 import type { ConnectionDraftInfo } from '../utils';
 import type { BlockDefinitionWithFrontend, DataPacket, NodeData, NodeState, PortDefinition } from '@flows/flows';
 
-export type ConfigValue = string | number | boolean | string[] | null;
+export type ConfigValue =
+    | string
+    | number
+    | boolean
+    | string[]
+    | Record<string, unknown>
+    | Array<Record<string, unknown>>
+    | null;
 
 export interface NodePortHandlers {
     onPortMouseDown: (
@@ -78,6 +85,7 @@ export interface NodeActions {
     onDelete: () => void;
     onTrigger: () => Promise<void> | void;
     onLongformReviewApproved?: () => Promise<void> | void;
+    onCountryballAngleSelected?: () => Promise<void> | void;
     onToggleDisabled?: () => void;
     onDuplicate?: () => void;
     onViewLogs: () => void;
@@ -1071,7 +1079,11 @@ const FriendlyOutputPreview: React.FC<{
     reviewEnabled?: boolean;
     reviewedOutputSaved?: boolean;
     onReviewedOutputSave?: (value: Record<string, unknown>) => void;
-    onCountryballAngleSelect?: (angleId: string) => Promise<void> | void;
+    onCountryballAngleSelect?: (
+        angleId: string,
+        selectedAngle?: Record<string, unknown>,
+        sourceOutput?: Record<string, unknown>
+    ) => Promise<void> | void;
     onLongformReviewApprove?: (value: Record<string, unknown>) => Promise<void> | void;
 }> = ({
     value,
@@ -1132,7 +1144,7 @@ const FriendlyOutputPreview: React.FC<{
                     <div>
                         <div className="text-[10px] font-semibold text-purple-200">컨트리볼 앵글 후보</div>
                         <div className="mt-0.5 text-[10px] text-muted-foreground">
-                            마음에 드는 상황극 방향을 선택하면 그 앵글로 대본이 이어집니다.
+                            선택하면 이 방향으로 작가 설계와 대본 생성을 이어갑니다.
                         </div>
                     </div>
                     <button
@@ -1152,6 +1164,11 @@ const FriendlyOutputPreview: React.FC<{
                         const title = firstStringValue(option.title) ?? `앵글 ${index + 1}`;
                         const pitch = firstStringValue(option.oneLinePitch);
                         const strength = firstStringValue(option.strength, option.bestFor);
+                        const risk = firstStringValue(option.risk);
+                        const storyShape = isRecordValue(option.storyShape) ? option.storyShape : {};
+                        const opening = firstStringValue(storyShape.opening);
+                        const peak = firstStringValue(storyShape.peakMoment);
+                        const ending = firstStringValue(storyShape.endingPayoff);
                         const isRecommended = id === recommendedId;
                         const isSelected = recordValue.angleSelectionStatus === 'selected' && id === selectedAngleId;
                         return (
@@ -1178,25 +1195,56 @@ const FriendlyOutputPreview: React.FC<{
                                             )}
                                         </div>
                                         {pitch && (
-                                            <div className="mt-1 text-[10px] text-foreground/80 line-clamp-2">
-                                                {pitch}
+                                            <div className="mt-1 text-[10px] text-foreground/80">
+                                                <span className="font-semibold text-purple-100">상황극:</span> {pitch}
+                                            </div>
+                                        )}
+                                        {(opening || peak || ending) && (
+                                            <div className="mt-1 space-y-0.5 text-[9px] text-muted-foreground">
+                                                {opening && (
+                                                    <div>
+                                                        <span className="text-purple-100/80">시작:</span> {opening}
+                                                    </div>
+                                                )}
+                                                {peak && (
+                                                    <div>
+                                                        <span className="text-purple-100/80">터지는 장면:</span> {peak}
+                                                    </div>
+                                                )}
+                                                {ending && (
+                                                    <div>
+                                                        <span className="text-purple-100/80">마무리:</span> {ending}
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
                                         {strength && (
-                                            <div className="mt-1 text-[9px] text-muted-foreground line-clamp-1">
-                                                {strength}
-                                            </div>
+                                            <div className="mt-1 text-[9px] text-emerald-100/80">장점: {strength}</div>
+                                        )}
+                                        {risk && (
+                                            <div className="mt-0.5 text-[9px] text-amber-100/80">주의: {risk}</div>
                                         )}
                                     </div>
                                     <button
                                         type="button"
-                                        className="shrink-0 rounded bg-primary px-2 py-1 text-[10px] font-medium text-primary-foreground hover:bg-primary/90"
-                                        onClick={event => {
+                                        className={cn(
+                                            'shrink-0 rounded px-2 py-1 text-[10px] font-medium text-primary-foreground',
+                                            isApproving
+                                                ? 'bg-muted text-muted-foreground'
+                                                : 'bg-primary hover:bg-primary/90'
+                                        )}
+                                        disabled={isApproving}
+                                        onClick={async event => {
                                             event.stopPropagation();
-                                            void onCountryballAngleSelect?.(id);
+                                            setIsApproving(true);
+                                            try {
+                                                await onCountryballAngleSelect?.(id, option, recordValue);
+                                            } finally {
+                                                setIsApproving(false);
+                                            }
                                         }}
                                     >
-                                        {index + 1}번 선택
+                                        {isSelected ? '선택됨' : `${index + 1}번 선택`}
                                     </button>
                                 </div>
                             </div>
@@ -2013,8 +2061,17 @@ const OutputPreview: React.FC<
         onConfigChange?: (key: string, value: ConfigValue) => void;
         onConfigPatch?: (patch: Record<string, ConfigValue>) => Promise<void> | void;
         onLongformReviewApproved?: () => Promise<void> | void;
+        onCountryballAngleSelected?: () => Promise<void> | void;
     }
-> = ({ node, definition, contentHeight, onConfigChange, onConfigPatch, onLongformReviewApproved }) => {
+> = ({
+    node,
+    definition,
+    contentHeight,
+    onConfigChange,
+    onConfigPatch,
+    onLongformReviewApproved,
+    onCountryballAngleSelected,
+}) => {
     const { t } = useTranslation(['nodes']);
     const packet = getFirstOutputData(node, definition);
 
@@ -2078,11 +2135,19 @@ const OutputPreview: React.FC<
                         typeof node.config?.reviewedOutput === 'string' && node.config.reviewedOutput.length > 0
                     }
                     onReviewedOutputSave={updated => onConfigChange?.('reviewedOutput', JSON.stringify(updated))}
-                    onCountryballAngleSelect={async angleId => {
-                        const patch = {
+                    onCountryballAngleSelect={async (angleId, selectedAngle, sourceOutput) => {
+                        const patch: Record<string, ConfigValue> = {
                             selectedAngleId: angleId,
                             angleSelectionStatus: 'selected',
                         };
+                        if (selectedAngle) patch.selectedAngle = selectedAngle;
+                        const angleOptions = asRecordArray(sourceOutput?.angleOptions);
+                        if (angleOptions.length > 0) patch.angleOptions = angleOptions;
+                        if (isRecordValue(sourceOutput?.recommendedChoice)) {
+                            patch.recommendedChoice = sourceOutput.recommendedChoice;
+                        }
+                        const selectionPrompt = firstStringValue(sourceOutput?.selectionPrompt);
+                        if (selectionPrompt) patch.selectionPrompt = selectionPrompt;
                         if (onConfigPatch) {
                             await onConfigPatch(patch);
                         } else {
@@ -2090,6 +2155,7 @@ const OutputPreview: React.FC<
                                 onConfigChange?.(key, value);
                             }
                         }
+                        await onCountryballAngleSelected?.();
                     }}
                     onLongformReviewApprove={async updated => {
                         const approvalPatch = {
@@ -2189,6 +2255,7 @@ export const NodeBlock: React.FC<NodeBlockProps> = ({
         onDelete,
         onTrigger,
         onLongformReviewApproved,
+        onCountryballAngleSelected,
         onToggleDisabled,
         onDuplicate,
         onViewLogs,
@@ -2739,6 +2806,7 @@ export const NodeBlock: React.FC<NodeBlockProps> = ({
                         onConfigChange={onConfigChange}
                         onConfigPatch={onConfigPatch}
                         onLongformReviewApproved={onLongformReviewApproved}
+                        onCountryballAngleSelected={onCountryballAngleSelected}
                     />
                 </div>
 

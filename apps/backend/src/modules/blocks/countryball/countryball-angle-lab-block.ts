@@ -91,9 +91,21 @@ export const countryballAngleLabBlock: BlockExecutor = {
         const start = Date.now();
         const requestTopic = extractTopic(input);
         const brief = extractBrief(input);
+        const currentConfig = config ?? {};
+
+        if (hasSelectedAngleSnapshot(currentConfig)) {
+            const output = normalizeAngleLabOutput(currentConfig, requestTopic, currentConfig);
+            const validated = CountryballAngleLabOutputSchema.safeParse(output);
+            if (!validated.success) {
+                throw new Error(
+                    `[countryball-angle-lab] Selected angle snapshot is invalid: ${validated.error.message}`
+                );
+            }
+            return { output: validated.data as Record<string, unknown>, durationMs: Date.now() - start };
+        }
 
         if (env.orchestratorMode === 'mock') {
-            const output = normalizeAngleLabOutput(buildFallbackAngleLab(requestTopic), requestTopic, config ?? {});
+            const output = normalizeAngleLabOutput(buildFallbackAngleLab(requestTopic), requestTopic, currentConfig);
             return { output, durationMs: Date.now() - start };
         }
 
@@ -110,7 +122,7 @@ export const countryballAngleLabBlock: BlockExecutor = {
             );
         }
 
-        const output = normalizeAngleLabOutput(parsed, requestTopic, config ?? {});
+        const output = normalizeAngleLabOutput(parsed, requestTopic, currentConfig);
         const validated = CountryballAngleLabOutputSchema.safeParse(output);
         if (!validated.success) {
             throw new Error(`[countryball-angle-lab] Output schema validation failed: ${validated.error.message}`);
@@ -149,7 +161,17 @@ function normalizeAngleLabOutput(
     config: Record<string, unknown>
 ): Record<string, unknown> {
     const root = isRecord(parsed) ? parsed : {};
+    const selectedAngleInput = isRecord(root['selectedAngle']) ? root['selectedAngle'] : undefined;
     const rawOptions = Array.isArray(root['angleOptions']) ? root['angleOptions'].filter(isRecord) : [];
+    if (selectedAngleInput) {
+        const selectedInputId = text(selectedAngleInput['id']);
+        const existingIndex = rawOptions.findIndex(option => text(option['id']) === selectedInputId);
+        if (existingIndex >= 0) {
+            rawOptions[existingIndex] = selectedAngleInput;
+        } else {
+            rawOptions.unshift(selectedAngleInput);
+        }
+    }
     const fallback = buildFallbackAngleLab(requestTopic);
     const angleOptions = (rawOptions.length > 0 ? rawOptions : (fallback.angleOptions as Record<string, unknown>[]))
         .slice(0, 3)
@@ -366,8 +388,63 @@ function parseJsonLike(content: string): unknown | null {
                 return null;
             }
         }
-        return null;
+        return parseFirstJsonObject(content);
     }
+}
+
+function hasSelectedAngleSnapshot(config: Record<string, unknown>): boolean {
+    const selectedAngleId = text(config['selectedAngleId']);
+    return (
+        config['angleSelectionStatus'] === 'selected' &&
+        selectedAngleId.length > 0 &&
+        (isRecord(config['selectedAngle']) || Array.isArray(config['angleOptions']))
+    );
+}
+
+function parseFirstJsonObject(content: string): unknown | null {
+    let start = -1;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let index = 0; index < content.length; index += 1) {
+        const char = content[index];
+
+        if (start < 0) {
+            if (char === '{') {
+                start = index;
+                depth = 1;
+            }
+            continue;
+        }
+
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (char === '\\') {
+            escaped = inString;
+            continue;
+        }
+        if (char === '"') {
+            inString = !inString;
+            continue;
+        }
+        if (inString) continue;
+
+        if (char === '{') depth += 1;
+        if (char === '}') depth -= 1;
+
+        if (depth === 0) {
+            try {
+                return JSON.parse(content.slice(start, index + 1));
+            } catch {
+                return null;
+            }
+        }
+    }
+
+    return null;
 }
 
 function text(input: unknown, fallback = ''): string {

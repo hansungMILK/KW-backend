@@ -86,6 +86,56 @@ describe('countryballAngleLabBlock', () => {
             })
         ).rejects.toThrow(/distinct story angles/);
     });
+
+    it('reuses a selected angle snapshot without asking OpenAI again', async () => {
+        const angleLabOutput = makeAngleLabOutput();
+
+        const result = await countryballAngleLabBlock.execute(
+            {
+                requestTopic: '컨트리볼 새벽배송 쇼츠',
+                countryballBrief: { targetFeature: '새벽배송' },
+            },
+            {
+                selectedAngleId: 'angle_2',
+                angleSelectionStatus: 'selected',
+                selectedAngle: angleLabOutput.angleOptions[1],
+                angleOptions: angleLabOutput.angleOptions,
+                recommendedChoice: angleLabOutput.recommendedChoice,
+                selectionPrompt: angleLabOutput.selectionPrompt,
+            }
+        );
+
+        expect(openaiAdapter.chatJson).not.toHaveBeenCalled();
+        expect(result.output).toMatchObject({
+            selectedAngleId: 'angle_2',
+            angleSelectionStatus: 'selected',
+            selectedAngle: expect.objectContaining({ id: 'angle_2', title: '계란이 출근보다 빠르다' }),
+        });
+    });
+
+    it('parses a JSON object wrapped in non-JSON prose', async () => {
+        vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
+            content: `좋습니다. 아래 JSON을 사용하세요.\n\n${JSON.stringify(makeAngleLabOutput())}\n\n이상입니다.`,
+            model: 'gpt-test',
+            inputTokens: 1,
+            outputTokens: 1,
+            latencyMs: 1,
+        });
+
+        const result = await countryballAngleLabBlock.execute({
+            requestTopic: '컨트리볼 새벽배송 쇼츠',
+            countryballBrief: { targetFeature: '새벽배송' },
+        });
+
+        expect(result.output).toMatchObject({
+            mode: 'countryball-angle-lab',
+            angleOptions: [
+                expect.objectContaining({ id: 'angle_1' }),
+                expect.objectContaining({ id: 'angle_2' }),
+                expect.objectContaining({ id: 'angle_3' }),
+            ],
+        });
+    });
 });
 
 function makeAngleLabOutput() {
