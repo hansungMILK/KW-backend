@@ -20,6 +20,12 @@ export const BlogBriefOutputSchema = z.object({
     intent: z.enum(['informational', 'commercial', 'navigational', 'transactional', 'unknown']),
     angle: z.string(),
     isFactual: z.boolean(),
+    /**
+     * The searches needed to ground THIS article, decided by the model — not by a hardcoded
+     * content-type switch. One query for a simple topic; several for multi-faceted or multi-entity
+     * topics (e.g. each side of a comparison, each tool in a roundup). blog-research runs them all.
+     */
+    searchQueries: z.array(z.string()).default([]),
     facts: z.array(FactSchema),
 });
 export type BlogBriefOutput = z.infer<typeof BlogBriefOutputSchema>;
@@ -35,6 +41,13 @@ Anti-hallucination rule (critical):
   generalized value — never invent specifics.
 - Set isFactual=true when the topic depends on real-world facts that need sourcing.
 
+Search planning (you decide — no fixed categories):
+- When isFactual=true, list the web searches needed to GROUND this specific article in searchQueries.
+- Use ONE query for a simple single-subject topic. Use SEPARATE queries when the topic spans
+  multiple distinct things that each need their own sourcing — e.g. each side of a comparison, each
+  item in a roundup, each phase of a process. Judge what THIS topic needs; do not force a count.
+- Each query should be a concrete, search-engine-ready phrase. When isFactual=false, return [].
+
 Return JSON only:
 {
   "keyword": "primary keyword",
@@ -43,6 +56,7 @@ Return JSON only:
   "intent": "informational|commercial|navigational|transactional",
   "angle": "the writer's unique angle in one sentence",
   "isFactual": true,
+  "searchQueries": ["search phrase 1", "search phrase 2 (only if the topic genuinely needs it)"],
   "facts": [{ "key": "fact name", "value": "fact value or generalization", "source": "user|search|missing" }]
 }`;
 
@@ -58,7 +72,7 @@ export const blogBriefBlock: BlockExecutor = {
         }
 
         const response = await openaiAdapter.chatJson({
-            model: env.openaiModel,
+            model: env.openaiWritingModel,
             systemPrompt: BLOG_BRIEF_SYSTEM_PROMPT,
             userMessage: `BLOG TOPIC:\n${topic}\n\nProduce the brief. Korean output. Ground every fact or mark it missing.`,
             maxTokens: env.openaiContentMaxTokens,
@@ -90,6 +104,7 @@ function normalizeBrief(parsed: unknown, topic: string): BlogBriefOutput {
         intent,
         angle: text(root['angle'], `${topic}을(를) 쉽고 실용적으로 정리한다.`),
         isFactual: typeof root['isFactual'] === 'boolean' ? root['isFactual'] : true,
+        searchQueries: stringArray(root['searchQueries']),
         facts: normalizeFacts(root['facts']),
     };
 }
@@ -118,6 +133,7 @@ function buildFallbackBrief(topic: string): BlogBriefOutput {
         intent: 'informational',
         angle: `${topic}을(를) 핵심만 골라 실용적으로 정리한다.`,
         isFactual: false,
+        searchQueries: [],
         facts: [],
     };
 }

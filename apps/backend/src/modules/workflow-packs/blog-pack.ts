@@ -56,7 +56,7 @@ export const blogPack: WorkflowPackManifest = {
                 label: contributionFor(blockType).orchestrator.label,
             })),
             defaultEdges: blogBlockTypes.slice(1).map((_, index) => ({ from: index, to: index + 1 })),
-            costPolicy: { estimatedCostUsd: 0.18, hardCapUsd: 2, requiresApproval: false },
+            costPolicy: { estimatedCostUsd: 0.45, hardCapUsd: 2, requiresApproval: false },
         },
     ],
 };

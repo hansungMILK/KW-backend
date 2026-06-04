@@ -39,6 +39,10 @@ Rules:
 - Use a clear, readable blog tone.
 - Only cite a concrete fact (number, date, quote, place) if it is present in the provided facts/sources.
   If a needed fact is missing, generalize instead of inventing it.
+- If the sources are empty or do not cover what this section needs (common for very recent or niche
+  topics), say plainly that confirmed information is limited — do NOT present guesses as established fact.
+- When the section weighs multiple options, judge them by the SAME criteria and stay balanced; never
+  invent specs or benchmark numbers that are not in the sources.
 
 Return JSON only: { "paragraphs": ["para 1", "para 2"] }`;
 
@@ -74,7 +78,7 @@ export const blogDraftBlock: BlockExecutor = {
         const sections: BlogDraftOutput['sections'] = [];
         for (const section of outlineSections) {
             const response = await openaiAdapter.chatJson({
-                model: env.openaiModel,
+                model: env.openaiWritingModel,
                 systemPrompt: BLOG_DRAFT_SYSTEM_PROMPT,
                 userMessage: buildSectionUserMessage(section, topic, facts, articles),
                 maxTokens: env.openaiContentMaxTokens,

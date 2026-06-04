@@ -47,6 +47,16 @@ Rules:
 - Headings must be concrete and scannable, not vague labels.
 - Do not invent facts here; the outline only sets structure.
 
+Match the STRUCTURE to the topic — judge what THIS topic and reader need. The structure should
+fall out of the topic's own shape, not a fixed template. These are illustrations of that judgment,
+NOT a menu to pick from:
+- A topic weighing multiple options reads best as: each option introduced, then compared on the SAME
+  criteria the reader cares about, a quick head-to-head summary, then a clear situational takeaway.
+- A "how to / 방법" topic reads best as ordered steps, plus prerequisites up front and common mistakes.
+- A single-thing review reads best as overview → strengths → limits → who it fits → alternatives.
+- A concept/explainer reads best as what-it-is → why-it-matters → how → examples → FAQ → summary.
+Infer the right shape yourself; blend or depart from these as the specific topic warrants.
+
 Return JSON only:
 {
   "title": "H1 title",
@@ -83,7 +93,7 @@ export const blogOutlineBlock: BlockExecutor = {
         }
 
         const response = await openaiAdapter.chatJson({
-            model: env.openaiModel,
+            model: env.openaiWritingModel,
             systemPrompt: BLOG_OUTLINE_SYSTEM_PROMPT,
             userMessage: buildOutlineUserMessage(topic, input),
             maxTokens: env.openaiContentMaxTokens,
@@ -113,7 +123,7 @@ function buildOutlineUserMessage(topic: string, input: unknown): string {
             null,
             2
         ).slice(0, 4000)}`,
-        'Produce an 8–10 H2 outline. Korean headings. Do not write the body.',
+        'Infer the structure that best fits this topic and reader, then produce an 8–10 H2 outline. Korean headings. Do not write the body.',
     ].join('\n\n');
 }
 
