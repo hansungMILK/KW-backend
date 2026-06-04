@@ -120,7 +120,7 @@ Return compact JSON only:
 }
 
 Rules:
-- If the user asks to draw, generate, make, or visualize an image, choose image.single.v1 even if they phrase it casually.
+- If the user asks to draw, generate, make, or visualize an image, choose image.single.v1 even if they phrase it casually. This recipe also covers multi-image requests: an explicit count ("4장"), multiple subjects ("63빌딩, 에펠타워"), and style/aspect-ratio options all still use image.single.v1. List each named subject separately in understanding.focusEntities so the system can map subjects to images.
 - If the user asks for Shorts/Reels/TikTok production, choose shorts.info.v1. Creative simulations and VS matchups are still shorts when the requested surface is short-form video.
 - If the user asks for longform or a long YouTube video, choose longform.explainer.v1.
 - If the user asks for blog/article/post/copy/text writing, choose text.blog.v1 unless a URL is the primary source, then choose text.url-explainer.v1.
@@ -475,27 +475,114 @@ function buildAiSelectedGenericWorkflow(
     }
 
     if (decision.recipeId === 'image.single.v1') {
+        const imageCount = resolveImageGenerationCount(userMessage, decision);
+        const multiImage = imageCount > 1;
+        const aspectRatio = detectRequestedImageAspectRatio(userMessage);
+        const referenceAssetId = readReferenceAssetId(decision);
+        // N>1 must NOT use single-image mode: the content block hard-throws when
+        // single-image mode yields !==1 scene. For N>1 we drive the existing
+        // shorts N-scene path (config.scenes) so the block emits N image prompts;
+        // media-image consumes only scenes[].imagePrompt, so output stays image-only.
+        const contentOverride = multiImage
+            ? {
+                  ...baseConfig,
+                  // Override the recipe's default single-image mode so the block
+                  // takes the N-scene path instead of throwing on scenes !== 1.
+                  mode: 'image-multi',
+                  scenes: imageCount,
+                  needsImagePrompt: true,
+              }
+            : {
+                  ...baseConfig,
+                  mode: 'single-image',
+                  scenes: 1,
+                  needsImagePrompt: true,
+              };
+        const mediaImageOverride: Record<string, unknown> = {
+            count: imageCount,
+            style: 'single-image',
+            requestUnderstanding: decision.understanding,
+            ...(aspectRatio ? { aspectRatio } : {}),
+            ...(referenceAssetId ? { refAssetId: referenceAssetId } : {}),
+        };
         return buildWorkflowFromRecipe(decision.recipeId, userMessage, {
             summary: buildAiRecipeSummary(
                 decision,
-                '요청한 이미지를 만들기 위해 프롬프트를 정리한 뒤 단일 이미지를 생성합니다.'
+                multiImage
+                    ? `요청한 이미지를 만들기 위해 프롬프트를 정리한 뒤 이미지 ${imageCount}장을 생성합니다.`
+                    : '요청한 이미지를 만들기 위해 프롬프트를 정리한 뒤 단일 이미지를 생성합니다.'
             ),
             blockConfigOverrides: {
-                content: {
-                    ...baseConfig,
-                    mode: 'single-image',
-                    scenes: 1,
-                    needsImagePrompt: true,
-                },
-                'media-image': {
-                    count: detectRequestedSceneCount(userMessage) ?? 1,
-                    requestUnderstanding: decision.understanding,
-                },
+                content: contentOverride,
+                'media-image': mediaImageOverride,
             },
         });
     }
 
     return null;
+}
+
+const IMAGE_GENERATION_MAX_COUNT = 12;
+
+/**
+ * Resolve how many images a standalone image request should generate (1–12).
+ *
+ * Distribution rules (plan §3):
+ * - Explicit count ("4장") wins.
+ * - Multiple subjects ("63빌딩, 에펠타워") => one image per subject.
+ * - When an explicit count is below the subject count, the subject count wins.
+ * - Single subject with N => N variations.
+ * Always clamped to IMAGE_GENERATION_MAX_COUNT (12) on this image-only path.
+ */
+function resolveImageGenerationCount(userMessage: string, decision: GenericRequestDecision): number {
+    const explicit = detectRequestedSceneCount(userMessage);
+    const subjectCount = countImageSubjects(userMessage, decision);
+    const resolved = Math.max(explicit ?? 0, subjectCount, 1);
+    return Math.min(IMAGE_GENERATION_MAX_COUNT, resolved);
+}
+
+/**
+ * Count distinct image subjects in the request. Prefers AI focus entities when it
+ * actually found more than one, otherwise splits the raw user text on common
+ * separators (comma, "그리고", "and", slash, middle dot).
+ */
+function countImageSubjects(userMessage: string, decision: GenericRequestDecision): number {
+    const focusEntities = decision.understanding.focusEntities.filter(entity => entity.trim().length > 0);
+    if (focusEntities.length > 1) return focusEntities.length;
+    return splitImageSubjects(userMessage).length;
+}
+
+function splitImageSubjects(userMessage: string): string[] {
+    const withoutOptions = userMessage
+        // Strip count/option tail words so "63빌딩, 에펠타워 두장" splits into 2 subjects, not 3.
+        .replace(/\b\d[\d,]*\s*(?:장|컷|씬|scene|scenes|images?)\b/gi, ' ')
+        .replace(/(?:한|두|세|네|다섯|여섯|일곱|여덟|아홉|열)\s*장/g, ' ');
+    return withoutOptions
+        .split(/\s*(?:,|，|、|\/|·|그리고|및|랑|이랑|와|과|\band\b)\s*/i)
+        .map(part => part.trim())
+        .filter(part => part.length > 0 && /[\p{L}\p{N}]/u.test(part));
+}
+
+function detectRequestedImageAspectRatio(userMessage: string): string | undefined {
+    const explicit = userMessage.match(/\b(\d{1,2})\s*[:：x×]\s*(\d{1,2})\b/);
+    if (explicit) {
+        const ratio = `${explicit[1]}:${explicit[2]}`;
+        if (['1:1', '16:9', '9:16', '4:3', '3:4'].includes(ratio)) return ratio;
+    }
+    const text = userMessage.toLowerCase();
+    if (/정사각형|square|1\s*대\s*1/.test(text)) return '1:1';
+    if (/가로|와이드|landscape|wide/.test(text)) return '16:9';
+    if (/세로|portrait|vertical/.test(text)) return '9:16';
+    return undefined;
+}
+
+function readReferenceAssetId(decision: GenericRequestDecision): string | undefined {
+    const constraints = decision.understanding.constraints;
+    for (const constraint of constraints) {
+        const match = constraint.match(/refAssetId\s*[:=]\s*([\w-]+)/i);
+        if (match) return match[1];
+    }
+    return undefined;
 }
 
 function buildCountryballShortsWorkflow(
@@ -994,6 +1081,21 @@ function resolveProposalSceneCount(
     userMessage: string,
     data: { plan: { outputType: string }; blocks: Array<{ type: string; config?: Record<string, unknown> }> }
 ): { count: number; mode: 'ai-recommended' | 'user-selected' | 'fixed' } {
+    // Standalone image-only path: the media-image config.count is the single source
+    // of truth (already clamped to 1–12 in buildAiSelectedGenericWorkflow). Resolve
+    // it before the generic userMessage scan so cost/metadata never exceed the cap.
+    const imageOnlyBlock = findStandaloneImageBlock(data);
+    if (imageOnlyBlock) {
+        const configuredCount = readConfiguredSceneCount(imageOnlyBlock.config);
+        if (configuredCount) {
+            const explicitInMessage = detectRequestedSceneCount(userMessage);
+            return {
+                count: configuredCount,
+                mode: configuredCount > 1 || explicitInMessage ? 'user-selected' : 'fixed',
+            };
+        }
+    }
+
     const explicit = detectRequestedSceneCount(userMessage);
     if (explicit) return { count: explicit, mode: 'user-selected' };
     const countryballScriptBlock = data.blocks.find(block => block.type === 'countryball-script');
@@ -1014,6 +1116,29 @@ function resolveProposalSceneCount(
         block => block.type === 'media-image' || block.type === 'countryball-image'
     );
     return { count: getMediaImageSceneCount(mediaImageBlock?.config), mode: 'fixed' };
+}
+
+/**
+ * Find the media-image block of a standalone (non-video, non-countryball) image
+ * workflow whose output is single images. Used to keep the standalone image path
+ * on its own 1–12 cap instead of the shorts/video cap-24 scan.
+ */
+function findStandaloneImageBlock(data: {
+    blocks: Array<{ type: string; config?: Record<string, unknown> }>;
+}): { type: string; config?: Record<string, unknown> } | undefined {
+    const hasVideoOrCountryball = data.blocks.some(
+        block =>
+            block.type === 'media-video' ||
+            block.type === 'countryball-video' ||
+            block.type === 'countryball-image' ||
+            block.type === 'countryball-script'
+    );
+    if (hasVideoOrCountryball) return undefined;
+    return data.blocks.find(
+        block =>
+            block.type === 'media-image' &&
+            (block.config?.['style'] === 'single-image' || block.config?.['format'] === 'single-image')
+    );
 }
 
 function detectRequestedSceneCount(userMessage: string): number | undefined {

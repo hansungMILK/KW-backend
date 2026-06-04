@@ -146,6 +146,64 @@ describe('contentBlock', () => {
         expect(result.output['style']).toMatchObject({ sceneCount: 8 });
     });
 
+    it('emits N image prompts for multi-image mode via the N-scene path without single-image throw', async () => {
+        vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
+            content: JSON.stringify({
+                title: '랜드마크 이미지',
+                hook: '랜드마크 3장',
+                script: { hook: '랜드마크 3장', angle: '주제별 이미지 프롬프트', cta: '' },
+                style: { format: 'vertical-shorts', aspectRatio: '9:16', sceneCount: 3 },
+                scenes: Array.from({ length: 3 }, (_, index) => ({
+                    sceneNumber: index + 1,
+                    imageSlot: `[Image #${index + 1}]`,
+                    storyBeat: index === 0 ? 'hook' : 'setup',
+                    topTitle: '랜드마크 이미지',
+                    caption: `이미지 ${index + 1}`,
+                    narration: `${index + 1}번째 랜드마크 이미지를 위한 장면입니다.`,
+                    imagePrompt: `landmark image prompt ${index + 1}`,
+                    visualText: `이미지 ${index + 1}`,
+                    visual: { topTitle: '랜드마크 이미지', mainCaption: `이미지 ${index + 1}` },
+                    claimType: 'opinion',
+                    sourceRefs: [],
+                    durationSec: 5,
+                })),
+                cta: '',
+                totalDurationSec: 15,
+                sources: [],
+            }),
+            model: 'gpt-test',
+            inputTokens: 1,
+            outputTokens: 1,
+            latencyMs: 1,
+        });
+
+        const result = await contentBlock.execute(
+            {
+                requestTopic: '63빌딩, 에펠타워, 남산타워 이미지 생성해줘',
+                requestSpec: {
+                    userRequest: '63빌딩, 에펠타워, 남산타워 이미지 생성해줘',
+                    contentIntent: 'single-image',
+                    outputKind: 'image',
+                    focusTerms: ['63빌딩', '에펠타워', '남산타워'],
+                    exactSubjectRequired: true,
+                },
+            },
+            { mode: 'image-multi', scenes: 3, needsImagePrompt: true, contentProfileId: 'image.single.v1' }
+        );
+
+        // Not single-image mode (no throw), not generic text mode (scenes survive).
+        const request = vi.mocked(openaiAdapter.chatJson).mock.calls[0]?.[0];
+        expect(request?.systemPrompt).toContain('exactly 3 scenes');
+        expect(request?.systemPrompt).not.toContain('image prompt planner');
+        const scenes = result.output['scenes'] as Array<Record<string, unknown>>;
+        expect(scenes).toHaveLength(3);
+        expect(scenes.map(scene => scene['imagePrompt'])).toEqual([
+            'landmark image prompt 1',
+            'landmark image prompt 2',
+            'landmark image prompt 3',
+        ]);
+    });
+
     it('plans a single image as an image prompt artifact without Shorts script instructions', async () => {
         vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
             content: JSON.stringify({

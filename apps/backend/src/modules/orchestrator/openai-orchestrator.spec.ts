@@ -484,17 +484,18 @@ describe('openaiOrchestrator longform Gate A', () => {
                 sceneCountOptions: [{ count: 4, label: '4장' }],
             })
         );
+        // Standalone image path caps at 12, independent of the shorts/video cap-24.
         expect(hugeBatch.proposedNodes).toContainEqual(
             expect.objectContaining({
                 blockType: 'media-image',
-                config: expect.objectContaining({ count: 24 }),
+                config: expect.objectContaining({ count: 12 }),
             })
         );
         expect(hugeBatch.metadata?.['imageGeneration']).toEqual(
             expect.objectContaining({
                 format: 'single-image',
-                sceneCount: 24,
-                sceneCountOptions: [{ count: 24, label: '24장' }],
+                sceneCount: 12,
+                sceneCountOptions: [{ count: 12, label: '12장' }],
             })
         );
     });

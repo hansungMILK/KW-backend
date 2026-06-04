@@ -12,9 +12,17 @@ export const mediaPack: WorkflowPackManifest = {
     recipes: [
         {
             recipeId: 'image.single.v1',
-            displayName: '단일 이미지 생성',
-            description: 'Prompt planning followed by one generated image.',
-            triggerHints: ['이미지 생성', '그림 생성', '사진 만들어줘', 'single image'],
+            displayName: '이미지 생성',
+            description: 'Prompt planning followed by 1–12 generated images (multi-subject and count aware).',
+            triggerHints: [
+                '이미지 생성',
+                '그림 생성',
+                '사진 만들어줘',
+                'single image',
+                '이미지 N장',
+                '여러 장 이미지',
+                '여러 주제 이미지',
+            ],
             outputType: 'image',
             requiredCapabilities: ['text.generate', 'image.generate'],
             defaultBlocks: [
