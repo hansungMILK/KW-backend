@@ -378,4 +378,53 @@ describe('NodeBlock longform previews', () => {
         expect(screen.getByText('MP4 다운로드')).toBeTruthy();
         expect(screen.queryByText('MP4 열기/다운로드')).toBeNull();
     });
+
+    it('renders a Naver-style blog preview from a blog-assemble previewModel (no export bar)', () => {
+        testState.registry = {
+            'blog-assemble': makeDefinition('blog-assemble', '블로그 조립'),
+        };
+
+        renderNode(
+            makeNode('blog-assemble', {
+                mode: 'blog-assemble',
+                previewModel: {
+                    title: '제로웨이스트 입문 가이드',
+                    blocks: [
+                        { kind: 'title', text: '제로웨이스트 입문 가이드' },
+                        { kind: 'highlight', text: '핵심만 정리한 강조 박스입니다.' },
+                        { kind: 'heading', level: 2, text: '왜 시작해야 할까' },
+                        { kind: 'paragraph', text: '작은 변화부터 시작하면 됩니다.' },
+                    ],
+                },
+            })
+        );
+
+        expect(screen.getByText('왜 시작해야 할까')).toBeTruthy();
+        expect(screen.getByText('작은 변화부터 시작하면 됩니다.')).toBeTruthy();
+        expect(screen.getByText('핵심만 정리한 강조 박스입니다.')).toBeTruthy();
+        // blog-assemble has no export strings -> export bar is hidden.
+        expect(screen.queryByText('blog.export.copyNaver')).toBeNull();
+    });
+
+    it('renders the export bar and naverHtml preview for a blog-export output', () => {
+        testState.registry = {
+            'blog-export': makeDefinition('blog-export', '블로그 내보내기'),
+        };
+
+        renderNode(
+            makeNode('blog-export', {
+                mode: 'blog-export',
+                naverHtml: '<h1>제로웨이스트 입문 가이드</h1>\n<p>오늘부터 시작하세요.</p>',
+                markdown: '# 제로웨이스트 입문 가이드\n\n오늘부터 시작하세요.',
+                imageManifest: [{ slotId: 'hero', url: 'https://img.example/hero.jpg', caption: 'c', alt: 'a' }],
+            })
+        );
+
+        // All three export actions are present.
+        expect(screen.getByText('blog.export.copyNaver')).toBeTruthy();
+        expect(screen.getByText('blog.export.copyMarkdown')).toBeTruthy();
+        expect(screen.getByText('blog.export.downloadZip')).toBeTruthy();
+        // naverHtml is rendered as the visual preview.
+        expect(screen.getByText('오늘부터 시작하세요.')).toBeTruthy();
+    });
 });

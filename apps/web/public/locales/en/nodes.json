@@ -1,4 +1,18 @@
 {
+    "blog": {
+        "export": {
+            "copyNaver": "Copy for Naver",
+            "copyMarkdown": "Copy Markdown",
+            "downloadZip": "Download images ZIP",
+            "naverCopied": "Naver-formatted content copied to clipboard",
+            "naverCopiedPlain": "Copied as plain text (rich copy unsupported in this browser)",
+            "markdownCopied": "Markdown copied to clipboard",
+            "copyFailed": "Failed to copy",
+            "noImages": "No images to download",
+            "zipReady": "Image ZIP download started",
+            "zipFallback": "ZIP failed — downloading images individually instead"
+        }
+    },
     "preview": {
         "title": "Content Preview",
         "close": "Close",

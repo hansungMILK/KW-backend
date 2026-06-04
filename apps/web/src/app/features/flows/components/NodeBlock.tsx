@@ -39,12 +39,16 @@ import {
 import { cn } from '@flows/lib/utils';
 import { JsonViewer, MarkdownViewer, isMarkdownContent } from '@flows/ui-kit';
 
+import { BlogExportBar } from './blog/BlogExportBar';
+import { BlogPreview } from './blog/BlogPreview';
 import { ContentPreviewModal } from './ContentPreviewModal';
 import { S3Image } from './S3Image';
 import { TooltipContentRenderer } from './TooltipContentRenderer';
 import { arePortTypesCompatible, getVisiblePorts, tryParseJson } from '../utils';
 
 import type { ConnectionDraftInfo } from '../utils';
+import type { BlogImageManifestEntry } from './blog/BlogExportBar';
+import type { BlogPreviewBlock, BlogPreviewModel } from './blog/BlogPreview';
 import type { BlockDefinitionWithFrontend, DataPacket, NodeData, NodeState, PortDefinition } from '@flows/flows';
 
 export type ConfigValue =
@@ -1001,9 +1005,34 @@ const applyLongformDraft = (value: Record<string, unknown>, draft: string): Reco
     };
 };
 
+const isBlogOutput = (value: unknown): boolean =>
+    isRecordValue(value) && (value.mode === 'blog-assemble' || value.mode === 'blog-export');
+
+const getBlogPreviewModel = (value: Record<string, unknown>): BlogPreviewModel | undefined => {
+    const preview = value.previewModel;
+    if (!isRecordValue(preview) || typeof preview.title !== 'string' || !Array.isArray(preview.blocks)) {
+        return undefined;
+    }
+    return {
+        title: preview.title,
+        blocks: preview.blocks.filter(isRecordValue) as unknown as BlogPreviewBlock[],
+    };
+};
+
+const getBlogImageManifest = (value: Record<string, unknown>): BlogImageManifestEntry[] =>
+    asRecordArray(value.imageManifest)
+        .map(entry => ({
+            slotId: firstStringValue(entry.slotId) ?? '',
+            url: firstStringValue(entry.url) ?? '',
+            caption: firstStringValue(entry.caption),
+            alt: firstStringValue(entry.alt),
+        }))
+        .filter(entry => entry.url.length > 0 || entry.slotId.length > 0);
+
 const hasFriendlyOutputPreview = (value: unknown): boolean => {
     if (!isRecordValue(value)) return false;
     return (
+        isBlogOutput(value) ||
         isLongformGateARecord(value) ||
         asRecordArray(value.angleOptions).length > 0 ||
         isRecordValue(value.script) ||
@@ -1130,6 +1159,33 @@ const FriendlyOutputPreview: React.FC<{
             />
         </>
     );
+
+    // Blog v2 — Naver-style rendered preview + copy/download bar (additive).
+    if (isBlogOutput(recordValue)) {
+        const previewModel = getBlogPreviewModel(recordValue);
+        const naverHtml = firstStringValue(recordValue.naverHtml);
+        const markdown = firstStringValue(recordValue.markdown);
+        const imageManifest = getBlogImageManifest(recordValue);
+        const showExportBar = typeof recordValue.naverHtml === 'string' || typeof recordValue.markdown === 'string';
+        return (
+            <div
+                className="overflow-auto rounded-lg border border-border bg-white"
+                style={{ maxHeight }}
+                onWheel={event => event.stopPropagation()}
+            >
+                {showExportBar && (
+                    <div className="sticky top-0 z-10 border-b border-border bg-white/95 px-3 py-2 backdrop-blur">
+                        <BlogExportBar
+                            naverHtml={naverHtml ?? ''}
+                            markdown={markdown ?? ''}
+                            imageManifest={imageManifest}
+                        />
+                    </div>
+                )}
+                <BlogPreview previewModel={previewModel} naverHtml={naverHtml} />
+            </div>
+        );
+    }
 
     if (countryballAngleOptions.length > 0) {
         const recommendedChoice = isRecordValue(recordValue.recommendedChoice) ? recordValue.recommendedChoice : {};

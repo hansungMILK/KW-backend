@@ -1,4 +1,18 @@
 {
+    "blog": {
+        "export": {
+            "copyNaver": "네이버용 복사",
+            "copyMarkdown": "마크다운 복사",
+            "downloadZip": "이미지 ZIP 다운로드",
+            "naverCopied": "네이버용 서식이 클립보드에 복사되었습니다",
+            "naverCopiedPlain": "텍스트로 복사했습니다 (서식 복사는 지원되지 않는 브라우저)",
+            "markdownCopied": "마크다운이 클립보드에 복사되었습니다",
+            "copyFailed": "복사에 실패했습니다",
+            "noImages": "다운로드할 이미지가 없습니다",
+            "zipReady": "이미지 ZIP 다운로드를 시작했습니다",
+            "zipFallback": "ZIP 생성에 실패해 이미지를 개별로 내려받습니다"
+        }
+    },
     "preview": {
         "title": "콘텐츠 미리보기",
         "close": "닫기",
