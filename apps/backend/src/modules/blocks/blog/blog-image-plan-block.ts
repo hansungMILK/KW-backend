@@ -13,13 +13,15 @@ import type { BlockExecutor, BlockExecutorResult } from '../types';
  *
  * includeImages toggle:
  * - off ⇒ empty slot list (the document will have no images).
- * - on  ⇒ one hero slot (afterTitle) + one slot after every other H2 section heading.
+ * - on  ⇒ at most `imageCount` slots: one hero slot (afterTitle) + up to (imageCount-1) section
+ *         slots spread EVENLY across the H2 sections (not one per section).
  */
 export const BlogImagePlanOutputSchema = z.object({
     mode: z.literal('blog-image-plan'),
     topic: z.string(),
     title: z.string(),
     includeImages: z.boolean(),
+    imageCount: z.number().int().min(1).max(12).default(4),
     sections: z.array(z.record(z.string(), z.unknown())),
     imageSlots: z.array(BlogImageSlotSchema),
     // Carry grounding forward so blog-assemble can populate BlogDocument.facts.
@@ -37,15 +39,17 @@ export const blogImagePlanBlock: BlockExecutor = {
         const topic = extractTopic(input, config);
         const title = text(upstream['title'], `${topic} 완벽 정리`);
         const includeImages = readIncludeImages(config, upstream);
+        const imageCount = readImageCount(config, upstream);
         const sections = Array.isArray(upstream['sections']) ? upstream['sections'].filter(isRecord) : [];
 
-        const imageSlots: BlogImageSlot[] = includeImages ? buildSlots(topic, title, sections) : [];
+        const imageSlots: BlogImageSlot[] = includeImages ? buildSlots(topic, title, sections, imageCount) : [];
 
         const output: BlogImagePlanOutput = {
             mode: 'blog-image-plan',
             topic,
             title,
             includeImages,
+            imageCount,
             sections,
             imageSlots,
             facts: normalizeFacts(upstream['facts']),
@@ -79,7 +83,22 @@ function readIncludeImages(config: Record<string, unknown> | undefined, upstream
     return false;
 }
 
-function buildSlots(topic: string, title: string, sections: Record<string, unknown>[]): BlogImageSlot[] {
+const IMAGE_COUNT_DEFAULT = 4;
+const IMAGE_COUNT_MIN = 1;
+const IMAGE_COUNT_MAX = 12;
+
+function readImageCount(config: Record<string, unknown> | undefined, upstream: Record<string, unknown>): number {
+    const raw = Number(config?.['imageCount'] ?? upstream['imageCount']);
+    const count = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : IMAGE_COUNT_DEFAULT;
+    return Math.min(IMAGE_COUNT_MAX, Math.max(IMAGE_COUNT_MIN, count));
+}
+
+/**
+ * Build at most `count` slots: 1 hero (afterTitle) + up to (count-1) section slots spread EVENLY
+ * across the H2 sections. Even spread uses index floor(i * n / k) so the chosen sections are
+ * distinct (guaranteed while k ≤ n) and distributed, not clustered at the top. Deterministic.
+ */
+function buildSlots(topic: string, title: string, sections: Record<string, unknown>[], count: number): BlogImageSlot[] {
     const slots: BlogImageSlot[] = [
         {
             slotId: 'hero',
@@ -92,7 +111,9 @@ function buildSlots(topic: string, title: string, sections: Record<string, unkno
     ];
 
     const h2Sections = sections.filter(section => section['level'] !== 3);
-    for (let index = 0; index < h2Sections.length; index += 1) {
+    const sectionSlotCount = Math.min(Math.max(count - 1, 0), h2Sections.length);
+    for (let i = 0; i < sectionSlotCount; i += 1) {
+        const index = Math.floor((i * h2Sections.length) / sectionSlotCount);
         const section = h2Sections[index];
         const sectionId = text(section['id'], `h2-${index + 1}`);
         const heading = text(section['heading'], `핵심 ${index + 1}`);

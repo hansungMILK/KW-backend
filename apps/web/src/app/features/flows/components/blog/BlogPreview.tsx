@@ -110,7 +110,9 @@ const BlocksRenderer: React.FC<{ blocks: BlogPreviewBlock[] }> = ({ blocks }) =>
 );
 
 export const BlogPreview: React.FC<BlogPreviewProps> = ({ previewModel, naverHtml, className }) => {
-    const wrapperClass = ['mx-auto max-w-[680px] bg-white px-6 py-8 text-left', className].filter(Boolean).join(' ');
+    const wrapperClass = ['mx-auto w-full max-w-[680px] bg-white px-6 py-8 text-left', className]
+        .filter(Boolean)
+        .join(' ');
 
     if (previewModel && previewModel.blocks.length > 0) {
         return (

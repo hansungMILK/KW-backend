@@ -20,7 +20,10 @@ import {
 } from '@flows/ui-kit';
 
 import { tryParseJson } from '../utils';
+import { BlogPreview } from './blog/BlogPreview';
 import { S3Image } from './S3Image';
+
+import type { BlogPreviewBlock, BlogPreviewModel } from './blog/BlogPreview';
 
 type ContentType =
     | 'image'
@@ -29,6 +32,7 @@ type ContentType =
     | 'script'
     | 'video'
     | 'audio'
+    | 'blog'
     | 'json'
     | 'markdown'
     | 'text';
@@ -49,6 +53,7 @@ const getContentTypeIcon = (type: ContentType): React.ReactNode => {
         case 'image-prompt':
             return <FileImage className={iconClass} />;
         case 'script':
+        case 'blog':
             return <FileText className={iconClass} />;
         case 'video':
             return <FileVideo className={iconClass} />;
@@ -142,6 +147,7 @@ const detectContentType = (value: unknown, explicitType?: string): ContentType =
     if (explicitType === 'image-gallery') return 'image-gallery';
     if (explicitType === 'image-prompt') return 'image-prompt';
     if (explicitType === 'script') return 'script';
+    if (explicitType === 'blog') return 'blog';
 
     const mediaUrl = getMediaUrl(value);
     const stringValue = typeof mediaUrl === 'string' ? mediaUrl : '';
@@ -449,6 +455,28 @@ const VideoPreview: React.FC<{ src: string }> = ({ src }) => (
     </div>
 );
 
+const getBlogPreviewModel = (value: unknown): BlogPreviewModel | undefined => {
+    if (!isRecordValue(value)) return undefined;
+    const preview = value.previewModel;
+    if (!isRecordValue(preview) || typeof preview.title !== 'string' || !Array.isArray(preview.blocks)) {
+        return undefined;
+    }
+    return {
+        title: preview.title,
+        blocks: preview.blocks.filter(isRecordValue) as unknown as BlogPreviewBlock[],
+    };
+};
+
+const BlogModalPreview: React.FC<{ value: unknown }> = ({ value }) => {
+    const previewModel = getBlogPreviewModel(value);
+    const naverHtml = isRecordValue(value) ? firstStringValue(value.naverHtml) : undefined;
+    return (
+        <div className="rounded-lg bg-white">
+            <BlogPreview previewModel={previewModel} naverHtml={naverHtml} />
+        </div>
+    );
+};
+
 const AudioPreview: React.FC<{ src: string }> = ({ src }) => (
     <div className="rounded-xl border border-border bg-muted/10 p-6">
         <div className="text-sm font-semibold text-foreground">나레이션 음성</div>
@@ -500,6 +528,8 @@ export const ContentPreviewModal: React.FC<ContentPreviewModalProps> = ({ open, 
                 return '이미지 프롬프트';
             case 'script':
                 return '대본';
+            case 'blog':
+                return '블로그';
             case 'video':
                 return '영상';
             case 'audio':
@@ -529,6 +559,9 @@ export const ContentPreviewModal: React.FC<ContentPreviewModalProps> = ({ open, 
 
             case 'script':
                 return <ScriptPreview value={content.value} />;
+
+            case 'blog':
+                return <BlogModalPreview value={content.value} />;
 
             case 'video':
                 return <VideoPreview src={getMediaUrl(content.value) ?? String(content.value)} />;

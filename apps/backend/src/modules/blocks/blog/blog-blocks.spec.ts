@@ -120,6 +120,35 @@ describe('blog-image-plan block', () => {
         expect(typeof sectionSlot['alt']).toBe('string');
     });
 
+    it('caps slots at imageCount and spreads section slots evenly (4 over 8 H2 sections)', async () => {
+        const sections = Array.from({ length: 8 }, (_unused, i) => ({
+            id: `h2-${i + 1}`,
+            level: 2,
+            heading: `섹션 ${i + 1}`,
+            summary: `요약 ${i + 1}`,
+            paragraphs: ['p'],
+        }));
+        const result = await blogImagePlanBlock.execute(
+            { topic: '새벽배송', title: '새벽배송 완벽 정리', sections },
+            { includeImages: true, imageCount: 4 }
+        );
+        const output = result.output as Record<string, unknown>;
+        const slots = output['imageSlots'] as Array<Record<string, unknown>>;
+
+        expect(output['includeImages']).toBe(true);
+        expect(output['imageCount']).toBe(4);
+        // exactly imageCount slots: 1 hero + 3 section slots.
+        expect(slots.length).toBe(4);
+        expect(slots[0]['placement']).toBe('afterTitle');
+        const sectionSlots = slots.slice(1);
+        expect(sectionSlots.every(slot => slot['placement'] === 'afterSectionHeading')).toBe(true);
+        // even spread over 8 sections: floor(i*8/3) → h2-1, h2-3, h2-6 (distinct, distributed).
+        expect(sectionSlots.map(slot => slot['sectionId'])).toEqual(['h2-1', 'h2-3', 'h2-6']);
+        // every section slot anchors to a real section id and carries a valid placement.
+        const validIds = new Set(sections.map(section => section.id));
+        expect(sectionSlots.every(slot => validIds.has(slot['sectionId'] as string))).toBe(true);
+    });
+
     it('returns empty slots when includeImages is off', async () => {
         const draft = {
             topic: '새벽배송',

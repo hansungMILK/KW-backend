@@ -68,6 +68,60 @@ const getVideoRecord = (value: Record<string, unknown>): Record<string, unknown>
     return isVideoRecord(value) ? value : undefined;
 };
 
+const BLOG_MODES = [
+    'blog-brief',
+    'blog-research',
+    'blog-outline',
+    'blog-draft',
+    'blog-image-plan',
+    'blog-images',
+    'blog-seo',
+    'blog-assemble',
+    'blog-export',
+];
+
+// Route blog outputs by the explicit `mode` discriminant (not sections-shape),
+// so intermediate blog modes are not hijacked by the longform tooltip (RC2).
+const isBlogShape = (value: unknown): value is Record<string, unknown> => {
+    const record = asRecord(value);
+    if (!record) return false;
+    const mode = firstString(record.mode);
+    return mode !== undefined && BLOG_MODES.includes(mode);
+};
+
+const BLOG_MODE_LABELS: Record<string, string> = {
+    'blog-brief': '블로그 브리프',
+    'blog-research': '근거 자료 수집',
+    'blog-outline': '블로그 목차',
+    'blog-draft': '블로그 본문 초안',
+    'blog-image-plan': '이미지 배치 계획',
+    'blog-images': '블로그 이미지 생성',
+    'blog-seo': 'SEO 메타데이터',
+    'blog-assemble': '블로그 조립',
+    'blog-export': '블로그 내보내기',
+};
+
+const BlogTooltipSummary = ({ value }: { value: Record<string, unknown> }) => {
+    const mode = firstString(value.mode) ?? '';
+    const label = BLOG_MODE_LABELS[mode] ?? '블로그';
+    const title = firstString(value.title, value.topic);
+    const sectionCount = Array.isArray(value.sections) ? value.sections.length : 0;
+    const slotCount = Array.isArray(value.imageSlots) ? value.imageSlots.length : 0;
+    return (
+        <div className="min-w-[180px] max-w-[320px] text-[10px] text-foreground">
+            <div className="font-semibold text-emerald-300">{label}</div>
+            {title ? <div className="mt-1 line-clamp-2 text-foreground">{title}</div> : null}
+            {(sectionCount > 0 || slotCount > 0) && (
+                <div className="mt-1 text-muted-foreground">
+                    {sectionCount > 0 ? `섹션 ${sectionCount}개` : ''}
+                    {sectionCount > 0 && slotCount > 0 ? ' · ' : ''}
+                    {slotCount > 0 ? `이미지 ${slotCount}장` : ''}
+                </div>
+            )}
+        </div>
+    );
+};
+
 const hasLongformFriendlyShape = (value: unknown): value is Record<string, unknown> => {
     const record = asRecord(value);
     if (!record) return false;
@@ -149,6 +203,9 @@ export const TooltipContentRenderer: React.FC<TooltipContentRendererProps> = ({
 
     // JSON/object type
     if (type === 'json' || (content !== null && typeof content === 'object')) {
+        if (isBlogShape(content)) {
+            return <BlogTooltipSummary value={content} />;
+        }
         if (hasLongformFriendlyShape(content)) {
             return <LongformTooltipSummary value={content} />;
         }
@@ -165,6 +222,9 @@ export const TooltipContentRenderer: React.FC<TooltipContentRendererProps> = ({
     // Try to parse JSON string
     const parsedJson = tryParseJson(strValue);
     if (parsedJson) {
+        if (isBlogShape(parsedJson)) {
+            return <BlogTooltipSummary value={parsedJson} />;
+        }
         if (hasLongformFriendlyShape(parsedJson)) {
             return <LongformTooltipSummary value={parsedJson} />;
         }

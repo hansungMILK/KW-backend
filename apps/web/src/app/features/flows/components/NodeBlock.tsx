@@ -1005,8 +1005,48 @@ const applyLongformDraft = (value: Record<string, unknown>, draft: string): Reco
     };
 };
 
+// Every blog mode the pipeline emits. Routing is by this explicit `mode`
+// discriminant (NOT by sections-shape), so intermediate blog outputs never get
+// hijacked by the sections-based longform renderer (RC2).
+const BLOG_MODES = [
+    'blog-brief',
+    'blog-research',
+    'blog-outline',
+    'blog-draft',
+    'blog-image-plan',
+    'blog-images',
+    'blog-seo',
+    'blog-assemble',
+    'blog-export',
+] as const;
+
 const isBlogOutput = (value: unknown): boolean =>
+    isRecordValue(value) && BLOG_MODES.includes(firstStringValue(value.mode) as (typeof BLOG_MODES)[number]);
+
+// Intermediate blog modes (no final preview/export payload) render a readable
+// blog summary instead of the BlogPreview document.
+const isFinalBlogOutput = (value: unknown): boolean =>
     isRecordValue(value) && (value.mode === 'blog-assemble' || value.mode === 'blog-export');
+
+export type PreviewVariant = 'blog' | 'video' | 'images' | 'longform' | 'single-image' | 'script' | 'other';
+
+/**
+ * Pure mirror of the variant FriendlyOutputPreview's dispatch will pick for a
+ * value. Exported for unit tests / screenshot harness. Blog modes are routed by
+ * the explicit `mode` discriminant BEFORE any longform/shape check.
+ */
+export const selectPreviewVariant = (value: unknown): PreviewVariant => {
+    if (!isRecordValue(value)) return 'other';
+    if (isBlogOutput(value)) return 'blog';
+    if (getVideoPreviewRecord(value)) return 'video';
+    if (asRecordArray(value.images).length > 0) return 'images';
+    if (isLongformGateARecord(value)) return 'longform';
+    if (isSingleImagePromptRecord(value)) return 'single-image';
+    if (isRecordValue(value.script) || asRecordArray(value.scenes).length > 0 || value.title || value.hook) {
+        return 'script';
+    }
+    return 'other';
+};
 
 const getBlogPreviewModel = (value: Record<string, unknown>): BlogPreviewModel | undefined => {
     const preview = value.previewModel;
@@ -1017,6 +1057,45 @@ const getBlogPreviewModel = (value: Record<string, unknown>): BlogPreviewModel |
         title: preview.title,
         blocks: preview.blocks.filter(isRecordValue) as unknown as BlogPreviewBlock[],
     };
+};
+
+interface BlogIntermediateSection {
+    heading: string;
+    detail?: string;
+}
+
+// Compact, readable section list for intermediate blog modes (outline/draft/
+// image-plan/images/seo). Uses section.heading (not section.title), with summary
+// (outline) or the first paragraph (draft) as the detail line.
+const getBlogIntermediateSections = (value: Record<string, unknown>): BlogIntermediateSection[] =>
+    asRecordArray(value.sections)
+        .map((section, index): BlogIntermediateSection => {
+            const heading = firstStringValue(section.heading, section.title) ?? `섹션 ${index + 1}`;
+            const paragraphs = asStringArray(section.paragraphs);
+            const detail = firstStringValue(section.summary, section.description) ?? paragraphs[0];
+            return { heading, detail };
+        })
+        .filter(section => section.heading.length > 0);
+
+const getBlogModeLabel = (mode: string | undefined): string => {
+    switch (mode) {
+        case 'blog-brief':
+            return '블로그 브리프';
+        case 'blog-research':
+            return '근거 자료 수집';
+        case 'blog-outline':
+            return '블로그 목차';
+        case 'blog-draft':
+            return '블로그 본문 초안';
+        case 'blog-image-plan':
+            return '이미지 배치 계획';
+        case 'blog-images':
+            return '블로그 이미지 생성';
+        case 'blog-seo':
+            return 'SEO 메타데이터';
+        default:
+            return '블로그';
+    }
 };
 
 const getBlogImageManifest = (value: Record<string, unknown>): BlogImageManifestEntry[] =>
@@ -1054,6 +1133,7 @@ const getPreferredNodeWidth = (node: NodeData, definition: BlockDefinitionWithFr
     const value = packet?.value;
     if (!isRecordValue(value) || !hasFriendlyOutputPreview(value)) return baseWidth;
 
+    if (isBlogOutput(value)) return Math.max(baseWidth, 420);
     if (getVideoPreviewRecord(value)) return Math.max(baseWidth, 360);
     if (asRecordArray(value.images).length > 0) return Math.max(baseWidth, 340);
     if (isLongformGateARecord(value)) return Math.max(baseWidth, 360);
@@ -1101,7 +1181,7 @@ const getStatusLabel = (value: unknown): string => {
     return '미확인';
 };
 
-const FriendlyOutputPreview: React.FC<{
+export const FriendlyOutputPreview: React.FC<{
     value: unknown;
     maxHeight: number;
     nodeType?: string;
@@ -1160,29 +1240,112 @@ const FriendlyOutputPreview: React.FC<{
         </>
     );
 
-    // Blog v2 — Naver-style rendered preview + copy/download bar (additive).
+    // Blog v2 — route by explicit `mode` (RC2). Final modes (assemble/export)
+    // render the Naver-style document; intermediate modes render a readable
+    // title + section summary instead of the longform renderer.
     if (isBlogOutput(recordValue)) {
-        const previewModel = getBlogPreviewModel(recordValue);
-        const naverHtml = firstStringValue(recordValue.naverHtml);
-        const markdown = firstStringValue(recordValue.markdown);
-        const imageManifest = getBlogImageManifest(recordValue);
-        const showExportBar = typeof recordValue.naverHtml === 'string' || typeof recordValue.markdown === 'string';
-        return (
+        if (isFinalBlogOutput(recordValue)) {
+            const previewModel = getBlogPreviewModel(recordValue);
+            const naverHtml = firstStringValue(recordValue.naverHtml);
+            const markdown = firstStringValue(recordValue.markdown);
+            const imageManifest = getBlogImageManifest(recordValue);
+            const showExportBar = typeof recordValue.naverHtml === 'string' || typeof recordValue.markdown === 'string';
+            return withModal(
+                <div
+                    className="overflow-auto rounded-lg border border-border bg-white"
+                    style={{ maxHeight }}
+                    onWheel={event => event.stopPropagation()}
+                >
+                    <div className="sticky top-0 z-10 flex items-center justify-end gap-2 border-b border-border bg-white/95 px-3 py-2 backdrop-blur">
+                        {showExportBar && (
+                            <BlogExportBar
+                                naverHtml={naverHtml ?? ''}
+                                markdown={markdown ?? ''}
+                                imageManifest={imageManifest}
+                            />
+                        )}
+                        <button
+                            type="button"
+                            className="shrink-0 rounded border border-emerald-500/40 px-2 py-0.5 text-[10px] text-emerald-700 hover:bg-emerald-50"
+                            onClick={event => {
+                                event.stopPropagation();
+                                setModalContent({ value: recordValue, type: 'blog' });
+                            }}
+                        >
+                            크게 보기
+                        </button>
+                    </div>
+                    <BlogPreview previewModel={previewModel} naverHtml={naverHtml} />
+                </div>
+            );
+        }
+
+        // Intermediate blog modes: outline / draft / image-plan / images / seo /
+        // brief / research. brief/research/seo carry no `sections`, so fall back
+        // to topic/keyword/angle so the node never renders blank.
+        const title = firstStringValue(recordValue.title, recordValue.topic) ?? '블로그 작업 결과';
+        const sections = getBlogIntermediateSections(recordValue);
+        const seo = isRecordValue(recordValue.seo) ? recordValue.seo : undefined;
+        const keyword = firstStringValue(recordValue.keyword, seo?.keyword);
+        const angle = firstStringValue(recordValue.angle);
+        const aeoSummary = firstStringValue(recordValue.aeoSummary, seo?.description);
+        const imageSlotCount = asRecordArray(recordValue.imageSlots).length;
+        const includeImages = recordValue.includeImages;
+        const imageCount = asNumberValue(recordValue.imageCount);
+        const articleCount = asRecordArray(recordValue.articles).length;
+        return withModal(
             <div
-                className="overflow-auto rounded-lg border border-border bg-white"
+                className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-2.5 overflow-auto"
                 style={{ maxHeight }}
                 onWheel={event => event.stopPropagation()}
             >
-                {showExportBar && (
-                    <div className="sticky top-0 z-10 border-b border-border bg-white/95 px-3 py-2 backdrop-blur">
-                        <BlogExportBar
-                            naverHtml={naverHtml ?? ''}
-                            markdown={markdown ?? ''}
-                            imageManifest={imageManifest}
-                        />
+                <div className="text-[10px] font-semibold text-emerald-700">
+                    {getBlogModeLabel(firstStringValue(recordValue.mode))}
+                </div>
+                <div className="mt-0.5 text-[12px] font-semibold leading-snug text-foreground">{title}</div>
+                {(keyword || angle) && (
+                    <div className="mt-1 space-y-0.5 text-[10px] text-foreground/80">
+                        {keyword && (
+                            <div>
+                                <span className="font-semibold text-emerald-700">키워드:</span> {keyword}
+                            </div>
+                        )}
+                        {angle && (
+                            <div className="line-clamp-2">
+                                <span className="font-semibold text-emerald-700">관점:</span> {angle}
+                            </div>
+                        )}
                     </div>
                 )}
-                <BlogPreview previewModel={previewModel} naverHtml={naverHtml} />
+                {(includeImages !== undefined || imageSlotCount > 0) && (
+                    <div className="mt-1 text-[10px] text-muted-foreground">
+                        {includeImages === false
+                            ? '이미지 없이 진행'
+                            : `이미지 ${imageSlotCount || imageCount || 0}장 배치`}
+                    </div>
+                )}
+                {articleCount > 0 && (
+                    <div className="mt-1 text-[10px] text-muted-foreground">참고 자료 {articleCount}건</div>
+                )}
+                {sections.length > 0 && (
+                    <div className="mt-2 space-y-1">
+                        {sections.slice(0, 5).map((section, index) => (
+                            <div key={`${index}-${section.heading}`} className="text-[10px] text-foreground/85">
+                                <span className="font-medium text-foreground">
+                                    {index + 1}. {section.heading}
+                                </span>
+                                {section.detail ? (
+                                    <span className="block line-clamp-2 text-foreground/70">{section.detail}</span>
+                                ) : null}
+                            </div>
+                        ))}
+                    </div>
+                )}
+                {aeoSummary && (
+                    <div className="mt-2 rounded bg-emerald-500/10 px-2 py-1 text-[10px] text-emerald-800 line-clamp-3">
+                        {aeoSummary}
+                    </div>
+                )}
             </div>
         );
     }

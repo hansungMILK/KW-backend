@@ -93,22 +93,37 @@ describe('openaiOrchestrator blog v2 routing', () => {
         );
         expect(proposal.proposedNodes.map(node => node.blockType)).not.toContain('media-video');
         expect(proposal.proposedNodes.map(node => node.blockType)).not.toContain('content');
-        // includeImages off by default → image-plan/images receive includeImages:false.
+        // Images are ON by default (FLOOR) with a sensible count → image-plan/images get includeImages:true.
+        expect(findConfig(proposal, 'blog-image-plan')).toEqual(
+            expect.objectContaining({ includeImages: true, imageCount: 4 })
+        );
+        expect(findConfig(proposal, 'blog-images')).toEqual(expect.objectContaining({ includeImages: true }));
+    });
+
+    it('turns images off only when the user explicitly opts out', async () => {
+        mockBlogPlanner(false);
+        const proposal = await openaiOrchestrator.generateProposal(
+            'flow-blog-v2-noimg',
+            '새벽배송 블로그 글 써줘. 이미지 없이 텍스트만'
+        );
+
         expect(findConfig(proposal, 'blog-image-plan')).toEqual(expect.objectContaining({ includeImages: false }));
         expect(findConfig(proposal, 'blog-images')).toEqual(expect.objectContaining({ includeImages: false }));
     });
 
-    it('toggles includeImages on when the request asks for images too', async () => {
+    it('keeps images on and respects an explicit count when the request asks for images too', async () => {
         mockBlogPlanner(true);
         const proposal = await openaiOrchestrator.generateProposal(
             'flow-blog-v2-images',
-            '새벽배송 블로그 글 써주고 이미지도 넣어줘'
+            '새벽배송 블로그 글 써주고 이미지도 6장 넣어줘'
         );
 
         expect(proposal.proposedNodes.map(node => node.blockType)).toEqual(
             DEFAULT_WORKFLOW_PACK_REGISTRY.getRecipe('text.blog.v2')?.defaultBlocks.map(block => block.blockType)
         );
-        expect(findConfig(proposal, 'blog-image-plan')).toEqual(expect.objectContaining({ includeImages: true }));
+        expect(findConfig(proposal, 'blog-image-plan')).toEqual(
+            expect.objectContaining({ includeImages: true, imageCount: 6 })
+        );
         expect(findConfig(proposal, 'blog-images')).toEqual(expect.objectContaining({ includeImages: true }));
     });
 });

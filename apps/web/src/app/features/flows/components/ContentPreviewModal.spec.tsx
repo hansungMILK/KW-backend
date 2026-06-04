@@ -99,4 +99,49 @@ describe('ContentPreviewModal', () => {
         expect(screen.getByText('미국: 너 지금 주문한다고?')).toBeTruthy();
         expect(screen.getByText('한국: 응, 아침에 와.')).toBeTruthy();
     });
+
+    it('renders a blog document for the blog content type (RC4 크게 보기)', () => {
+        render(
+            <ContentPreviewModal
+                open
+                onOpenChange={vi.fn()}
+                content={{
+                    type: 'blog',
+                    value: {
+                        mode: 'blog-export',
+                        naverHtml: '<h1>제로웨이스트 입문 가이드</h1>\n<p>오늘부터 시작하세요.</p>',
+                        markdown: '# 제로웨이스트 입문 가이드\n\n오늘부터 시작하세요.',
+                    },
+                }}
+            />
+        );
+
+        // The blog type renders BlogPreview (not the JSON catch-all).
+        expect(screen.getByText('블로그')).toBeTruthy();
+        expect(screen.getByText('오늘부터 시작하세요.')).toBeTruthy();
+    });
+
+    it('renders a blog document from a previewModel via the blog content type', () => {
+        render(
+            <ContentPreviewModal
+                open
+                onOpenChange={vi.fn()}
+                content={{
+                    type: 'blog',
+                    value: {
+                        mode: 'blog-assemble',
+                        previewModel: {
+                            title: '제로웨이스트 입문 가이드',
+                            blocks: [
+                                { kind: 'title', text: '제로웨이스트 입문 가이드' },
+                                { kind: 'paragraph', text: '작은 변화부터 시작하면 됩니다.' },
+                            ],
+                        },
+                    },
+                }}
+            />
+        );
+
+        expect(screen.getByText('작은 변화부터 시작하면 됩니다.')).toBeTruthy();
+    });
 });

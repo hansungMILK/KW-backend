@@ -7,6 +7,7 @@ import { env } from '../../config/env';
 import { traceService } from '../../services/trace-service';
 import { generateNumericId } from '../../utils/id-generator';
 import { log } from '../../utils/logger';
+import { extractStatedSubject } from '../blocks/blog/blog-shared';
 import {
     buildContentProfilePreferences,
     enrichContentProfileNodeConfig,
@@ -138,7 +139,9 @@ Rules:
 - If the user asks for blog/article/post/copy/text writing, choose text.blog.v2 (the Naver-ready blog pipeline with outline checkpoint, in-body image placement, and copy-paste export). If they explicitly ask for the images to be included, still choose text.blog.v2 — the pipeline toggles images on. Choose text.url-explainer.v1 instead only when a URL is the primary source.
 - If the request is outside the known recipes but still automation-worthy, set recipeId null and intent custom so the full workflow planner can decide.
 - If it is obvious small talk or a product question without an output request, set recipeId null and intent chat.
-- Preserve the user's real subject in understanding.surfaceTerms. Do not replace it with generic words like "content" or "topic".`;
+- Preserve the user's real subject in understanding.surfaceTerms. Do not replace it with generic words like "content" or "topic".
+- surfaceTerms and focusEntities must be the actual SUBJECT MATTER of the request, never the output format word. Never put "블로그", "글", "쇼츠", "영상", or "이미지" into surfaceTerms/focusEntities — those describe the output, not the topic.
+- When the user explicitly marks the subject ("주제는 X" / "주제: X" / "about X" / "subject: X"), put ONLY X into surfaceTerms and focusEntities. Example: "블로그 글 생성해줘. 주제는 대한민국 월드컵 조편성 분석" → surfaceTerms ["대한민국 월드컵 조편성 분석"], not ["블로그 글"].`;
 
 export const openaiOrchestrator: Orchestrator = {
     async generateProposal(
@@ -473,19 +476,23 @@ function buildAiSelectedGenericWorkflow(
     }
 
     if (decision.recipeId === 'text.blog.v2') {
-        const includeImages = detectBlogIncludeImages(userMessage, decision);
+        const { includeImages, imageCount } = resolveBlogImagePlan(userMessage, decision);
+        // An explicit subject marker ("주제는 X") deterministically wins over the nano decision
+        // LLM's surfaceTerms, which sometimes capture the output FORMAT word ("블로그") instead of
+        // the real subject. Scoped to blog so the frozen shorts/countryball/image flows are unaffected.
+        const blogTopic = extractStatedSubject(userMessage) ?? topic;
         return buildWorkflowFromRecipe(decision.recipeId, userMessage, {
             summary: buildAiRecipeSummary(
                 decision,
                 includeImages
-                    ? '브리프, 근거 수집, 목차, 섹션 본문, 이미지 배치/생성, SEO, 문서 조립, 네이버 복붙용 내보내기까지 이어지는 블로그 완성형 워크플로우로 처리합니다.'
-                    : '브리프, 근거 수집, 목차, 섹션 본문, SEO, 문서 조립, 네이버 복붙용 내보내기까지 이어지는 블로그 완성형 워크플로우로 처리합니다(이미지 미포함).'
+                    ? `브리프, 근거 수집, 목차, 섹션 본문, 이미지 ${imageCount}장 배치/생성, SEO, 문서 조립, 네이버 복붙용 내보내기까지 이어지는 블로그 완성형 워크플로우로 처리합니다.`
+                    : '브리프, 근거 수집, 목차, 섹션 본문, SEO, 문서 조립, 네이버 복붙용 내보내기까지 이어지는 블로그 완성형 워크플로우로 처리합니다(이미지 미포함 요청).'
             ),
             blockConfigOverrides: {
-                'blog-brief': baseConfig,
-                'blog-research': { query: userMessage.trim() || topic || '블로그 근거', requestSpec },
-                'blog-outline': { topic },
-                'blog-image-plan': { includeImages },
+                'blog-brief': { ...baseConfig, topic: blogTopic },
+                'blog-research': { query: blogTopic || userMessage.trim(), requestSpec },
+                'blog-outline': { topic: blogTopic },
+                'blog-image-plan': { includeImages, imageCount },
                 'blog-images': { includeImages },
             },
         });
@@ -608,16 +615,30 @@ function detectRequestedImageAspectRatio(userMessage: string): string | undefine
     return undefined;
 }
 
+const BLOG_DEFAULT_IMAGE_COUNT = 4;
+const BLOG_IMAGE_COUNT_MIN = 1;
+const BLOG_IMAGE_COUNT_MAX = 8;
+
 /**
- * Decide whether a blog v2 request should also generate in-body images.
- * Toggle: on when the user explicitly asks for images ("이미지도 넣어줘"), otherwise off.
+ * Resolve the blog v2 image plan. Images are ON by DEFAULT (the user authorized automatic
+ * generation); they are turned OFF only when the user explicitly opts out. The count is an
+ * explicit count from the message when present, otherwise a sensible default, clamped to 1..8.
  */
-function detectBlogIncludeImages(userMessage: string, decision: GenericRequestDecision): boolean {
-    if (decision.needsImagePrompt) return true;
-    const haystack = [userMessage, ...decision.understanding.constraints, ...decision.understanding.styleHints]
-        .join(' ')
-        .toLowerCase();
-    return /이미지|사진|그림|썸네일|일러스트|image|photo|picture|illustration/.test(haystack);
+function resolveBlogImagePlan(
+    userMessage: string,
+    _decision: GenericRequestDecision
+): { includeImages: boolean; imageCount: number } {
+    const optOut =
+        /이미지\s*없이|이미지\s*빼|이미지\s*말고|사진\s*없이|텍스트만|글만|without\s+images?|no\s+images?/i.test(
+            userMessage
+        );
+    const includeImages = !optOut;
+    const requested = detectRequestedSceneCount(userMessage);
+    const imageCount = Math.min(
+        BLOG_IMAGE_COUNT_MAX,
+        Math.max(BLOG_IMAGE_COUNT_MIN, requested ?? BLOG_DEFAULT_IMAGE_COUNT)
+    );
+    return { includeImages, imageCount };
 }
 
 function readReferenceAssetId(decision: GenericRequestDecision): string | undefined {

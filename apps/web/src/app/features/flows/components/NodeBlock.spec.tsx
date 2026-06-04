@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { NodeBlock } from './NodeBlock';
+import { NodeBlock, selectPreviewVariant } from './NodeBlock';
 
 import type { ConfigValue } from './NodeBlock';
 import type { BlockDefinitionWithFrontend, NodeData } from '@flows/flows';
@@ -426,5 +426,94 @@ describe('NodeBlock longform previews', () => {
         expect(screen.getByText('blog.export.downloadZip')).toBeTruthy();
         // naverHtml is rendered as the visual preview.
         expect(screen.getByText('오늘부터 시작하세요.')).toBeTruthy();
+    });
+
+    it('renders intermediate blog modes as a readable section summary, not longform (RC2)', () => {
+        testState.registry = {
+            'blog-outline': makeDefinition('blog-outline', '블로그 목차'),
+        };
+
+        renderNode(
+            makeNode('blog-outline', {
+                mode: 'blog-outline',
+                topic: '제로웨이스트',
+                title: '제로웨이스트 완벽 정리',
+                sections: [
+                    { id: 'h2-1', level: 2, heading: '왜 시작해야 할까', summary: '환경과 비용 절감.' },
+                    { id: 'h2-2', level: 2, heading: '오늘 할 수 있는 것', summary: '작은 습관부터.' },
+                ],
+            })
+        );
+
+        // Uses section.heading (blog), NOT the longform "섹션 N" title path.
+        expect(screen.getByText(/왜 시작해야 할까/)).toBeTruthy();
+        expect(screen.getByText('환경과 비용 절감.')).toBeTruthy();
+        // Title shows in the node body preview (and in the port tooltip summary).
+        expect(screen.getAllByText('제로웨이스트 완벽 정리').length).toBeGreaterThan(0);
+        // Longform-only labels must be absent.
+        expect(screen.queryByText('대본 섹션')).toBeNull();
+        expect(screen.queryByText('롱폼 제작 기획안')).toBeNull();
+    });
+
+    it('renders no-section blog modes (seo) without blanking and without longform', () => {
+        testState.registry = {
+            'blog-seo': makeDefinition('blog-seo', 'SEO 메타데이터'),
+        };
+
+        renderNode(
+            makeNode('blog-seo', {
+                mode: 'blog-seo',
+                topic: '제로웨이스트',
+                seo: { title: '제로웨이스트 완벽 정리', keyword: '제로웨이스트' },
+                aeoSummary: '제로웨이스트는 쓰레기를 줄이는 생활 방식입니다.',
+            })
+        );
+
+        // Title falls back to topic so the node never blanks.
+        expect(screen.getAllByText('제로웨이스트').length).toBeGreaterThan(0);
+        expect(screen.getByText('제로웨이스트는 쓰레기를 줄이는 생활 방식입니다.')).toBeTruthy();
+        expect(screen.queryByText('롱폼 제작 기획안')).toBeNull();
+    });
+});
+
+describe('selectPreviewVariant', () => {
+    const blogModes = [
+        'blog-brief',
+        'blog-research',
+        'blog-outline',
+        'blog-draft',
+        'blog-image-plan',
+        'blog-images',
+        'blog-seo',
+        'blog-assemble',
+        'blog-export',
+    ];
+
+    it.each(blogModes)('routes blog mode %s to the blog variant', mode => {
+        expect(selectPreviewVariant({ mode, sections: [{ heading: 'h' }] })).toBe('blog');
+    });
+
+    it('routes a longform-gate-a record to longform', () => {
+        expect(selectPreviewVariant({ mode: 'longform-gate-a' })).toBe('longform');
+    });
+
+    it('routes a record with fullScriptDraft and no blog mode to longform (regression c)', () => {
+        expect(selectPreviewVariant({ fullScriptDraft: 'intro\n\nbody' })).toBe('longform');
+    });
+
+    it('routes a record with sections and no blog mode to longform (regression c)', () => {
+        expect(selectPreviewVariant({ sections: [{ title: '섹션 1', narration: '...' }] })).toBe('longform');
+    });
+
+    it('routes a video record to video', () => {
+        expect(selectPreviewVariant({ video: { url: 'https://x/clip.mp4' } })).toBe('video');
+    });
+
+    it('routes an images record to images', () => {
+        expect(selectPreviewVariant({ images: [{ url: 'https://x/a.png' }] })).toBe('images');
+    });
+
+    it('routes a non-record to other', () => {
+        expect(selectPreviewVariant('plain string')).toBe('other');
     });
 });
