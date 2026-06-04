@@ -33,7 +33,16 @@ export type WorkflowCapability =
     | 'longform.motion-compose'
     | 'longform.render'
     | 'longform.qa'
-    | 'longform.package';
+    | 'longform.package'
+    | 'blog.brief'
+    | 'blog.research'
+    | 'blog.outline'
+    | 'blog.draft'
+    | 'blog.image-plan'
+    | 'blog.images'
+    | 'blog.seo'
+    | 'blog.assemble'
+    | 'blog.export';
 
 export interface BlockCatalogEntry {
     blockType: AllowedBlockType;
@@ -351,6 +360,87 @@ export const ORCHESTRATOR_BLOCK_CATALOG: Record<AllowedBlockType, BlockCatalogEn
         output: 'json downloadable package',
         whenToUse: 'MP4, SRT, 대본, source digest를 최종 묶음으로 제공할 때',
         whenNotToUse: 'QA를 통과하지 않은 영상',
+    },
+    'blog-brief': {
+        blockType: 'blog-brief',
+        label: '블로그 브리프',
+        capabilities: ['blog.brief'],
+        input: 'user blog topic',
+        output: 'json blog brief with keyword, audience, intent, angle, sourced facts',
+        whenToUse: '네이버 복붙 완성형 블로그를 쓰기 전 키워드/독자/인텐트/각도를 정리할 때',
+        whenNotToUse: '쇼츠/롱폼 기획, 단일 이미지 프롬프트',
+    },
+    'blog-research': {
+        blockType: 'blog-research',
+        label: '블로그 근거 수집',
+        capabilities: ['blog.research', 'source.collect'],
+        input: 'blog brief',
+        output: 'json brief plus collected sources for factual topics (passthrough otherwise)',
+        whenToUse: '사실형 블로그 주제의 근거를 search 블록으로 수집할 때',
+        whenNotToUse: '근거가 필요 없는 창작/의견형 글',
+    },
+    'blog-outline': {
+        blockType: 'blog-outline',
+        label: '블로그 아웃라인',
+        capabilities: ['blog.outline'],
+        input: 'blog brief and optional sources',
+        output: 'json H1 + 8–10 H2 outline with per-section length, supports a selection checkpoint',
+        whenToUse: '블로그 목차를 만들고 사용자 목차 편집 체크포인트가 필요할 때',
+        whenNotToUse: '본문 작성, 단일 이미지 생성',
+    },
+    'blog-draft': {
+        blockType: 'blog-draft',
+        label: '블로그 본문 초안',
+        capabilities: ['blog.draft', 'text.generate'],
+        input: 'selected blog outline plus grounded facts',
+        output: 'json per-section blog body paragraphs',
+        whenToUse: '아웃라인을 섹션별 본문으로 작성할 때(한 방 생성 금지)',
+        whenNotToUse: '목차 설계, 영상 대본',
+    },
+    'blog-image-plan': {
+        blockType: 'blog-image-plan',
+        label: '블로그 이미지 배치 설계',
+        capabilities: ['blog.image-plan'],
+        input: 'drafted blog sections',
+        output: 'json image slots with placement/sectionId/purpose/promptSource/caption/alt',
+        whenToUse: '블로그 본문 내 이미지의 위치 계약을 설계할 때(개수가 아닌 위치)',
+        whenNotToUse: '이미지 포함 토글이 꺼진 경우는 빈 슬롯을 반환',
+    },
+    'blog-images': {
+        blockType: 'blog-images',
+        label: '블로그 이미지 생성',
+        capabilities: ['blog.images', 'image.generate'],
+        input: 'blog image slots',
+        output: 'json image slots with generated imageUrl filled (media-image 위임)',
+        whenToUse: '이미지 슬롯의 promptSource로 본문 이미지를 생성할 때',
+        whenNotToUse: '이미지 포함 토글이 꺼진 경우',
+    },
+    'blog-seo': {
+        blockType: 'blog-seo',
+        label: '블로그 SEO/AEO',
+        capabilities: ['blog.seo', 'metadata.generate'],
+        input: 'blog title and outline',
+        output: 'json meta title/description/keywords and AEO summary',
+        whenToUse: '블로그 메타데이터와 구조/AEO 요약을 생성할 때',
+        whenNotToUse: '영상 배포 메타데이터',
+    },
+    'blog-assemble': {
+        blockType: 'blog-assemble',
+        label: '블로그 문서 조립',
+        capabilities: ['blog.assemble'],
+        input: 'drafted sections, image slots, seo, facts',
+        output: 'json complete BlogDocument plus Naver-like previewModel',
+        whenToUse: '본문과 이미지 슬롯을 placement대로 결합해 구조화 문서를 완성할 때',
+        whenNotToUse: '마크다운만 필요한 단순 출력',
+    },
+    'blog-export': {
+        blockType: 'blog-export',
+        label: '블로그 내보내기',
+        capabilities: ['blog.export'],
+        input: 'BlogDocument',
+        output: 'json naverHtml, markdown, imageManifest for copy-paste',
+        whenToUse: '네이버 에디터 붙여넣기용 HTML/마크다운/이미지 매니페스트를 만들 때',
+        whenNotToUse: '구조화 문서 조립 이전 단계',
     },
 };
 

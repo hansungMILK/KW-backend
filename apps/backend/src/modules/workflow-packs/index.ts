@@ -1,3 +1,4 @@
+import { blogPack } from './blog-pack';
 import { countryballShortsPack } from './countryball-shorts-pack';
 import { longformPack } from './longform-pack';
 import { mediaPack } from './media-pack';
@@ -17,6 +18,7 @@ export const DEFAULT_WORKFLOW_PACKS: WorkflowPackManifest[] = [
     shortsPack,
     countryballShortsPack,
     longformPack,
+    blogPack,
 ];
 
 export const DEFAULT_WORKFLOW_PACK_REGISTRY = createWorkflowPackRegistry(DEFAULT_WORKFLOW_PACKS);

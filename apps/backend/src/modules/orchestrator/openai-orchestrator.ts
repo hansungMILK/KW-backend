@@ -63,6 +63,15 @@ const COST_ESTIMATES: Record<AllowedBlockType, number> = {
     'longform-render': 0.5,
     'longform-qa': 0.01,
     'longform-package': 0.01,
+    'blog-brief': 0.02,
+    'blog-research': 0.01,
+    'blog-outline': 0.02,
+    'blog-draft': 0.06,
+    'blog-image-plan': 0,
+    'blog-images': 0,
+    'blog-seo': 0.01,
+    'blog-assemble': 0,
+    'blog-export': 0,
 };
 
 const LONGFORM_ORCHESTRATOR_DECISION_SYSTEM_PROMPT = `You are an AI longform workflow planner for a node-based automation product.
@@ -101,7 +110,7 @@ Choose a recipe only from this registry:
 Return compact JSON only:
 {
   "intent": "single-image|blog-post|url-explainer|shorts|longform|custom|chat",
-  "recipeId": "image.single.v1|text.blog.v1|text.url-explainer.v1|shorts.info.v1|longform.explainer.v1|null",
+  "recipeId": "image.single.v1|text.blog.v2|text.blog.v1|text.url-explainer.v1|shorts.info.v1|longform.explainer.v1|null",
   "outputKind": "text|image|audio|video|data|unknown",
   "mode": "informational|creative-simulation|story|news|explanation|unknown",
   "needsSearch": true,
@@ -123,7 +132,7 @@ Rules:
 - If the user asks to draw, generate, make, or visualize an image, choose image.single.v1 even if they phrase it casually. This recipe also covers multi-image requests: an explicit count ("4장"), multiple subjects ("63빌딩, 에펠타워"), and style/aspect-ratio options all still use image.single.v1. List each named subject separately in understanding.focusEntities so the system can map subjects to images.
 - If the user asks for Shorts/Reels/TikTok production, choose shorts.info.v1. Creative simulations and VS matchups are still shorts when the requested surface is short-form video.
 - If the user asks for longform or a long YouTube video, choose longform.explainer.v1.
-- If the user asks for blog/article/post/copy/text writing, choose text.blog.v1 unless a URL is the primary source, then choose text.url-explainer.v1.
+- If the user asks for blog/article/post/copy/text writing, choose text.blog.v2 (the Naver-ready blog pipeline with outline checkpoint, in-body image placement, and copy-paste export). If they explicitly ask for the images to be included, still choose text.blog.v2 — the pipeline toggles images on. Choose text.url-explainer.v1 instead only when a URL is the primary source.
 - If the request is outside the known recipes but still automation-worthy, set recipeId null and intent custom so the full workflow planner can decide.
 - If it is obvious small talk or a product question without an output request, set recipeId null and intent chat.
 - Preserve the user's real subject in understanding.surfaceTerms. Do not replace it with generic words like "content" or "topic".`;
@@ -394,6 +403,7 @@ function buildFallbackProposal(errorMessage: string): ProposalResult {
 type KnownRecipeId =
     | 'image.single.v1'
     | 'text.blog.v1'
+    | 'text.blog.v2'
     | 'text.url-explainer.v1'
     | 'shorts.info.v1'
     | 'longform.explainer.v1';
@@ -455,6 +465,25 @@ function buildAiSelectedGenericWorkflow(
                 data: { requestUnderstanding: decision.understanding },
                 analysis: { requestUnderstanding: decision.understanding },
                 'media-image': { requestUnderstanding: decision.understanding },
+            },
+        });
+    }
+
+    if (decision.recipeId === 'text.blog.v2') {
+        const includeImages = detectBlogIncludeImages(userMessage, decision);
+        return buildWorkflowFromRecipe(decision.recipeId, userMessage, {
+            summary: buildAiRecipeSummary(
+                decision,
+                includeImages
+                    ? '브리프, 근거 수집, 목차, 섹션 본문, 이미지 배치/생성, SEO, 문서 조립, 네이버 복붙용 내보내기까지 이어지는 블로그 완성형 워크플로우로 처리합니다.'
+                    : '브리프, 근거 수집, 목차, 섹션 본문, SEO, 문서 조립, 네이버 복붙용 내보내기까지 이어지는 블로그 완성형 워크플로우로 처리합니다(이미지 미포함).'
+            ),
+            blockConfigOverrides: {
+                'blog-brief': baseConfig,
+                'blog-research': { query: userMessage.trim() || topic || '블로그 근거', requestSpec },
+                'blog-outline': { topic },
+                'blog-image-plan': { includeImages },
+                'blog-images': { includeImages },
             },
         });
     }
@@ -574,6 +603,18 @@ function detectRequestedImageAspectRatio(userMessage: string): string | undefine
     if (/가로|와이드|landscape|wide/.test(text)) return '16:9';
     if (/세로|portrait|vertical/.test(text)) return '9:16';
     return undefined;
+}
+
+/**
+ * Decide whether a blog v2 request should also generate in-body images.
+ * Toggle: on when the user explicitly asks for images ("이미지도 넣어줘"), otherwise off.
+ */
+function detectBlogIncludeImages(userMessage: string, decision: GenericRequestDecision): boolean {
+    if (decision.needsImagePrompt) return true;
+    const haystack = [userMessage, ...decision.understanding.constraints, ...decision.understanding.styleHints]
+        .join(' ')
+        .toLowerCase();
+    return /이미지|사진|그림|썸네일|일러스트|image|photo|picture|illustration/.test(haystack);
 }
 
 function readReferenceAssetId(decision: GenericRequestDecision): string | undefined {
@@ -844,6 +885,7 @@ function normalizeKnownRecipeId(value: unknown): KnownRecipeId | null {
     if (
         normalized === 'image.single.v1' ||
         normalized === 'text.blog.v1' ||
+        normalized === 'text.blog.v2' ||
         normalized === 'text.url-explainer.v1' ||
         normalized === 'shorts.info.v1' ||
         normalized === 'longform.explainer.v1'

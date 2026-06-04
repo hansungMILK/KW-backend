@@ -514,6 +514,116 @@ describe('runService cost guards', () => {
         }
     });
 
+    it('resumes after a selected blog outline by seeding it COMPLETED without re-running it', async () => {
+        const previousMode = env.orchestratorMode;
+        (env as { orchestratorMode: string }).orchestratorMode = 'mock';
+        getFlow.mockResolvedValueOnce({
+            id: 'flow-blog-resume',
+            name: 'Blog resume flow',
+            state: 'READY',
+            nodes: [
+                { id: 'node-brief', blockType: 'blog-brief', label: '블로그 브리프', config: {} },
+                {
+                    id: 'node-outline',
+                    blockType: 'blog-outline',
+                    label: '블로그 아웃라인',
+                    config: {
+                        topic: '새벽배송',
+                        outlineSelectionStatus: 'selected',
+                        // Grounding is round-tripped through config on resume; the seed must carry it
+                        // so blog-draft keeps the facts even though the outline block is not re-run.
+                        facts: [{ key: '배송 시간', value: '새벽 7시 이전', source: 'user' }],
+                        articles: [{ title: '출처', url: 'http://example.com' }],
+                        selectedOutline: {
+                            title: '내가 고른 제목',
+                            sections: [
+                                { id: 'h2-1', level: 2, heading: '직접 고른 섹션', summary: '요약', targetWords: 150 },
+                            ],
+                        },
+                    },
+                },
+                { id: 'node-draft', blockType: 'blog-draft', label: '블로그 본문', config: {} },
+                { id: 'node-assemble', blockType: 'blog-assemble', label: '블로그 조립', config: {} },
+            ],
+            edges: [
+                { source: 'node-brief', target: 'node-outline' },
+                { source: 'node-outline', target: 'node-draft' },
+                { source: 'node-draft', target: 'node-assemble' },
+            ],
+            createdAt: '2026-06-04T00:00:00.000Z',
+            updatedAt: '2026-06-04T00:00:00.000Z',
+        });
+        putRun.mockResolvedValue(undefined);
+        putRunNode.mockResolvedValue(undefined);
+        sendQueueMessage.mockResolvedValue(undefined);
+
+        try {
+            const result = await runService.createRun('flow-blog-resume', 'MANUAL', {
+                executionMode: 'full',
+                resumeFromNodeId: 'node-outline',
+            } as Parameters<typeof runService.createRun>[2] & { resumeFromNodeId: string });
+
+            expect(result).toEqual(expect.objectContaining({ ok: true }));
+            expect(putRunNode.mock.calls.map(call => call[0].nodeId)).toEqual([
+                'node-outline',
+                'node-draft',
+                'node-assemble',
+            ]);
+            // The outline node is seeded COMPLETED with the selected outline so it is not re-run.
+            expect(putRunNode.mock.calls[0]?.[0]).toEqual(
+                expect.objectContaining({
+                    nodeId: 'node-outline',
+                    status: 'COMPLETED',
+                    outputPayload: expect.objectContaining({
+                        mode: 'blog-outline',
+                        outlineSelectionStatus: 'selected',
+                        title: '내가 고른 제목',
+                        // Anti-hallucination grounding must survive the checkpoint/resume path.
+                        facts: [{ key: '배송 시간', value: '새벽 7시 이전', source: 'user' }],
+                        articles: [{ title: '출처', url: 'http://example.com' }],
+                    }),
+                })
+            );
+            expect(putRunNode.mock.calls[1]?.[0]).toEqual(
+                expect.objectContaining({
+                    nodeId: 'node-draft',
+                    status: 'PENDING',
+                    parentNodeIds: ['node-outline'],
+                })
+            );
+            expect(sendQueueMessage).toHaveBeenCalled();
+        } finally {
+            (env as { orchestratorMode: string }).orchestratorMode = previousMode;
+        }
+    });
+
+    it('rejects resuming from a blog outline that has no selection snapshot', async () => {
+        getFlow.mockResolvedValueOnce({
+            id: 'flow-blog-no-selection',
+            name: 'Blog no-selection flow',
+            state: 'READY',
+            nodes: [
+                {
+                    id: 'node-outline',
+                    blockType: 'blog-outline',
+                    label: '블로그 아웃라인',
+                    config: { topic: '새벽배송' },
+                },
+                { id: 'node-draft', blockType: 'blog-draft', label: '블로그 본문', config: {} },
+            ],
+            edges: [{ source: 'node-outline', target: 'node-draft' }],
+            createdAt: '2026-06-04T00:00:00.000Z',
+            updatedAt: '2026-06-04T00:00:00.000Z',
+        });
+
+        const result = await runService.createRun('flow-blog-no-selection', 'MANUAL', {
+            executionMode: 'full',
+            resumeFromNodeId: 'node-outline',
+        } as Parameters<typeof runService.createRun>[2] & { resumeFromNodeId: string });
+
+        expect(result).toEqual(expect.objectContaining({ ok: false, status: 409 }));
+    });
+
     it('allows a step longform run to queue with future Gate B nodes before approval', async () => {
         getFlow.mockResolvedValueOnce({
             id: 'flow-longform-full-factory',

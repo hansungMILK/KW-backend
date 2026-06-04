@@ -608,8 +608,13 @@ const filterSnapshotFromResumeNode = (
 };
 
 const buildResumeSeedOutput = (node: Record<string, unknown>): Record<string, unknown> | null => {
-    if (getBlockType(node) !== 'countryball-angle-lab') return null;
+    const blockType = getBlockType(node);
+    if (blockType === 'countryball-angle-lab') return buildCountryballAngleResumeSeed(node);
+    if (blockType === 'blog-outline') return buildBlogOutlineResumeSeed(node);
+    return null;
+};
 
+const buildCountryballAngleResumeSeed = (node: Record<string, unknown>): Record<string, unknown> | null => {
     const config = getNodeConfig(node);
     const selectedAngleId = typeof config['selectedAngleId'] === 'string' ? config['selectedAngleId'].trim() : '';
     const selectedAngle = isRecord(config['selectedAngle']) ? config['selectedAngle'] : null;
@@ -630,6 +635,62 @@ const buildResumeSeedOutput = (node: Record<string, unknown>): Record<string, un
             reviewMode: 'script-first',
             angleSelectionRequired: false,
         },
+    };
+};
+
+/**
+ * Blog v2 outline checkpoint resume seed (additive; mirrors the countryball angle seed pattern).
+ * When the user has edited/selected the outline (config carries selectedOutline / selectedSections /
+ * sections), seed a COMPLETED blog-outline output so downstream blog blocks run without re-running it.
+ */
+const buildBlogOutlineResumeSeed = (node: Record<string, unknown>): Record<string, unknown> | null => {
+    const config = getNodeConfig(node);
+    const selectedOutline = isRecord(config['selectedOutline']) ? config['selectedOutline'] : null;
+    const sectionsFromSelected =
+        selectedOutline && Array.isArray(selectedOutline['sections']) ? selectedOutline['sections'] : null;
+    const sections =
+        sectionsFromSelected ??
+        (Array.isArray(config['selectedSections']) ? config['selectedSections'] : null) ??
+        (Array.isArray(config['sections']) ? config['sections'] : null);
+    if (!sections || sections.length === 0) return null;
+
+    const topic =
+        typeof config['topic'] === 'string'
+            ? config['topic']
+            : typeof config['requestTopic'] === 'string'
+              ? config['requestTopic']
+              : '블로그 글';
+    const title =
+        typeof config['selectedTitle'] === 'string'
+            ? config['selectedTitle']
+            : selectedOutline && typeof selectedOutline['title'] === 'string'
+              ? (selectedOutline['title'] as string)
+              : typeof config['title'] === 'string'
+                ? config['title']
+                : `${topic} 완벽 정리`;
+
+    // Carry anti-hallucination grounding (brief facts / search articles) into the seed so the
+    // resumed outline output keeps it for blog-draft. The block itself is NOT re-run on resume
+    // (its output is replaced by this seed), so grounding must be re-attached here or the chain
+    // breaks on the checkpoint path. Grounding is round-tripped through config (same convention
+    // the countryball seed uses for angleOptions); fall back to selectedOutline's copy.
+    const facts =
+        (Array.isArray(config['facts']) ? config['facts'] : null) ??
+        (selectedOutline && Array.isArray(selectedOutline['facts']) ? selectedOutline['facts'] : null) ??
+        [];
+    const articles =
+        (Array.isArray(config['articles']) ? config['articles'] : null) ??
+        (selectedOutline && Array.isArray(selectedOutline['articles']) ? selectedOutline['articles'] : null) ??
+        [];
+
+    return {
+        mode: 'blog-outline',
+        topic,
+        title,
+        sections,
+        outlineSelectionStatus: 'selected',
+        facts,
+        articles,
     };
 };
 

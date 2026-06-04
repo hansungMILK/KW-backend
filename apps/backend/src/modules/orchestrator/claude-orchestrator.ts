@@ -57,6 +57,15 @@ const COST_ESTIMATES: Record<AllowedBlockType, number> = {
     'longform-render': 0.5,
     'longform-qa': 0.01,
     'longform-package': 0.01,
+    'blog-brief': 0.02,
+    'blog-research': 0.02,
+    'blog-outline': 0.02,
+    'blog-draft': 0.08,
+    'blog-image-plan': 0,
+    'blog-images': 0,
+    'blog-seo': 0.02,
+    'blog-assemble': 0,
+    'blog-export': 0,
 };
 
 /**

@@ -967,6 +967,126 @@ describe('executionEngine asset publication', () => {
         expect(run.status).toBe('COMPLETED');
         expect(run.finalOutputSummary).not.toMatchObject({ stoppedForReview: true });
     });
+
+    it('stops a step blog run after blog-outline when no outline selection was made', async () => {
+        run = {
+            runId: 'run-step-review',
+            flowId: 'flow-blog-step',
+            runType: 'FULL_FLOW',
+            status: 'QUEUED',
+            triggerSource: 'MANUAL',
+            executionMode: 'step',
+            flowSnapshot: {
+                nodes: [],
+                edges: [
+                    { sourceNodeId: 'node-brief', targetNodeId: 'node-outline' },
+                    { sourceNodeId: 'node-outline', targetNodeId: 'node-draft' },
+                    { sourceNodeId: 'node-draft', targetNodeId: 'node-assemble' },
+                ],
+            },
+            createdAt: new Date().toISOString(),
+        } as Run;
+
+        const runNodes: RunNode[] = [
+            makeRunNode('node-brief', 'blog-brief', []),
+            makeRunNode('node-outline', 'blog-outline', ['node-brief']),
+            makeRunNode('node-draft', 'blog-draft', ['node-outline']),
+            makeRunNode('node-assemble', 'blog-assemble', ['node-draft']),
+        ];
+
+        getRun.mockImplementation(async () => run);
+        listRunNodes.mockImplementation(async () => runNodes);
+        getRunNode.mockImplementation(async (_runId, nodeId) => runNodes.find(item => item.nodeId === nodeId) ?? null);
+        putRunNode.mockImplementation(async updatedNode => {
+            const index = runNodes.findIndex(item => item.nodeId === updatedNode.nodeId);
+            if (index >= 0) runNodes[index] = updatedNode;
+        });
+        updateRunStatus.mockImplementation(async (_runId, status, extra) => {
+            run = { ...run, ...extra, status } as Run;
+            return { ok: true, run };
+        });
+        updateRunNodeStatus.mockImplementation(async (_runId, nodeId, status, extra) => {
+            const index = runNodes.findIndex(item => item.nodeId === nodeId);
+            if (index < 0) return { ok: false, error: 'missing node' };
+            runNodes[index] = { ...runNodes[index], ...extra, status } as RunNode;
+            return { ok: true, node: runNodes[index] };
+        });
+        executeBlock.mockImplementation(async blockType => ({
+            output:
+                blockType === 'blog-outline'
+                    ? { mode: 'blog-outline', outlineSelectionStatus: 'pending', sections: [{ id: 'h2-1' }] }
+                    : { ok: true },
+            durationMs: 1,
+        }));
+
+        await executionEngine.handleRunExecution(run.runId, 'exec-blog-step-review');
+
+        // Pending outline ⇒ stop after outline; draft/assemble must not run.
+        expect(executeBlock.mock.calls.map(call => call[0])).toEqual(['blog-brief', 'blog-outline']);
+        expect(run.status).toBe('COMPLETED');
+        expect(run.finalOutputSummary).toMatchObject({ stoppedForReview: true });
+    });
+
+    it('continues a step blog resume when the outline is seeded as selected', async () => {
+        run = {
+            runId: 'run-step-review',
+            flowId: 'flow-blog-resume',
+            runType: 'FULL_FLOW',
+            status: 'QUEUED',
+            triggerSource: 'MANUAL',
+            executionMode: 'step',
+            flowSnapshot: {
+                nodes: [],
+                edges: [
+                    { sourceNodeId: 'node-outline', targetNodeId: 'node-draft' },
+                    { sourceNodeId: 'node-draft', targetNodeId: 'node-assemble' },
+                ],
+            },
+            createdAt: new Date().toISOString(),
+        } as Run;
+
+        const runNodes: RunNode[] = [
+            {
+                ...makeRunNode('node-outline', 'blog-outline', []),
+                status: 'COMPLETED',
+                progress: 100,
+                outputPayload: {
+                    mode: 'blog-outline',
+                    outlineSelectionStatus: 'selected',
+                    sections: [{ id: 'h2-1', level: 2, heading: '직접 고른 섹션' }],
+                },
+            } as RunNode,
+            makeRunNode('node-draft', 'blog-draft', ['node-outline']),
+            makeRunNode('node-assemble', 'blog-assemble', ['node-draft']),
+        ];
+
+        getRun.mockImplementation(async () => run);
+        listRunNodes.mockImplementation(async () => runNodes);
+        getRunNode.mockImplementation(async (_runId, nodeId) => runNodes.find(item => item.nodeId === nodeId) ?? null);
+        putRunNode.mockImplementation(async updatedNode => {
+            const index = runNodes.findIndex(item => item.nodeId === updatedNode.nodeId);
+            if (index >= 0) runNodes[index] = updatedNode;
+        });
+        updateRunStatus.mockImplementation(async (_runId, status, extra) => {
+            run = { ...run, ...extra, status } as Run;
+            return { ok: true, run };
+        });
+        updateRunNodeStatus.mockImplementation(async (_runId, nodeId, status, extra) => {
+            const index = runNodes.findIndex(item => item.nodeId === nodeId);
+            if (index < 0) return { ok: false, error: 'missing node' };
+            runNodes[index] = { ...runNodes[index], ...extra, status } as RunNode;
+            return { ok: true, node: runNodes[index] };
+        });
+        executeBlock.mockImplementation(async () => ({ output: { ok: true }, durationMs: 1 }));
+
+        await executionEngine.handleRunExecution(run.runId, 'exec-blog-resume');
+
+        // Selected outline ⇒ no re-run, no second stop; downstream blog blocks run.
+        expect(executeBlock.mock.calls.map(call => call[0])).toEqual(['blog-draft', 'blog-assemble']);
+        expect(executeBlock.mock.calls.map(call => call[0])).not.toContain('blog-outline');
+        expect(run.status).toBe('COMPLETED');
+        expect(run.finalOutputSummary).not.toMatchObject({ stoppedForReview: true });
+    });
 });
 
 function makeRunNode(nodeId: string, blockType: string, parentNodeIds: string[]): RunNode {

@@ -1,4 +1,13 @@
 import { analysisBlock } from './analysis-block';
+import { blogAssembleBlock } from './blog/blog-assemble-block';
+import { blogBriefBlock } from './blog/blog-brief-block';
+import { blogDraftBlock } from './blog/blog-draft-block';
+import { blogExportBlock } from './blog/blog-export-block';
+import { blogImagePlanBlock } from './blog/blog-image-plan-block';
+import { blogImagesBlock } from './blog/blog-images-block';
+import { blogOutlineBlock } from './blog/blog-outline-block';
+import { blogResearchBlock } from './blog/blog-research-block';
+import { blogSeoBlock } from './blog/blog-seo-block';
 import { contentBlock } from './content-block';
 import { countryballAnalysisBlock } from './countryball/countryball-analysis-block';
 import { countryballAngleLabBlock } from './countryball/countryball-angle-lab-block';
@@ -76,6 +85,15 @@ registry.set('longform-motion-compose', longformMotionComposeBlock);
 registry.set('longform-render', longformRenderBlock);
 registry.set('longform-qa', longformQaBlock);
 registry.set('longform-package', longformPackageBlock);
+registry.set('blog-brief', blogBriefBlock);
+registry.set('blog-research', blogResearchBlock);
+registry.set('blog-outline', blogOutlineBlock);
+registry.set('blog-draft', blogDraftBlock);
+registry.set('blog-image-plan', blogImagePlanBlock);
+registry.set('blog-images', blogImagesBlock);
+registry.set('blog-seo', blogSeoBlock);
+registry.set('blog-assemble', blogAssembleBlock);
+registry.set('blog-export', blogExportBlock);
 
 // Sanity check: every declared block type must be registered
 for (const blockType of BLOCK_TYPES) {

@@ -59,11 +59,13 @@ describe('workflow pack registry', () => {
             'shorts',
             'countryball-shorts',
             'longform',
+            'blog',
         ]);
         expect(registry.getPack('media')?.kind).toBe('capability');
         expect(registry.getPack('shorts')?.kind).toBe('recipe');
         expect(registry.getPack('countryball-shorts')?.kind).toBe('recipe');
         expect(registry.getPack('longform')?.kind).toBe('recipe');
+        expect(registry.getPack('blog')?.kind).toBe('recipe');
 
         expect(registry.getBlock('media-image')?.orchestrator.capabilities).toContain('image.generate');
         expect(registry.getBlock('media-video')?.orchestrator.capabilities).toContain('video.compose');
@@ -156,6 +158,30 @@ describe('workflow pack registry', () => {
             'longform-qa',
             'longform-package',
         ]);
+    });
+
+    it('registers Blog v2 as an isolated recipe pack with blog-specific blocks', () => {
+        const registry = createDefaultWorkflowPackRegistry();
+        const recipe = registry.getRecipe('text.blog.v2');
+
+        expect(recipe?.defaultBlocks.map(item => item.blockType)).toEqual([
+            'blog-brief',
+            'blog-research',
+            'blog-outline',
+            'blog-draft',
+            'blog-image-plan',
+            'blog-images',
+            'blog-seo',
+            'blog-assemble',
+            'blog-export',
+        ]);
+        // text.blog.v1 must be preserved unchanged alongside v2.
+        expect(registry.getRecipe('text.blog.v1')?.defaultBlocks.map(item => item.blockType)).toEqual([
+            'content',
+            'output-preview',
+        ]);
+        expect(recipe?.defaultBlocks.map(item => item.blockType)).not.toContain('content');
+        expect(recipe?.defaultBlocks.map(item => item.blockType)).not.toContain('media-video');
     });
 
     it('keeps static block type enums in sync with pack manifests', () => {

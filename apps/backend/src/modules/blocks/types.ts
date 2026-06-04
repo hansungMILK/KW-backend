@@ -40,6 +40,15 @@ export const BLOCK_TYPES = [
     'longform-render',
     'longform-qa',
     'longform-package',
+    'blog-brief',
+    'blog-research',
+    'blog-outline',
+    'blog-draft',
+    'blog-image-plan',
+    'blog-images',
+    'blog-seo',
+    'blog-assemble',
+    'blog-export',
 ] as const;
 
 export type BlockType = (typeof BLOCK_TYPES)[number];

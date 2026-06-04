@@ -51,7 +51,12 @@ function isExecutionTimeoutError(err: unknown): boolean {
 }
 
 function isStepReviewStopNode(blockType: string): boolean {
-    return blockType === 'content' || blockType === 'longform-review' || blockType === 'countryball-angle-lab';
+    return (
+        blockType === 'content' ||
+        blockType === 'longform-review' ||
+        blockType === 'countryball-angle-lab' ||
+        blockType === 'blog-outline'
+    );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -79,6 +84,11 @@ function isSelectedCountryballAngleOutput(value: unknown): boolean {
     );
 }
 
+function isSelectedBlogOutlineOutput(value: unknown): boolean {
+    if (!isRecord(value)) return false;
+    return value['outlineSelectionStatus'] === 'selected';
+}
+
 function shouldStopAtStepReviewNode(node: { blockType: string; status: string; outputPayload?: unknown }): boolean {
     if (node.status !== 'COMPLETED' || !isStepReviewStopNode(node.blockType)) return false;
     if (node.blockType === 'longform-review') {
@@ -86,6 +96,9 @@ function shouldStopAtStepReviewNode(node: { blockType: string; status: string; o
     }
     if (node.blockType === 'countryball-angle-lab') {
         return !isSelectedCountryballAngleOutput(node.outputPayload);
+    }
+    if (node.blockType === 'blog-outline') {
+        return !isSelectedBlogOutlineOutput(node.outputPayload);
     }
     return true;
 }
@@ -359,7 +372,9 @@ export const executionEngine = {
                 const reviewMessage =
                     reviewNode.blockType === 'countryball-angle-lab'
                         ? 'Countryball angle selection step completed'
-                        : 'Script review step completed';
+                        : reviewNode.blockType === 'blog-outline'
+                          ? 'Blog outline selection step completed'
+                          : 'Script review step completed';
                 await skipPendingNodes(runId);
                 await runRepo.updateRunStatus(runId, 'COMPLETED', {
                     completedAt: new Date().toISOString(),
@@ -381,7 +396,9 @@ export const executionEngine = {
                         message:
                             reviewNode.blockType === 'countryball-angle-lab'
                                 ? '컨트리볼 앵글 선택 단계가 완료되었습니다.'
-                                : '대본 검수 단계가 완료되었습니다.',
+                                : reviewNode.blockType === 'blog-outline'
+                                  ? '블로그 목차 설계 단계가 완료되었습니다.'
+                                  : '대본 검수 단계가 완료되었습니다.',
                         timestamp: Date.now(),
                     });
                 } catch {
