@@ -8,7 +8,7 @@ export default defineConfig({
     },
     reporter: [['list']],
     use: {
-        baseURL: 'http://127.0.0.1:3001',
+        baseURL: process.env.E2E_WEB_URL || 'http://127.0.0.1:3000',
         trace: 'retain-on-failure',
         screenshot: 'only-on-failure',
     },
