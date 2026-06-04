@@ -115,7 +115,7 @@ export const countryballAngleLabBlock: BlockExecutor = {
         }
 
         const response = await openaiAdapter.chatJson({
-            model: env.openaiModel,
+            model: env.openaiWritingModel,
             systemPrompt: COUNTRYBALL_ANGLE_LAB_SYSTEM_PROMPT,
             userMessage: buildAngleLabUserMessage(requestTopic, brief, input),
             maxTokens: env.openaiContentMaxTokens,

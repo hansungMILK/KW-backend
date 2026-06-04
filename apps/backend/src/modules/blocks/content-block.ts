@@ -395,7 +395,7 @@ export const contentBlock: BlockExecutor = {
 
         const initialMaxTokens = resolveContentMaxTokens({ longformGateAMode });
         const response = await openaiAdapter.chatJson({
-            model: env.openaiModel,
+            model: env.openaiWritingModel,
             systemPrompt,
             userMessage,
             maxTokens: initialMaxTokens,
@@ -410,7 +410,7 @@ export const contentBlock: BlockExecutor = {
                 retryMaxTokens: env.openaiContentRetryMaxTokens,
             });
             const retryResponse = await openaiAdapter.chatJson({
-                model: env.openaiModel,
+                model: env.openaiWritingModel,
                 systemPrompt: `${systemPrompt}\n\nSTRICT RETRY: Return one complete valid JSON object only. Do not include markdown, explanations, comments, or text outside the JSON object. Close every array and object.`,
                 userMessage,
                 maxTokens: Math.max(env.openaiContentRetryMaxTokens, initialMaxTokens),

@@ -546,7 +546,7 @@ async function generateAiSourceResearch(
     supportingSources: RecordValue[]
 ): Promise<{ output: RecordValue; model: string; latencyMs: number }> {
     const response = await openaiAdapter.chatJson({
-        model: env.openaiModel,
+        model: env.openaiWritingModel,
         systemPrompt: LONGFORM_SOURCE_RESEARCH_SYSTEM_PROMPT,
         userMessage: JSON.stringify(
             {
@@ -572,7 +572,7 @@ async function generateAiBrief(
     estimatedDurationSec: number
 ): Promise<{ output: RecordValue; model: string; latencyMs: number }> {
     const response = await openaiAdapter.chatJson({
-        model: env.openaiModel,
+        model: env.openaiWritingModel,
         systemPrompt: LONGFORM_BRIEF_SYSTEM_PROMPT,
         userMessage: JSON.stringify(
             {
@@ -600,7 +600,7 @@ async function generateAiStoryboard(
     script: RecordValue
 ): Promise<{ output: RecordValue; model: string; latencyMs: number; recovered?: boolean; recoveryReason?: string }> {
     const response = await openaiAdapter.chatJson({
-        model: env.openaiModel,
+        model: env.openaiWritingModel,
         systemPrompt: LONGFORM_STORYBOARD_SYSTEM_PROMPT,
         userMessage: JSON.stringify(
             {

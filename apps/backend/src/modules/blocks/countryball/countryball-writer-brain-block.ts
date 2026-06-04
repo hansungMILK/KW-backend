@@ -83,7 +83,7 @@ export const countryballWriterBrainBlock: BlockExecutor = {
         }
 
         const response = await openaiAdapter.chatJson({
-            model: env.openaiModel,
+            model: env.openaiWritingModel,
             systemPrompt: COUNTRYBALL_WRITER_BRAIN_SYSTEM_PROMPT,
             userMessage: buildWriterBrainUserMessage(requestTopic, selectedAngle, userAdjustment),
             maxTokens: env.openaiContentMaxTokens,

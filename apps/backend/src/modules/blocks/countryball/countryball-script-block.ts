@@ -101,7 +101,7 @@ export const countryballScriptBlock: BlockExecutor = {
         }
 
         const response = await openaiAdapter.chatJson({
-            model: env.openaiModel,
+            model: env.openaiWritingModel,
             systemPrompt: COUNTRYBALL_SCRIPT_SYSTEM_PROMPT,
             userMessage: buildScriptUserMessage(topic, brief, writerBrain, sceneCount, input),
             maxTokens: env.openaiCountryballContentMaxTokens,

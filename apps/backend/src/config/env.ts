@@ -51,6 +51,10 @@ export const env = {
     anthropicDefaultModel: readEnv('ANTHROPIC_DEFAULT_MODEL', 'claude-sonnet-4-6'),
     anthropicFastModel: readEnv('ANTHROPIC_FAST_MODEL', 'claude-haiku-4-5-20251001'),
     openaiModel: readEnv('OPENAI_MODEL', readEnv('OPENAI_TEXT_MODEL', 'gpt-5.4-nano')),
+    // Creative/long-form text generation (blog body, countryball/shorts scripts). A larger
+    // tier than the nano utility default — nano writes weak prose and reasons poorly. Cheap
+    // classification/meta calls (orchestrator, search query, vision, SEO) stay on openaiModel.
+    openaiWritingModel: readEnv('OPENAI_WRITING_MODEL', 'gpt-5.4-mini'),
     openaiOrchestratorModel: readEnv('OPENAI_ORCHESTRATOR_MODEL', readEnv('OPENAI_MODEL', 'gpt-5.4-nano')),
     openaiVisionModel: readEnv('OPENAI_VISION_MODEL', 'gpt-5.4-nano'),
     openaiSearchModel: readEnv('OPENAI_SEARCH_MODEL', readEnv('OPENAI_MODEL', 'gpt-5.4-nano')),
