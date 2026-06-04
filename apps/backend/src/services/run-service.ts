@@ -268,6 +268,7 @@ type CreateRunOptions = {
     executionMode?: string;
     notifyWebhook?: string;
     scope?: RunScope;
+    resumeFromNodeId?: string;
 };
 
 const ANALYSIS_RECOVERY_SYSTEM_PROMPT = [
@@ -583,6 +584,53 @@ const filterSnapshotByRunScope = (
     });
 
     return { nodes: scopedNodes, edges: scopedEdges };
+};
+
+const filterSnapshotFromResumeNode = (
+    nodes: Array<Record<string, unknown>>,
+    edges: Array<Record<string, unknown>>,
+    resumeFromNodeId?: string
+): { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> } => {
+    if (!resumeFromNodeId) return { nodes, edges };
+
+    const nodeIds = nodes.map(getNodeId).filter(Boolean);
+    if (!nodeIds.includes(resumeFromNodeId)) return { nodes: [], edges: [] };
+
+    const includedNodeIds = new Set([resumeFromNodeId, ...collectDescendantNodeIds(resumeFromNodeId, nodeIds, edges)]);
+    return {
+        nodes: nodes.filter(node => includedNodeIds.has(getNodeId(node))),
+        edges: edges.filter(edge => {
+            const source = (edge['source'] ?? edge['sourceNodeId']) as string | undefined;
+            const target = (edge['target'] ?? edge['targetNodeId']) as string | undefined;
+            return !!source && !!target && includedNodeIds.has(source) && includedNodeIds.has(target);
+        }),
+    };
+};
+
+const buildResumeSeedOutput = (node: Record<string, unknown>): Record<string, unknown> | null => {
+    if (getBlockType(node) !== 'countryball-angle-lab') return null;
+
+    const config = getNodeConfig(node);
+    const selectedAngleId = typeof config['selectedAngleId'] === 'string' ? config['selectedAngleId'].trim() : '';
+    const selectedAngle = isRecord(config['selectedAngle']) ? config['selectedAngle'] : null;
+    if (!selectedAngleId && !selectedAngle) return null;
+
+    return {
+        mode: 'countryball-angle-lab',
+        presetId: 'countryball-shorts',
+        requestTopic: typeof config['requestTopic'] === 'string' ? config['requestTopic'] : undefined,
+        selectedAngleId: selectedAngleId || String(selectedAngle?.['id'] ?? 'angle_1'),
+        angleSelectionStatus: 'selected',
+        ...(selectedAngle ? { selectedAngle } : {}),
+        ...(Array.isArray(config['angleOptions']) ? { angleOptions: config['angleOptions'] } : {}),
+        ...(isRecord(config['recommendedChoice']) ? { recommendedChoice: config['recommendedChoice'] } : {}),
+        ...(typeof config['selectionPrompt'] === 'string' ? { selectionPrompt: config['selectionPrompt'] } : {}),
+        metadata: {
+            contentProfileId: 'shorts.countryball.v1',
+            reviewMode: 'script-first',
+            angleSelectionRequired: false,
+        },
+    };
 };
 
 const getNodeData = (node: Record<string, unknown>): Record<string, unknown> => {
@@ -1004,7 +1052,30 @@ export const runService = {
         const allSnapshotNodes = (flow.nodes ?? []) as Array<Record<string, unknown>>;
         const allSnapshotEdges = (flow.edges ?? []) as Array<Record<string, unknown>>;
         const scopedSnapshot = filterSnapshotByRunScope(allSnapshotNodes, allSnapshotEdges, options?.scope);
-        const executableNodes = scopedSnapshot.nodes.filter(isExecutableNode);
+        const resumeNode = options?.resumeFromNodeId
+            ? scopedSnapshot.nodes.find(node => getNodeId(node) === options.resumeFromNodeId)
+            : undefined;
+        const resumeSeedOutput = resumeNode ? buildResumeSeedOutput(resumeNode) : null;
+        if (options?.resumeFromNodeId && !resumeNode) {
+            return {
+                ok: false,
+                error: `Resume node ${options.resumeFromNodeId} not found in selected run scope`,
+                status: 404,
+            };
+        }
+        if (options?.resumeFromNodeId && !resumeSeedOutput) {
+            return {
+                ok: false,
+                error: `Node ${options.resumeFromNodeId} cannot be used as a resume checkpoint`,
+                status: 409,
+            };
+        }
+        const executionSnapshot = filterSnapshotFromResumeNode(
+            scopedSnapshot.nodes,
+            scopedSnapshot.edges,
+            options?.resumeFromNodeId
+        );
+        const executableNodes = executionSnapshot.nodes.filter(isExecutableNode);
         const executionMode = (options?.executionMode as 'full' | 'step') ?? 'full';
         const preflightNodes = getPreflightNodesForRun(executableNodes, executionMode);
 
@@ -1053,20 +1124,21 @@ export const runService = {
             executionMode,
             scope: options?.scope ?? null,
             notifyWebhook: options?.notifyWebhook ?? null,
-            flowSnapshot: { nodes: executableNodes, edges: scopedSnapshot.edges },
+            flowSnapshot: { nodes: executableNodes, edges: executionSnapshot.edges },
             createdAt: now,
         };
         await runRepo.putRun(run);
 
         // Build DAG
         const nodeIds = executableNodes.map(getNodeId).filter(Boolean);
-        const parentMap = buildParentMap(nodeIds, scopedSnapshot.edges);
+        const parentMap = buildParentMap(nodeIds, executionSnapshot.edges);
 
         // Persist RunNode records (all PENDING)
         for (const node of executableNodes) {
             const nodeId = getNodeId(node);
             if (!nodeId) continue;
 
+            const isResumeSeedNode = options?.resumeFromNodeId === nodeId && !!resumeSeedOutput;
             const runNode: RunNode = {
                 runId,
                 nodeId,
@@ -1076,11 +1148,17 @@ export const runService = {
                     (node['name'] as string | undefined) ??
                     (node['label'] as string | undefined) ??
                     nodeId,
-                status: 'PENDING',
-                progress: 0,
+                status: isResumeSeedNode ? 'COMPLETED' : 'PENDING',
+                progress: isResumeSeedNode ? 100 : 0,
                 retryCount: 0,
                 parentNodeIds: parentMap.get(nodeId) ?? [],
                 inputPayload: buildInitialInputPayload(node),
+                ...(isResumeSeedNode
+                    ? {
+                          outputPayload: resumeSeedOutput,
+                          completedAt: now,
+                      }
+                    : {}),
                 updatedAt: now,
             };
             await runRepo.putRunNode(runNode);

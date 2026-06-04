@@ -82,6 +82,7 @@ export const RunCreateRequestSchema = z.object({
     triggerSource: z.string().default('MANUAL'),
     executionMode: z.enum(['full', 'step']).default('full'),
     scope: RunScopeSchema.optional(),
+    resumeFromNodeId: z.string().min(1).optional(),
     notifyWebhook: z.string().url().optional(),
 });
 

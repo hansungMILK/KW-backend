@@ -22,6 +22,7 @@ export interface CreateFlowRunOptions {
     executionMode?: 'full' | 'step';
     triggerSource?: string;
     scope?: RunScope;
+    resumeFromNodeId?: string;
 }
 
 export type FlowRunSummary = RunListResponse['items'][number];

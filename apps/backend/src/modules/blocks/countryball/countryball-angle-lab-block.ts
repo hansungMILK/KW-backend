@@ -31,6 +31,11 @@ Characters must experience the topic, not explain it.
 Countryball characters are not presenters. They should get confused, overreact, test something, misread a scene, panic, brag, worship a prop, or change attitude because of the topic.
 Facts must become time, place, props, action, facial expression, sound, and short caption strategy.
 
+Each angle must be a complete skit idea a user can choose, not a vague theme label.
+Use concrete titles that explain the situation in Korean.
+Avoid vague clickbait titles like "공습", "실험", "대참사", or "쇼크" unless the visible action literally supports that word.
+If the user gave an explicit plot, preserve that plot in every option and vary only the staging, reaction style, and ending payoff.
+
 Use these story mechanisms as writer tools, not hardcoded plots:
 ${COUNTRYBALL_STORY_MECHANISMS.map(item => `- ${item}`).join('\n')}
 
@@ -149,6 +154,8 @@ function buildAngleLabUserMessage(
             'Do not decide the final script yet.',
             'Do not turn the topic into a lecture or infrastructure explanation.',
             'Each option must be playable as a short situation skit.',
+            'Each option title and pitch must make the user instantly understand what would happen on screen.',
+            'Do not make three variants of the same angle with different nouns.',
         ].join('\n'),
     ]
         .filter(Boolean)
@@ -382,13 +389,11 @@ function parseJsonLike(content: string): unknown | null {
     } catch {
         const fenced = content.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
         if (fenced) {
-            try {
-                return JSON.parse(fenced.trim());
-            } catch {
-                return null;
-            }
+            const parsedFence = parseJsonCandidate(fenced);
+            if (parsedFence) return parsedFence;
         }
-        return parseFirstJsonObject(content);
+        const candidate = extractFirstJsonObjectText(content);
+        return candidate ? parseJsonCandidate(candidate) : null;
     }
 }
 
@@ -401,7 +406,7 @@ function hasSelectedAngleSnapshot(config: Record<string, unknown>): boolean {
     );
 }
 
-function parseFirstJsonObject(content: string): unknown | null {
+function extractFirstJsonObjectText(content: string): string | null {
     let start = -1;
     let depth = 0;
     let inString = false;
@@ -436,15 +441,62 @@ function parseFirstJsonObject(content: string): unknown | null {
         if (char === '}') depth -= 1;
 
         if (depth === 0) {
-            try {
-                return JSON.parse(content.slice(start, index + 1));
-            } catch {
-                return null;
-            }
+            return content.slice(start, index + 1);
         }
     }
 
-    return null;
+    return start >= 0 ? repairPossiblyTruncatedJsonObject(content.slice(start)) : null;
+}
+
+function parseJsonCandidate(input: string): unknown | null {
+    const trimmed = input.trim();
+    try {
+        return JSON.parse(trimmed);
+    } catch {
+        const repaired = repairPossiblyTruncatedJsonObject(trimmed);
+        if (!repaired || repaired === trimmed) return null;
+        try {
+            return JSON.parse(repaired);
+        } catch {
+            return null;
+        }
+    }
+}
+
+function repairPossiblyTruncatedJsonObject(input: string): string | null {
+    const start = input.indexOf('{');
+    if (start < 0) return null;
+
+    let result = input
+        .slice(start)
+        .replace(/,\s*([}\]])/g, '$1')
+        .trimEnd();
+    const stack: string[] = [];
+    let inString = false;
+    let escaped = false;
+
+    for (const char of result) {
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (char === '\\' && inString) {
+            escaped = true;
+            continue;
+        }
+        if (char === '"') {
+            inString = !inString;
+            continue;
+        }
+        if (inString) continue;
+        if (char === '{') stack.push('}');
+        if (char === '[') stack.push(']');
+        if ((char === '}' || char === ']') && stack[stack.length - 1] === char) stack.pop();
+    }
+
+    if (inString) result += '"';
+    while (stack.length > 0) result += stack.pop();
+    return result.replace(/,\s*([}\]])/g, '$1');
 }
 
 function text(input: unknown, fallback = ''): string {

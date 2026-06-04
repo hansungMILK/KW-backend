@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
     filterNodesByWorkflowGroup,
     getWorkflowGroupOptions,
+    getWorkflowRunButtonLabel,
     getWorkflowRunMode,
     isWorkflowRunButtonDisabled,
 } from './run-mode';
@@ -56,6 +57,17 @@ describe('workflow run mode', () => {
                 runStatus: 'reviewing',
             })
         ).toBe(false);
+    });
+
+    it('uses countryball angle continuation wording instead of script review copy', () => {
+        expect(
+            getWorkflowRunButtonLabel({
+                isApplyingProposal: false,
+                isWorkflowRunning: false,
+                runStatus: 'reviewing',
+                reviewKind: 'countryball-angle',
+            })
+        ).toBe('선택한 앵글로 작가 설계 실행');
     });
 
     it('runs in step mode when the approved content node requests script-first review', () => {

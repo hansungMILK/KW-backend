@@ -421,6 +421,99 @@ describe('runService cost guards', () => {
         expect(sendQueueMessage).toHaveBeenCalled();
     });
 
+    it('resumes after a selected countryball angle without re-running upstream nodes', async () => {
+        const previousMode = env.orchestratorMode;
+        (env as { orchestratorMode: string }).orchestratorMode = 'mock';
+        getFlow.mockResolvedValueOnce({
+            id: 'flow-countryball-resume',
+            name: 'Countryball resume flow',
+            state: 'READY',
+            nodes: [
+                { id: 'node-search', blockType: 'search', label: '트렌드 수집', config: {} },
+                { id: 'node-brief', blockType: 'countryball-brief', label: '컨트리볼 브리프', config: {} },
+                {
+                    id: 'node-angle',
+                    blockType: 'countryball-angle-lab',
+                    label: '컨트리볼 앵글 선택',
+                    config: {
+                        selectedAngleId: 'angle_1',
+                        angleSelectionStatus: 'selected',
+                        selectedAngle: { id: 'angle_1', title: '심야 주문 대참사' },
+                        angleOptions: [{ id: 'angle_1', title: '심야 주문 대참사' }],
+                        recommendedChoice: { id: 'angle_1', reason: '가장 상황극이 선명함' },
+                    },
+                },
+                { id: 'node-writer', blockType: 'countryball-writer-brain', label: '컨트리볼 작가 설계', config: {} },
+                { id: 'node-script', blockType: 'countryball-script', label: '컨트리볼 대본', config: {} },
+                { id: 'node-data', blockType: 'countryball-data', label: '컨트리볼 데이터', config: {} },
+            ],
+            edges: [
+                { source: 'node-search', target: 'node-brief' },
+                { source: 'node-brief', target: 'node-angle' },
+                { source: 'node-angle', target: 'node-writer' },
+                { source: 'node-writer', target: 'node-script' },
+                { source: 'node-script', target: 'node-data' },
+            ],
+            createdAt: '2026-05-28T00:00:00.000Z',
+            updatedAt: '2026-05-28T00:00:00.000Z',
+        });
+        putRun.mockResolvedValue(undefined);
+        putRunNode.mockResolvedValue(undefined);
+        sendQueueMessage.mockResolvedValue(undefined);
+
+        try {
+            const result = await runService.createRun('flow-countryball-resume', 'MANUAL', {
+                executionMode: 'full',
+                resumeFromNodeId: 'node-angle',
+            } as Parameters<typeof runService.createRun>[2] & { resumeFromNodeId: string });
+
+            expect(result).toEqual(expect.objectContaining({ ok: true }));
+            expect(putRun).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    flowSnapshot: {
+                        nodes: [
+                            expect.objectContaining({ id: 'node-angle' }),
+                            expect.objectContaining({ id: 'node-writer' }),
+                            expect.objectContaining({ id: 'node-script' }),
+                            expect.objectContaining({ id: 'node-data' }),
+                        ],
+                        edges: [
+                            expect.objectContaining({ source: 'node-angle', target: 'node-writer' }),
+                            expect.objectContaining({ source: 'node-writer', target: 'node-script' }),
+                            expect.objectContaining({ source: 'node-script', target: 'node-data' }),
+                        ],
+                    },
+                })
+            );
+            expect(putRunNode.mock.calls.map(call => call[0].nodeId)).toEqual([
+                'node-angle',
+                'node-writer',
+                'node-script',
+                'node-data',
+            ]);
+            expect(putRunNode.mock.calls[0]?.[0]).toEqual(
+                expect.objectContaining({
+                    nodeId: 'node-angle',
+                    status: 'COMPLETED',
+                    outputPayload: expect.objectContaining({
+                        selectedAngleId: 'angle_1',
+                        selectedAngle: expect.objectContaining({ id: 'angle_1' }),
+                    }),
+                })
+            );
+            expect(putRunNode.mock.calls[1]?.[0]).toEqual(
+                expect.objectContaining({
+                    nodeId: 'node-writer',
+                    status: 'PENDING',
+                    parentNodeIds: ['node-angle'],
+                })
+            );
+            expect(sendQueueMessage).toHaveBeenCalled();
+        } finally {
+            (env as { orchestratorMode: string }).orchestratorMode = previousMode;
+        }
+    });
+
     it('allows a step longform run to queue with future Gate B nodes before approval', async () => {
         getFlow.mockResolvedValueOnce({
             id: 'flow-longform-full-factory',

@@ -19,9 +19,11 @@ import { useInitFlowSocket } from '@flows/socket';
 
 import {
     type WorkflowGroupOption,
+    type WorkflowReviewKind,
     type WorkflowRunStatus,
     filterNodesByWorkflowGroup,
     getWorkflowGroupOptions,
+    getWorkflowRunButtonLabel,
     getWorkflowRunMode,
     isWorkflowRunButtonDisabled,
 } from './run-mode';
@@ -140,7 +142,10 @@ const isStoppedForReviewSummary = (summary: unknown): summary is RunReviewSummar
     return (summary as RunReviewSummary).stoppedForReview === true;
 };
 
-const getScriptReviewWaitingMessage = (message?: string): string => {
+const getScriptReviewWaitingMessage = (message?: string, reviewKind?: WorkflowReviewKind | null): string => {
+    if (reviewKind === 'countryball-angle') {
+        return '컨트리볼 앵글이 선택되었습니다. 선택한 앵글을 바탕으로 작가 설계부터 이어서 실행합니다.';
+    }
     if (!message || message === 'Script review step completed') {
         return '대본 단계가 완료되었습니다. 대본 노드에서 검수본을 저장한 뒤 검수본으로 이어서 실행 버튼을 누르면 이미지, TTS, 영상 합성이 이어집니다.';
     }
@@ -212,18 +217,29 @@ export const FlowEditorPage = () => {
         [blockRegistry]
     );
 
+    const getReviewKindForNode = useCallback((nodeId?: string): WorkflowReviewKind => {
+        const node = nodeId ? canvasRef.current?.getWorkflow()?.nodes?.find(item => item.id === nodeId) : undefined;
+        return node?.type === 'countryball-angle-lab' ? 'countryball-angle' : 'script';
+    }, []);
+
     const setScriptReviewWaitingState = useCallback(
         (summary?: RunReviewSummary) => {
+            const reviewKind = getReviewKindForNode(summary?.reviewNodeId);
             setRunStatus('reviewing');
             setRunActivity({
-                nodeLabel: summary?.reviewNodeId ? getCanvasNodeLabel(summary.reviewNodeId) : '대본 검수 대기',
+                nodeLabel: summary?.reviewNodeId
+                    ? getCanvasNodeLabel(summary.reviewNodeId)
+                    : reviewKind === 'countryball-angle'
+                      ? '컨트리볼 앵글 선택 대기'
+                      : '대본 검수 대기',
+                nodeId: summary?.reviewNodeId,
                 progress: 100,
                 state: 'reviewing',
-                message: getScriptReviewWaitingMessage(summary?.message),
+                message: getScriptReviewWaitingMessage(summary?.message, reviewKind),
             });
             setIsAgentOpen(true);
         },
-        [getCanvasNodeLabel]
+        [getCanvasNodeLabel, getReviewKindForNode]
     );
 
     const applyRunNodeSnapshots = useCallback(
@@ -1138,7 +1154,7 @@ export const FlowEditorPage = () => {
         canvasRef.current?.addNode(type);
     }, []);
 
-    const handleRunWorkflow = async () => {
+    const handleRunWorkflow = async (options?: { resumeFromNodeId?: string }) => {
         if (
             !canvasRef.current ||
             isApplyingProposal ||
@@ -1157,12 +1173,22 @@ export const FlowEditorPage = () => {
             }
             const nodes = data.nodes as NodeData[];
             const groups = syncWorkflowGroupOptions(nodes);
+            const requestedResumeNode = options?.resumeFromNodeId
+                ? nodes.find(node => node.id === options.resumeFromNodeId)
+                : undefined;
+            const requestedResumeGroupId =
+                typeof (requestedResumeNode as (NodeData & { workflowGroupId?: unknown }) | undefined)
+                    ?.workflowGroupId === 'string'
+                    ? ((requestedResumeNode as NodeData & { workflowGroupId?: string }).workflowGroupId ?? null)
+                    : null;
             const selectedGroup =
-                selectedWorkflowGroupId && groups.some(group => group.id === selectedWorkflowGroupId)
-                    ? selectedWorkflowGroupId
-                    : groups.length === 1
-                      ? groups[0]?.id
-                      : null;
+                requestedResumeGroupId && groups.some(group => group.id === requestedResumeGroupId)
+                    ? requestedResumeGroupId
+                    : selectedWorkflowGroupId && groups.some(group => group.id === selectedWorkflowGroupId)
+                      ? selectedWorkflowGroupId
+                      : groups.length === 1
+                        ? groups[0]?.id
+                        : null;
 
             if (groups.length > 1 && !selectedGroup) {
                 showNotification('실행할 워크플로우를 선택해주세요.', 'error');
@@ -1184,11 +1210,17 @@ export const FlowEditorPage = () => {
             }
 
             const { executionMode, scriptReviewFirst: runScriptReviewFirst } = getWorkflowRunMode(runNodes);
+            const reviewKind =
+                runStatus === 'reviewing' && runActivity?.nodeId ? getReviewKindForNode(runActivity.nodeId) : null;
+            const resumeFromNodeId =
+                options?.resumeFromNodeId ??
+                (reviewKind === 'countryball-angle' && runActivity?.nodeId ? runActivity.nodeId : undefined);
             activeRunScriptReviewFirstRef.current = runScriptReviewFirst;
 
             const run = await createFlowRun(result.id, {
                 executionMode,
                 scope: selectedGroup ? { type: 'workflowGroup', groupId: selectedGroup } : undefined,
+                resumeFromNodeId,
             });
             setActiveRunId(run.id);
             setRunStatus('running');
@@ -1196,19 +1228,23 @@ export const FlowEditorPage = () => {
                 nodeLabel: `실행 ${run.id}`,
                 progress: 0,
                 state: 'queued',
-                message: runScriptReviewFirst
-                    ? '대본 검수 모드로 실행합니다. 대본 노드까지 완료되면 멈춥니다.'
-                    : selectedGroupLabel
-                      ? `${selectedGroupLabel} 실행을 시작했습니다.`
-                      : '전체 워크플로우 실행을 시작했습니다.',
+                message: resumeFromNodeId
+                    ? '선택한 컨트리볼 앵글로 작가 설계를 시작했습니다.'
+                    : runScriptReviewFirst
+                      ? '대본 검수 모드로 실행합니다. 대본 노드까지 완료되면 멈춥니다.'
+                      : selectedGroupLabel
+                        ? `${selectedGroupLabel} 실행을 시작했습니다.`
+                        : '전체 워크플로우 실행을 시작했습니다.',
             });
             setIsAgentOpen(true);
             showNotification(
-                runScriptReviewFirst
-                    ? '대본 검수 모드로 실행을 시작했습니다.'
-                    : selectedGroupLabel
-                      ? `${selectedGroupLabel} 실행을 시작했습니다.`
-                      : '워크플로우 실행을 시작했습니다.',
+                resumeFromNodeId
+                    ? '선택한 앵글로 컨트리볼 작가 설계를 시작했습니다.'
+                    : runScriptReviewFirst
+                      ? '대본 검수 모드로 실행을 시작했습니다.'
+                      : selectedGroupLabel
+                        ? `${selectedGroupLabel} 실행을 시작했습니다.`
+                        : '워크플로우 실행을 시작했습니다.',
                 'success'
             );
         } catch (error) {
@@ -1466,7 +1502,9 @@ export const FlowEditorPage = () => {
                     onConnectionError={handleConnectionError}
                     onShowNotification={showNotification}
                     onLongformReviewApproved={handleRunWorkflow}
-                    onCountryballAngleSelected={handleRunWorkflow}
+                    onCountryballAngleSelected={nodeId =>
+                        handleRunWorkflow(nodeId ? { resumeFromNodeId: nodeId } : undefined)
+                    }
                 />
 
                 {workflowGroupOptions.length > 1 ? (
@@ -1500,15 +1538,15 @@ export const FlowEditorPage = () => {
                         <Play className="h-4 w-4" />
                     )}
                     <span>
-                        {isApplyingProposal
-                            ? '제안 추가 중'
-                            : isWorkflowRunning
-                              ? '실행 요청 중'
-                              : runStatus === 'running'
-                                ? '워크플로우 실행 중'
-                                : runStatus === 'reviewing'
-                                  ? '검수본으로 이어서 실행'
-                                  : '워크플로우 실행'}
+                        {getWorkflowRunButtonLabel({
+                            isApplyingProposal,
+                            isWorkflowRunning,
+                            runStatus,
+                            reviewKind:
+                                runStatus === 'reviewing' && runActivity?.nodeId
+                                    ? getReviewKindForNode(runActivity.nodeId)
+                                    : null,
+                        })}
                     </span>
                 </button>
             </div>

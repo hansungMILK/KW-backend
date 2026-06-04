@@ -894,6 +894,79 @@ describe('executionEngine asset publication', () => {
         expect(run.status).toBe('COMPLETED');
         expect(run.finalOutputSummary).not.toMatchObject({ stoppedForReview: true });
     });
+
+    it('continues a step countryball resume run into the writer when the selected angle is seeded as completed', async () => {
+        run = {
+            runId: 'run-step-review',
+            flowId: 'flow-countryball-resume',
+            runType: 'FULL_FLOW',
+            status: 'QUEUED',
+            triggerSource: 'MANUAL',
+            executionMode: 'step',
+            flowSnapshot: {
+                nodes: [],
+                edges: [
+                    { sourceNodeId: 'node-angle', targetNodeId: 'node-writer' },
+                    { sourceNodeId: 'node-writer', targetNodeId: 'node-script' },
+                    { sourceNodeId: 'node-script', targetNodeId: 'node-data' },
+                ],
+            },
+            createdAt: new Date().toISOString(),
+        } as Run;
+
+        const runNodes: RunNode[] = [
+            {
+                ...makeRunNode('node-angle', 'countryball-angle-lab', []),
+                status: 'COMPLETED',
+                progress: 100,
+                outputPayload: {
+                    mode: 'countryball-angle-lab',
+                    angleSelectionStatus: 'selected',
+                    selectedAngleId: 'angle_1',
+                    selectedAngle: { id: 'angle_1', title: '심야 주문 대참사' },
+                },
+            } as RunNode,
+            makeRunNode('node-writer', 'countryball-writer-brain', ['node-angle']),
+            makeRunNode('node-script', 'countryball-script', ['node-writer']),
+            makeRunNode('node-data', 'countryball-data', ['node-script']),
+        ];
+
+        getRun.mockImplementation(async () => run);
+        listRunNodes.mockImplementation(async () => runNodes);
+        getRunNode.mockImplementation(async (_runId, nodeId) => runNodes.find(item => item.nodeId === nodeId) ?? null);
+        putRunNode.mockImplementation(async updatedNode => {
+            const index = runNodes.findIndex(item => item.nodeId === updatedNode.nodeId);
+            if (index >= 0) runNodes[index] = updatedNode;
+        });
+        updateRunStatus.mockImplementation(async (_runId, status, extra) => {
+            run = { ...run, ...extra, status } as Run;
+            return { ok: true, run };
+        });
+        updateRunNodeStatus.mockImplementation(async (_runId, nodeId, status, extra) => {
+            const index = runNodes.findIndex(item => item.nodeId === nodeId);
+            if (index < 0) return { ok: false, error: 'missing node' };
+            runNodes[index] = {
+                ...runNodes[index],
+                ...extra,
+                status,
+            } as RunNode;
+            sequence.push(`node.status:${nodeId}:${status}`);
+            return { ok: true, node: runNodes[index] };
+        });
+        executeBlock.mockImplementation(async () => ({ output: { ok: true }, durationMs: 1 }));
+
+        await executionEngine.handleRunExecution(run.runId, 'exec-countryball-resume');
+
+        // The seeded angle node carries a selection, so the run must not re-run it and must not stop again for review.
+        expect(executeBlock.mock.calls.map(call => call[0])).toEqual([
+            'countryball-writer-brain',
+            'countryball-script',
+            'countryball-data',
+        ]);
+        expect(executeBlock.mock.calls.map(call => call[0])).not.toContain('countryball-angle-lab');
+        expect(run.status).toBe('COMPLETED');
+        expect(run.finalOutputSummary).not.toMatchObject({ stoppedForReview: true });
+    });
 });
 
 function makeRunNode(nodeId: string, blockType: string, parentNodeIds: string[]): RunNode {

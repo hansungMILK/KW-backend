@@ -219,8 +219,8 @@ describe('NodeBlock longform previews', () => {
         expect(screen.getByText('컨트리볼 앵글 후보')).toBeTruthy();
         expect(screen.getByText('새벽 문앞 괴담')).toBeTruthy();
         expect(screen.getByText('계란이 출근보다 빠르다')).toBeTruthy();
-        expect(screen.getByText(/선택하면 이 방향으로 작가 설계와 대본 생성을 이어갑니다/)).toBeTruthy();
-        fireEvent.click(screen.getByText('1번 선택'));
+        expect(screen.getByText(/트렌드 수집으로 돌아가지 않고 작가 설계부터 이어집니다/)).toBeTruthy();
+        fireEvent.click(screen.getByText('1번으로 작가 설계 실행'));
         await waitFor(() => {
             expect(onConfigPatch).toHaveBeenCalledWith(
                 expect.objectContaining({
@@ -232,7 +232,7 @@ describe('NodeBlock longform previews', () => {
                     selectionPrompt: '세 가지 중 하나를 골라주세요.',
                 })
             );
-            expect(onCountryballAngleSelected).toHaveBeenCalledTimes(1);
+            expect(onCountryballAngleSelected).toHaveBeenCalledWith('node-countryball-angle-lab');
         });
     });
 

@@ -378,14 +378,17 @@ export const executionEngine = {
                         flowId: run.flowId,
                         status: 'COMPLETED',
                         reviewNodeId: reviewNode.nodeId,
-                        message: '대본 검수 단계가 완료되었습니다.',
+                        message:
+                            reviewNode.blockType === 'countryball-angle-lab'
+                                ? '컨트리볼 앵글 선택 단계가 완료되었습니다.'
+                                : '대본 검수 단계가 완료되었습니다.',
                         timestamp: Date.now(),
                     });
                 } catch {
                     /* non-fatal */
                 }
                 try {
-                    await traceService.record(runId, reviewNode.nodeId, 'STATUS', 'Script review step completed');
+                    await traceService.record(runId, reviewNode.nodeId, 'STATUS', reviewMessage);
                 } catch {
                     /* non-fatal */
                 }

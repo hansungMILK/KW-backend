@@ -26,6 +26,8 @@ describe('countryballAngleLabBlock', () => {
         expect(COUNTRYBALL_ANGLE_LAB_SYSTEM_PROMPT).toContain('three distinct story angles');
         expect(COUNTRYBALL_ANGLE_LAB_SYSTEM_PROMPT).toContain('Do not write the script');
         expect(COUNTRYBALL_ANGLE_LAB_SYSTEM_PROMPT).toContain('Characters must experience the topic');
+        expect(COUNTRYBALL_ANGLE_LAB_SYSTEM_PROMPT).toContain('complete skit idea');
+        expect(COUNTRYBALL_ANGLE_LAB_SYSTEM_PROMPT).toContain('preserve that plot');
         expect(COUNTRYBALL_ANGLE_LAB_SYSTEM_PROMPT).toContain('ordinary_as_absurd');
         expect(COUNTRYBALL_ANGLE_LAB_SYSTEM_PROMPT).toContain('misread_as_crime');
         expect(COUNTRYBALL_ANGLE_LAB_SYSTEM_PROMPT).toContain('receipt_reveal');
@@ -133,6 +135,31 @@ describe('countryballAngleLabBlock', () => {
                 expect.objectContaining({ id: 'angle_1' }),
                 expect.objectContaining({ id: 'angle_2' }),
                 expect.objectContaining({ id: 'angle_3' }),
+            ],
+        });
+    });
+
+    it('recovers a concise JSON object when the provider wraps and truncates the tail', async () => {
+        const content = `추천 앵글입니다.\n${JSON.stringify(makeAngleLabOutput()).slice(0, -2)}`;
+        vi.mocked(openaiAdapter.chatJson).mockResolvedValueOnce({
+            content,
+            model: 'gpt-test',
+            inputTokens: 1,
+            outputTokens: 1,
+            latencyMs: 1,
+        });
+
+        const result = await countryballAngleLabBlock.execute({
+            requestTopic: '컨트리볼 새벽배송 쇼츠',
+            countryballBrief: { targetFeature: '새벽배송' },
+        });
+
+        expect(result.output).toMatchObject({
+            mode: 'countryball-angle-lab',
+            angleOptions: [
+                expect.objectContaining({ id: 'angle_1', title: '새벽 문앞 괴담' }),
+                expect.objectContaining({ id: 'angle_2', title: '계란이 출근보다 빠르다' }),
+                expect.objectContaining({ id: 'angle_3', title: '배송 상자 신앙' }),
             ],
         });
     });

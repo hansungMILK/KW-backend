@@ -85,7 +85,7 @@ export interface NodeActions {
     onDelete: () => void;
     onTrigger: () => Promise<void> | void;
     onLongformReviewApproved?: () => Promise<void> | void;
-    onCountryballAngleSelected?: () => Promise<void> | void;
+    onCountryballAngleSelected?: (nodeId?: string) => Promise<void> | void;
     onToggleDisabled?: () => void;
     onDuplicate?: () => void;
     onViewLogs: () => void;
@@ -1144,7 +1144,7 @@ const FriendlyOutputPreview: React.FC<{
                     <div>
                         <div className="text-[10px] font-semibold text-purple-200">컨트리볼 앵글 후보</div>
                         <div className="mt-0.5 text-[10px] text-muted-foreground">
-                            선택하면 이 방향으로 작가 설계와 대본 생성을 이어갑니다.
+                            마음에 드는 상황극을 고르면 트렌드 수집으로 돌아가지 않고 작가 설계부터 이어집니다.
                         </div>
                     </div>
                     <button
@@ -1182,6 +1182,9 @@ const FriendlyOutputPreview: React.FC<{
                                 <div className="flex items-start justify-between gap-2">
                                     <div className="min-w-0">
                                         <div className="flex flex-wrap items-center gap-1">
+                                            <span className="rounded bg-purple-500/20 px-1 py-0.5 text-[9px] font-semibold text-purple-100">
+                                                {index + 1}번 앵글
+                                            </span>
                                             <span className="text-[10px] font-semibold text-foreground">{title}</span>
                                             {isRecommended && (
                                                 <span className="rounded-full bg-purple-500/20 px-1.5 py-0.5 text-[9px] text-purple-100">
@@ -1224,6 +1227,12 @@ const FriendlyOutputPreview: React.FC<{
                                         {risk && (
                                             <div className="mt-0.5 text-[9px] text-amber-100/80">주의: {risk}</div>
                                         )}
+                                        {isSelected && (
+                                            <div className="mt-1 rounded bg-emerald-500/15 px-2 py-1 text-[9px] text-emerald-100">
+                                                {index + 1}번 앵글 선택됨. 다음 실행은 컨트리볼 작가 설계부터
+                                                이어집니다.
+                                            </div>
+                                        )}
                                     </div>
                                     <button
                                         type="button"
@@ -1244,7 +1253,7 @@ const FriendlyOutputPreview: React.FC<{
                                             }
                                         }}
                                     >
-                                        {isSelected ? '선택됨' : `${index + 1}번 선택`}
+                                        {isSelected ? '선택됨' : `${index + 1}번으로 작가 설계 실행`}
                                     </button>
                                 </div>
                             </div>
@@ -2061,7 +2070,7 @@ const OutputPreview: React.FC<
         onConfigChange?: (key: string, value: ConfigValue) => void;
         onConfigPatch?: (patch: Record<string, ConfigValue>) => Promise<void> | void;
         onLongformReviewApproved?: () => Promise<void> | void;
-        onCountryballAngleSelected?: () => Promise<void> | void;
+        onCountryballAngleSelected?: (nodeId?: string) => Promise<void> | void;
     }
 > = ({
     node,
@@ -2155,7 +2164,7 @@ const OutputPreview: React.FC<
                                 onConfigChange?.(key, value);
                             }
                         }
-                        await onCountryballAngleSelected?.();
+                        await onCountryballAngleSelected?.(node.id);
                     }}
                     onLongformReviewApprove={async updated => {
                         const approvalPatch = {

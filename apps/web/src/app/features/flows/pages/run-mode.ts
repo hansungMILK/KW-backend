@@ -6,6 +6,7 @@ type WorkflowRunMode = {
 };
 
 export type WorkflowRunStatus = 'running' | 'reviewing' | 'completed' | 'failed' | null;
+export type WorkflowReviewKind = 'script' | 'countryball-angle';
 export type WorkflowGroupOption = {
     id: string;
     label: string;
@@ -17,6 +18,21 @@ export const isWorkflowRunButtonDisabled = (state: {
     isLoading: boolean;
     runStatus: WorkflowRunStatus;
 }): boolean => state.isWorkflowRunning || state.isLoading || state.runStatus === 'running';
+
+export const getWorkflowRunButtonLabel = (state: {
+    isApplyingProposal: boolean;
+    isWorkflowRunning: boolean;
+    runStatus: WorkflowRunStatus;
+    reviewKind?: WorkflowReviewKind | null;
+}): string => {
+    if (state.isApplyingProposal) return '제안 추가 중';
+    if (state.isWorkflowRunning) return '실행 요청 중';
+    if (state.runStatus === 'running') return '워크플로우 실행 중';
+    if (state.runStatus === 'reviewing') {
+        return state.reviewKind === 'countryball-angle' ? '선택한 앵글로 작가 설계 실행' : '검수본으로 이어서 실행';
+    }
+    return '워크플로우 실행';
+};
 
 const getWorkflowNodeType = (node: NodeData): string | undefined =>
     node.type ?? ((node as NodeData & { blockType?: string }).blockType as string | undefined);

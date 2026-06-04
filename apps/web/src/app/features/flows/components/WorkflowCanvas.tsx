@@ -87,7 +87,7 @@ interface WorkflowCanvasProps {
     /** Called after a longform Gate A script review is approved and persisted. */
     onLongformReviewApproved?: () => Promise<void> | void;
     /** Called after a countryball story angle is selected and persisted. */
-    onCountryballAngleSelected?: () => Promise<void> | void;
+    onCountryballAngleSelected?: (nodeId?: string) => Promise<void> | void;
 }
 
 const GRID_SIZE = 20;
