@@ -86,8 +86,6 @@ interface WorkflowCanvasProps {
     onShowNotification?: (message: string, type: 'success' | 'error') => void;
     /** Called after a longform Gate A script review is approved and persisted. */
     onLongformReviewApproved?: () => Promise<void> | void;
-    /** Called after a countryball story angle is selected and persisted. */
-    onCountryballAngleSelected?: (nodeId?: string) => Promise<void> | void;
 }
 
 const GRID_SIZE = 20;
@@ -214,7 +212,6 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
             onConnectionError,
             onShowNotification,
             onLongformReviewApproved,
-            onCountryballAngleSelected,
         },
         ref
     ) => {
@@ -2724,7 +2721,6 @@ export const WorkflowCanvas = forwardRef<WorkflowCanvasRef, WorkflowCanvasProps>
                                                 onDelete: () => deleteNode(node.id),
                                                 onTrigger: () => executeNode(node.id),
                                                 onLongformReviewApproved,
-                                                onCountryballAngleSelected,
                                                 onToggleDisabled: () => toggleNodeDisabled(node.id),
                                                 onDuplicate: () => duplicateNode(node.id),
                                                 onViewLogs: () => setLogViewerNodeId(node.id),

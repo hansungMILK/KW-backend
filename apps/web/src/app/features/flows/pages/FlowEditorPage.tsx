@@ -1502,9 +1502,6 @@ export const FlowEditorPage = () => {
                     onConnectionError={handleConnectionError}
                     onShowNotification={showNotification}
                     onLongformReviewApproved={handleRunWorkflow}
-                    onCountryballAngleSelected={nodeId =>
-                        handleRunWorkflow(nodeId ? { resumeFromNodeId: nodeId } : undefined)
-                    }
                 />
 
                 {workflowGroupOptions.length > 1 ? (

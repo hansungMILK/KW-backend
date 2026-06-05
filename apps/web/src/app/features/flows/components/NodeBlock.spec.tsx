@@ -57,7 +57,6 @@ const renderNode = (
     node: NodeData,
     handlers?: {
         onConfigPatch?: (patch: Record<string, ConfigValue>) => void | Promise<void>;
-        onCountryballAngleSelected?: () => void | Promise<void>;
     }
 ) =>
     render(
@@ -78,7 +77,6 @@ const renderNode = (
                 onDelete: vi.fn(),
                 onTrigger: vi.fn(),
                 onViewLogs: vi.fn(),
-                onCountryballAngleSelected: handlers?.onCountryballAngleSelected,
             }}
             onMouseDown={vi.fn()}
         />
@@ -177,12 +175,11 @@ describe('NodeBlock longform previews', () => {
         expect(screen.getByText('1. 미국: 너 지금 주문한다고? / 한국: 응, 아침에 와.')).toBeTruthy();
     });
 
-    it('shows countryball angle options, saves a selected snapshot, and resumes production', async () => {
+    it('shows countryball angle options and persists a selected snapshot without auto-running', async () => {
         testState.registry = {
             'countryball-angle-lab': makeDefinition('countryball-angle-lab', '컨트리볼 앵글 선택'),
         };
         const onConfigPatch = vi.fn(async () => undefined);
-        const onCountryballAngleSelected = vi.fn();
 
         renderNode(
             makeNode('countryball-angle-lab', {
@@ -213,14 +210,14 @@ describe('NodeBlock longform previews', () => {
                 recommendedChoice: { id: 'angle_1', reason: '새벽배송 체감 포인트가 가장 선명함' },
                 selectionPrompt: '세 가지 중 하나를 골라주세요.',
             }),
-            { onConfigPatch, onCountryballAngleSelected }
+            { onConfigPatch }
         );
 
         expect(screen.getByText('컨트리볼 앵글 후보')).toBeTruthy();
         expect(screen.getByText('새벽 문앞 괴담')).toBeTruthy();
         expect(screen.getByText('계란이 출근보다 빠르다')).toBeTruthy();
-        expect(screen.getByText(/트렌드 수집으로 돌아가지 않고 작가 설계부터 이어집니다/)).toBeTruthy();
-        fireEvent.click(screen.getByText('1번으로 작가 설계 실행'));
+        expect(screen.getByText(/마음에 드는 상황극을 고른 뒤/)).toBeTruthy();
+        fireEvent.click(screen.getByText('1번 선택'));
         await waitFor(() => {
             expect(onConfigPatch).toHaveBeenCalledWith(
                 expect.objectContaining({
@@ -232,7 +229,6 @@ describe('NodeBlock longform previews', () => {
                     selectionPrompt: '세 가지 중 하나를 골라주세요.',
                 })
             );
-            expect(onCountryballAngleSelected).toHaveBeenCalledWith('node-countryball-angle-lab');
         });
     });
 

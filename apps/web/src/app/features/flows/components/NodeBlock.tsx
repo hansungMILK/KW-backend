@@ -89,7 +89,6 @@ export interface NodeActions {
     onDelete: () => void;
     onTrigger: () => Promise<void> | void;
     onLongformReviewApproved?: () => Promise<void> | void;
-    onCountryballAngleSelected?: (nodeId?: string) => Promise<void> | void;
     onToggleDisabled?: () => void;
     onDuplicate?: () => void;
     onViewLogs: () => void;
@@ -1363,7 +1362,8 @@ export const FriendlyOutputPreview: React.FC<{
                     <div>
                         <div className="text-[10px] font-semibold text-purple-200">컨트리볼 앵글 후보</div>
                         <div className="mt-0.5 text-[10px] text-muted-foreground">
-                            마음에 드는 상황극을 고르면 트렌드 수집으로 돌아가지 않고 작가 설계부터 이어집니다.
+                            마음에 드는 상황극을 고른 뒤 아래 &lsquo;선택한 앵글로 작가 설계 실행&rsquo; 버튼을 누르면
+                            작가 설계부터 이어집니다.
                         </div>
                     </div>
                     <button
@@ -1448,8 +1448,8 @@ export const FriendlyOutputPreview: React.FC<{
                                         )}
                                         {isSelected && (
                                             <div className="mt-1 rounded bg-emerald-500/15 px-2 py-1 text-[9px] text-emerald-100">
-                                                {index + 1}번 앵글 선택됨. 다음 실행은 컨트리볼 작가 설계부터
-                                                이어집니다.
+                                                {index + 1}번 앵글 선택됨. &lsquo;선택한 앵글로 작가 설계 실행&rsquo;을
+                                                누르면 이어집니다.
                                             </div>
                                         )}
                                     </div>
@@ -1472,7 +1472,7 @@ export const FriendlyOutputPreview: React.FC<{
                                             }
                                         }}
                                     >
-                                        {isSelected ? '선택됨' : `${index + 1}번으로 작가 설계 실행`}
+                                        {isSelected ? '선택됨 ✓' : `${index + 1}번 선택`}
                                     </button>
                                 </div>
                             </div>
@@ -2289,17 +2289,8 @@ const OutputPreview: React.FC<
         onConfigChange?: (key: string, value: ConfigValue) => void;
         onConfigPatch?: (patch: Record<string, ConfigValue>) => Promise<void> | void;
         onLongformReviewApproved?: () => Promise<void> | void;
-        onCountryballAngleSelected?: (nodeId?: string) => Promise<void> | void;
     }
-> = ({
-    node,
-    definition,
-    contentHeight,
-    onConfigChange,
-    onConfigPatch,
-    onLongformReviewApproved,
-    onCountryballAngleSelected,
-}) => {
+> = ({ node, definition, contentHeight, onConfigChange, onConfigPatch, onLongformReviewApproved }) => {
     const { t } = useTranslation(['nodes']);
     const packet = getFirstOutputData(node, definition);
 
@@ -2383,7 +2374,9 @@ const OutputPreview: React.FC<
                                 onConfigChange?.(key, value);
                             }
                         }
-                        await onCountryballAngleSelected?.(node.id);
+                        // Selecting an angle only PERSISTS the choice — it must NOT auto-run.
+                        // The user advances deliberately via the run button (relabeled
+                        // "선택한 앵글로 작가 설계 실행"), which resumes from this checkpoint.
                     }}
                     onLongformReviewApprove={async updated => {
                         const approvalPatch = {
@@ -2483,7 +2476,6 @@ export const NodeBlock: React.FC<NodeBlockProps> = ({
         onDelete,
         onTrigger,
         onLongformReviewApproved,
-        onCountryballAngleSelected,
         onToggleDisabled,
         onDuplicate,
         onViewLogs,
@@ -3034,7 +3026,6 @@ export const NodeBlock: React.FC<NodeBlockProps> = ({
                         onConfigChange={onConfigChange}
                         onConfigPatch={onConfigPatch}
                         onLongformReviewApproved={onLongformReviewApproved}
-                        onCountryballAngleSelected={onCountryballAngleSelected}
                     />
                 </div>
 
