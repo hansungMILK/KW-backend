@@ -71,7 +71,7 @@ const COST_ESTIMATES: Record<AllowedBlockType, number> = {
     'blog-research': 0.03,
     'blog-outline': 0.04,
     'blog-draft': 0.3,
-    'blog-image-plan': 0,
+    'blog-image-plan': 0.02,
     'blog-images': 0,
     'blog-seo': 0.01,
     'blog-assemble': 0,

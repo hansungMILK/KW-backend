@@ -1,4 +1,4 @@
-import { isRecord } from './blog-shared';
+import { isRecord, text } from './blog-shared';
 import { mediaImageBlock } from '../media-image-block';
 
 import type { BlogImageSlot } from './blog-contract';
@@ -35,16 +35,22 @@ export const blogImagesBlock: BlockExecutor = {
         }
 
         // Build the scene contract media-image expects: scenes[].imagePrompt.
+        // caption is left empty on purpose — media-image injects caption as a "Subtitle meaning"
+        // hint, which would re-introduce the abstract heading text and nudge the model toward
+        // rendering letters. The visual promptSource already carries the full scene.
         const scenes = slots.map((slot, index) => ({
             sceneNumber: index + 1,
             imagePrompt: slot.promptSource,
-            caption: slot.caption,
+            caption: '',
             narration: '',
         }));
 
+        // Style the model picked in blog-image-plan (default photo-real). `style: 'single-image'`
+        // selects the full-image FORMAT; `imageStyleId` selects the visual style preset.
+        const imageStyleId = text(upstream['imageStyleId'], 'photo-real');
         const mediaResult = await mediaImageBlock.execute(
             { scenes },
-            { ...config, count: slots.length, style: 'single-image' },
+            { ...config, count: slots.length, style: 'single-image', imageStyleId },
             context
         );
         const mediaOutput = isRecord(mediaResult.output) ? mediaResult.output : {};
