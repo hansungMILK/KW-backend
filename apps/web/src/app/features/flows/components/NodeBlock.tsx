@@ -1219,6 +1219,9 @@ export const FriendlyOutputPreview: React.FC<{
     const [draft, setDraft] = useState(initialDraft);
     const [isApproving, setIsApproving] = useState(false);
     const [modalContent, setModalContent] = useState<{ value: unknown; type?: string } | null>(null);
+    // Local echo of the countryball angle just picked, so the card shows "선택됨" immediately.
+    // The persisted selection lives in node config, which this output-driven view cannot read.
+    const [locallySelectedAngleId, setLocallySelectedAngleId] = useState<string | undefined>(undefined);
 
     useEffect(() => {
         setDraft(initialDraft);
@@ -1389,7 +1392,9 @@ export const FriendlyOutputPreview: React.FC<{
                         const peak = firstStringValue(storyShape.peakMoment);
                         const ending = firstStringValue(storyShape.endingPayoff);
                         const isRecommended = id === recommendedId;
-                        const isSelected = recordValue.angleSelectionStatus === 'selected' && id === selectedAngleId;
+                        const isSelected =
+                            (recordValue.angleSelectionStatus === 'selected' && id === selectedAngleId) ||
+                            id === locallySelectedAngleId;
                         return (
                             <div
                                 key={id}
@@ -1467,6 +1472,7 @@ export const FriendlyOutputPreview: React.FC<{
                                             setIsApproving(true);
                                             try {
                                                 await onCountryballAngleSelect?.(id, option, recordValue);
+                                                setLocallySelectedAngleId(id);
                                             } finally {
                                                 setIsApproving(false);
                                             }

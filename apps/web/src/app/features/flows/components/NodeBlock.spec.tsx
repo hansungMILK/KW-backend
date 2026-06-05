@@ -230,6 +230,8 @@ describe('NodeBlock longform previews', () => {
                 })
             );
         });
+        // Immediate local feedback: the picked card flips to "선택됨" without a run.
+        expect(await screen.findByText('선택됨 ✓')).toBeTruthy();
     });
 
     it('shows single-image prompt planning as an image prompt, not a script review card', () => {
